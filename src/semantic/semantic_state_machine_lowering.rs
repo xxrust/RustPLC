@@ -711,9 +711,7 @@ fn action_to_transition_action(action: &ActionStatement) -> Option<TransitionAct
             target: target.device.clone(),
             port: target.port.clone(),
             distance_raw: distance.to_string(),
-            speed_raw: speed
-                .expect("axis.move_relative speed must be resolved in semantic pass")
-                .to_string(),
+            speed_raw: speed.as_ref()?.to_string(),
             acceleration_raw: acceleration.map(|value| value.to_string()),
             deceleration_raw: deceleration.map(|value| value.to_string()),
             timeout: lower_axis_timeout_branch(timeout.as_ref()?),
@@ -752,9 +750,7 @@ fn action_to_transition_action(action: &ActionStatement) -> Option<TransitionAct
             target: target.device.clone(),
             port: target.port.clone(),
             position_raw: position.to_string(),
-            speed_raw: speed
-                .expect("axis.move_absolute speed must be resolved in semantic pass")
-                .to_string(),
+            speed_raw: speed.as_ref()?.to_string(),
             acceleration_raw: acceleration.map(|value| value.to_string()),
             deceleration_raw: deceleration.map(|value| value.to_string()),
             require_homed: true,

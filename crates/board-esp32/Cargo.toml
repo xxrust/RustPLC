@@ -1,0 +1,11 @@
+[package]
+name = "board-esp32"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# Host-buildable ESP32 HAL adapter skeleton. Hardware-specific ESP-IDF or
+# esp-hal bindings plug in behind Esp32IoBackend.
+
+[dependencies]
+io-traits = { path = "../io-traits" }

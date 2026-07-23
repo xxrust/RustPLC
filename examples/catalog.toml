@@ -1,0 +1,261 @@
+schema_version = 1
+
+[[categories]]
+id = "01_basics"
+name = "01 Basics"
+summary = "Minimal PLC language, process-device, and compute examples."
+
+[[categories.examples]]
+id = "demo"
+title = "demo"
+path = "examples/demo.plc"
+kind = "plc"
+purpose = "Minimal language and device demonstration."
+scenario_path = "examples/demo.scenario.json"
+
+[[categories.examples]]
+id = "process_device_demo"
+title = "process_device_demo"
+path = "examples/process_device_demo.plc"
+kind = "plc"
+purpose = "Process-device topology and task flow example."
+
+[[categories.examples]]
+id = "quadratic_fit"
+title = "quadratic_fit"
+path = "examples/quadratic_fit.plc"
+kind = "plc"
+purpose = "Compute/extern-style numeric workflow fixture."
+
+[[categories]]
+id = "02_motion_control"
+name = "02 Motion Control"
+summary = "Axis motion, board-oriented motion, and fault-routing fixtures."
+
+[[categories.examples]]
+id = "dual_axis_platform"
+title = "dual_axis_platform"
+path = "examples/dual_axis_platform.plc"
+kind = "plc"
+purpose = "Canonical dual-axis motion example used by quickstart docs."
+
+[[categories.examples]]
+id = "rp2040_motion_minimal"
+title = "rp2040_motion_minimal"
+path = "examples/rp2040_motion_minimal.plc"
+kind = "plc"
+purpose = "Board-oriented motion example paired with RP2040 scenarios and IO map."
+
+[[categories.examples]]
+id = "stepper_collision_guard"
+title = "stepper_collision_guard"
+path = "examples/stepper_collision_guard.plc"
+kind = "plc"
+purpose = "Stepper safety and collision-guard scenario fixture."
+
+[[categories.examples]]
+id = "axis_move_blocking_baseline"
+title = "axis_move_blocking_baseline"
+path = "examples/axis_move_blocking_baseline.plc"
+kind = "plc"
+purpose = "Blocking axis move baseline without hand-written wait steps."
+
+[[categories.examples]]
+id = "axis_servo_fault_routing"
+title = "axis_servo_fault_routing"
+path = "examples/axis_servo_fault_routing.plc"
+kind = "plc"
+purpose = "Servo fault routing fixture."
+
+[[categories.examples]]
+id = "axis_stepper_fault_routing"
+title = "axis_stepper_fault_routing"
+path = "examples/axis_stepper_fault_routing.plc"
+kind = "plc"
+purpose = "Stepper fault routing fixture."
+
+[[categories.examples]]
+id = "axis_fault_normal_path"
+title = "axis_fault_normal_path"
+path = "examples/axis_fault_normal_path.plc"
+kind = "plc"
+purpose = "Axis normal-path fault policy fixture."
+
+[[categories.examples]]
+id = "axis_fault_recoverable_path"
+title = "axis_fault_recoverable_path"
+path = "examples/axis_fault_recoverable_path.plc"
+kind = "plc"
+purpose = "Axis recoverable fault policy fixture."
+
+[[categories.examples]]
+id = "axis_fault_nonrecoverable_path"
+title = "axis_fault_nonrecoverable_path"
+path = "examples/axis_fault_nonrecoverable_path.plc"
+kind = "plc"
+purpose = "Axis nonrecoverable fault policy fixture."
+
+[[categories.examples]]
+id = "axis_fault_safety_path"
+title = "axis_fault_safety_path"
+path = "examples/axis_fault_safety_path.plc"
+kind = "plc"
+purpose = "Axis safety fault policy fixture."
+
+[[categories]]
+id = "03_process_and_station_flow"
+name = "03 Process And Station Flow"
+summary = "Station sequences, concurrent task flow, and structured project fixtures."
+
+[[categories.examples]]
+id = "three_station_assembly"
+title = "three_station_assembly"
+path = "examples/three_station_assembly.plc"
+kind = "plc"
+purpose = "Multi-station assembly sequence."
+
+[[categories.examples]]
+id = "welding_station"
+title = "welding_station"
+path = "examples/welding_station.plc"
+kind = "plc"
+purpose = "Welding station sequence and constraints."
+
+[[categories.examples]]
+id = "load_unload_concurrent_tasks"
+title = "load_unload_concurrent_tasks"
+path = "examples/load_unload_concurrent_tasks.plc"
+kind = "plc"
+purpose = "Concurrent load/unload task fixture."
+
+[[categories.examples]]
+id = "realtime_stress"
+title = "realtime_stress"
+path = "examples/realtime_stress/stress_case.plc"
+kind = "plc"
+purpose = "No-board gate and realtime stress playbook fixture."
+scenario_path = "examples/realtime_stress/scenarios/safe.yaml"
+
+[[categories.examples]]
+id = "project_scaffold_demo"
+title = "project_scaffold_demo"
+path = "examples/project_scaffold_demo/plc/main.plc"
+kind = "project"
+purpose = "Structured project scaffold reference used by scenario tools."
+scenario_path = "examples/project_scaffold_demo/scenarios/nominal/normal.yaml"
+
+[[categories]]
+id = "04_workpiece_and_material_flow"
+name = "04 Workpiece And Material Flow"
+summary = "Acquire, transfer, carrier slot, split, and merge workpiece fixtures."
+
+[[categories.examples]]
+id = "workpiece_phase1_transfer"
+title = "workpiece_phase1_transfer"
+path = "examples/workpiece_phase1_transfer.plc"
+kind = "plc"
+purpose = "Phase 1 acquire/transfer/finish workpiece flow."
+
+[[categories.examples]]
+id = "workpiece_carrier_slot_transfer"
+title = "workpiece_carrier_slot_transfer"
+path = "examples/workpiece_carrier_slot_transfer.plc"
+kind = "plc"
+purpose = "Carrier slot transfer fixture."
+
+[[categories.examples]]
+id = "workpiece_split_merge"
+title = "workpiece_split_merge"
+path = "examples/workpiece_split_merge.plc"
+kind = "plc"
+purpose = "Split/merge lineage fixture."
+
+[[categories]]
+id = "05_safety_recovery_and_diagnostics"
+name = "05 Safety, Recovery, And Diagnostics"
+summary = "Safety, recovery template, force override, and negative diagnostic fixtures."
+
+[[categories.examples]]
+id = "nuclear_coolant_isolation"
+title = "nuclear_coolant_isolation"
+path = "examples/nuclear_coolant_isolation.plc"
+kind = "plc"
+purpose = "High-criticality safety example."
+
+[[categories.examples]]
+id = "force_override_demo"
+title = "force_override_demo"
+path = "examples/force_override_demo.plc"
+kind = "plc"
+purpose = "Online force, retain, commissioning, and control-plane fixture."
+
+[[categories.examples]]
+id = "estop_recovery"
+title = "estop_recovery"
+path = "examples/recovery_templates/estop_recovery.plc"
+kind = "template"
+purpose = "Emergency-stop recovery template."
+
+[[categories.examples]]
+id = "power_loss_recovery"
+title = "power_loss_recovery"
+path = "examples/recovery_templates/power_loss_recovery.plc"
+kind = "template"
+purpose = "Power-loss recovery template."
+
+[[categories.examples]]
+id = "sensor_stuck_recovery"
+title = "sensor_stuck_recovery"
+path = "examples/recovery_templates/sensor_stuck_recovery.plc"
+kind = "template"
+purpose = "Sensor-stuck recovery template."
+
+[[categories.examples]]
+id = "error_all_verifiers"
+title = "error_all_verifiers"
+path = "examples/error_all_verifiers.plc"
+kind = "negative_plc"
+purpose = "Negative fixture spanning verification failures."
+
+[[categories.examples]]
+id = "error_cam_missing_table"
+title = "error_cam_missing_table"
+path = "examples/error_cam_missing_table.plc"
+kind = "negative_plc"
+purpose = "Negative fixture for missing cam data."
+
+[[categories.examples]]
+id = "error_missing_device"
+title = "error_missing_device"
+path = "examples/error_missing_device.plc"
+kind = "negative_plc"
+purpose = "Negative fixture for missing devices."
+
+[[categories]]
+id = "06_performance_and_deployment_fixtures"
+name = "06 Performance And Deployment Fixtures"
+summary = "Large topology, component topology, and PIL baseline fixtures."
+
+[[categories.examples]]
+id = "topology_perf_500"
+title = "topology_perf_500"
+path = "examples/topology_perf_500.plc"
+kind = "plc"
+purpose = "Large topology performance fixture."
+scenario_path = "examples/topology_perf_500.scenario.json"
+
+[[categories.examples]]
+id = "pil_case_timeout"
+title = "pil_case_timeout"
+path = "examples/pil_baselines/case_timeout/case.plc"
+kind = "plc"
+purpose = "PIL/Renode timeout baseline."
+scenario_path = "examples/pil_baselines/case_timeout/scenarios/base.yaml"
+
+[[categories.examples]]
+id = "component_model"
+title = "component_model"
+path = "examples/component_model/topology.json"
+kind = "component_topology"
+purpose = "Component topology and scenario fixture set."
+scenario_path = "examples/component_model/scenario_normal.json"

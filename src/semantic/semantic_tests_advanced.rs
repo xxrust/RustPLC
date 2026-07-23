@@ -101,6 +101,39 @@ task done:
     }
 
     #[test]
+    fn low_level_state_machine_builder_reports_unresolved_axis_speed() {
+        let input = r#"
+[topology]
+
+[constraints]
+
+[tasks]
+task motion:
+    step run:
+        action: axis.move_relative(axis_x, distance: 10)
+            timeout: 500ms -> fault.timeout
+            on_reject -> fault.reject
+            on_motion_fault -> fault.motion_fault
+            on_safety_fault -> fault.safety_fault
+task fault:
+    step timeout:
+    step reject:
+    step motion_fault:
+    step safety_fault:
+"#;
+
+        let program = parse_plc(input).expect("axis source should parse");
+        let errors = build_state_machine_from_ast(&program.tasks)
+            .expect_err("unresolved speed must return a diagnostic instead of panicking");
+        let rendered = errors
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(rendered.contains("speed"), "{rendered}");
+    }
+
+    #[test]
     fn lowers_axis_move_refined_fault_routes_into_ir_transition_actions() {
         let input = r#"
 [topology]
@@ -1070,8 +1103,8 @@ task fault:
 ";
 
         let program = parse_plc(input).expect("垂直轴示例语法应可解析");
-        let errors =
-            build_state_machine(&program).expect_err("未确认抱闸直接 disable 应触发 AXIS-012");
+        let errors = build_state_machine_allow_raw_io_for_test(&program)
+            .expect_err("未确认抱闸直接 disable 应触发 AXIS-012");
         let joined = errors
             .iter()
             .map(|err| err.to_string())
@@ -1100,7 +1133,8 @@ task fault:
 ";
 
         let program = parse_plc(input).expect("垂直轴示例语法应可解析");
-        build_state_machine(&program).expect("先抱闸确认再 disable 应通过语义校验");
+        build_state_machine_allow_raw_io_for_test(&program)
+            .expect("先抱闸确认再 disable 应通过语义校验");
     }
 
     #[test]

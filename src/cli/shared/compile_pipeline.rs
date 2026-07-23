@@ -1,15 +1,17 @@
 use runtime_core::MAX_TRANSITIONS_PER_TASK_PER_TICK;
 use rust_plc::error::PlcError;
 use rust_plc::ir::{ConstraintSet, StateMachine, TimingModel, TopologyGraph};
-use rust_plc::semantic::{
-    build_constraint_set, build_state_machine, build_timing_model, build_topology_graph,
-    preprocess_program_with_library,
-};
+use rust_plc::semantic::compile_semantic_program_with_library;
 use rust_plc::source_bundle::{LoadedPlcSource, remap_plc_error};
-use rust_plc::topology_semantic_gate::{
-    collect_topology_deprecation_warnings, validate_topology_semantics,
+use rust_plc::state_proof::{
+    StateProofIssue, StateProofSeverity, analyze_program, load_state_proof_config,
+    should_auto_run_state_proof_check,
 };
-use rust_plc::verification::{VerificationSummary, WarningEntry, WarningLevel, verify_all};
+use rust_plc::topology_semantic_gate::collect_topology_deprecation_warnings;
+use rust_plc::verification::{
+    ReusableVerificationSummary, VerificationReuseReport, VerificationSummary, WarningEntry,
+    WarningLevel, reusable_verification_summary, verify_all, verify_all_incremental,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashMap};
 use std::fmt::Write as _;
@@ -19,7 +21,7 @@ use time::format_description::well_known::Rfc3339;
 
 const AXIS_BLOCKING_MIGRATION_WARNING_CODE: &str = "MIG-AXIS-BLOCK-001";
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub(in crate::cli) struct IrBundle {
     pub(in crate::cli) topology: TopologyGraph,
     pub(in crate::cli) state_machine: StateMachine,
@@ -27,6 +29,19 @@ pub(in crate::cli) struct IrBundle {
     pub(in crate::cli) timing_model: TimingModel,
     pub(in crate::cli) runtime_budget: RuntimeBudget,
     pub(in crate::cli) verification: VerificationSummary,
+}
+
+pub(in crate::cli) fn reusable_verification_from_ir_bundle(
+    ir_bundle: &IrBundle,
+) -> Result<ReusableVerificationSummary, Vec<String>> {
+    let mut summary = ir_bundle.verification.clone();
+    strip_axis_move_blocking_migration_warning(&mut summary);
+    Ok(reusable_verification_summary(
+        &ir_bundle.topology,
+        &ir_bundle.constraints,
+        &ir_bundle.state_machine,
+        summary,
+    ))
 }
 
 #[derive(Debug, Serialize)]
@@ -168,21 +183,22 @@ impl Default for RuntimeBudgetThresholds {
 }
 
 pub(in crate::cli) fn compile_pipeline(input: &LoadedPlcSource) -> Result<IrBundle, Vec<String>> {
+    compile_pipeline_with_reusable_verification(input, None).map(|(ir_bundle, _)| ir_bundle)
+}
+
+pub(in crate::cli) fn compile_pipeline_with_reusable_verification(
+    input: &LoadedPlcSource,
+    reusable_verification: Option<&ReusableVerificationSummary>,
+) -> Result<(IrBundle, VerificationReuseReport), Vec<String>> {
     let program = crate::cli_support::plc_pipeline::parse_loaded_plc_with_required_purpose(input)
         .map_err(|err| vec![err])?;
     for warning in collect_topology_deprecation_warnings(&program.topology) {
         eprintln!("WARNING [topology] {warning}");
     }
 
-    let devices_dir = Path::new("devices");
-    let device_library = match rust_plc::device_library::DeviceLibrary::load(devices_dir) {
-        Ok(lib) => lib,
-        Err(errors) => {
-            return Err(errors.into_iter().map(|e| e.to_string()).collect());
-        }
-    };
+    let device_library = crate::cli_support::plc_pipeline::load_default_device_library()?;
 
-    let expanded_program = preprocess_program_with_library(
+    let semantic = compile_semantic_program_with_library(
         &program,
         if device_library.is_empty() {
             None
@@ -191,26 +207,40 @@ pub(in crate::cli) fn compile_pipeline(input: &LoadedPlcSource) -> Result<IrBund
         },
     )
     .map_err(|errors| format_plc_errors(errors, input))?;
-    validate_topology_semantics(&expanded_program.topology)
-        .map_err(|gate_error| vec![format_topology_gate_error(gate_error, input)])?;
+    run_state_proof_compile_gate(input, &semantic.expanded_program)?;
 
-    let mut errors = Vec::new();
-    let topology = collect_stage(build_topology_graph(&expanded_program), &mut errors);
-    let state_machine = collect_stage(build_state_machine(&expanded_program), &mut errors);
-    let constraints = collect_stage(build_constraint_set(&expanded_program), &mut errors);
-    let timing_model = collect_stage(build_timing_model(&expanded_program), &mut errors);
+    let expanded_program = semantic.expanded_program;
+    let topology = semantic.topology;
+    let state_machine = semantic.state_machine;
+    let constraints = semantic.constraints;
+    let timing_model = semantic.timing_model;
 
-    if !errors.is_empty() {
-        return Err(format_plc_errors(errors, input));
+    let (mut verification, verification_reuse) = match reusable_verification {
+        Some(reusable) => verify_all_incremental(
+            &expanded_program,
+            &topology,
+            &constraints,
+            &state_machine,
+            Some(reusable),
+        ),
+        None => {
+            verify_all(&expanded_program, &topology, &constraints, &state_machine).map(|summary| {
+                (
+                    summary,
+                    VerificationReuseReport {
+                        reused_checkers: Vec::new(),
+                        checked_checkers: vec![
+                            "safety".to_string(),
+                            "liveness".to_string(),
+                            "timing".to_string(),
+                            "causality".to_string(),
+                        ],
+                    },
+                )
+            })
+        }
     }
-
-    let topology = topology.expect("topology exists when semantic errors are empty");
-    let state_machine = state_machine.expect("state machine exists when semantic errors are empty");
-    let constraints = constraints.expect("constraints exist when semantic errors are empty");
-    let timing_model = timing_model.expect("timing model exists when semantic errors are empty");
-
-    let mut verification = verify_all(&expanded_program, &topology, &constraints, &state_machine)
-        .map_err(|issues| {
+    .map_err(|issues| {
         issues
             .into_iter()
             .map(|issue| issue.to_string())
@@ -220,14 +250,77 @@ pub(in crate::cli) fn compile_pipeline(input: &LoadedPlcSource) -> Result<IrBund
 
     let runtime_budget = analyze_runtime_budget(&expanded_program, &state_machine);
 
-    Ok(IrBundle {
-        topology,
-        state_machine,
-        constraints,
-        timing_model,
-        runtime_budget,
-        verification,
-    })
+    Ok((
+        IrBundle {
+            topology,
+            state_machine,
+            constraints,
+            timing_model,
+            runtime_budget,
+            verification,
+        },
+        verification_reuse,
+    ))
+}
+
+fn run_state_proof_compile_gate(
+    input: &LoadedPlcSource,
+    program: &rust_plc::ast::PlcProgram,
+) -> Result<(), Vec<String>> {
+    if !should_auto_run_state_proof_check(program, &input.requested_path) {
+        return Ok(());
+    }
+
+    let loaded_config = load_state_proof_config(&input.requested_path, None)
+        .map_err(|err| vec![format!("ERROR [state-proof] {err}")])?;
+    let mut issues = analyze_program(program, &loaded_config.config);
+    remap_state_proof_issues(&mut issues, input);
+
+    let errors = issues
+        .into_iter()
+        .filter(|issue| issue.severity.is_error())
+        .map(format_state_proof_issue)
+        .collect::<Vec<_>>();
+
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(errors)
+    }
+}
+
+fn remap_state_proof_issues(issues: &mut [StateProofIssue], input: &LoadedPlcSource) {
+    for issue in issues {
+        if let Some(location) = input.source_map.remap_location(issue.line.max(1), 1) {
+            issue.line = location.line.max(1);
+            issue.source_file = Some(location.file);
+        } else if issue.source_file.is_none() {
+            issue.source_file = Some(input.requested_path.display().to_string());
+        }
+    }
+}
+
+fn format_state_proof_issue(issue: StateProofIssue) -> String {
+    let severity = match issue.severity {
+        StateProofSeverity::Error => "ERROR",
+        StateProofSeverity::Warning => "WARNING",
+    };
+    let file = issue.source_file.unwrap_or_else(|| "<input>".to_string());
+    let mut rendered = format!(
+        "{severity} [state-proof:{}] {}:{}:1\n  reason: {}\n  fix: {}",
+        issue.code,
+        file,
+        issue.line.max(1),
+        issue.message,
+        issue.fix
+    );
+    if let (Some(task), Some(step)) = (issue.task, issue.step) {
+        let _ = write!(rendered, "\n  step: {task}.{step}");
+    }
+    if let Some(symbol) = issue.symbol {
+        let _ = write!(rendered, "\n  symbol: {symbol}");
+    }
+    rendered
 }
 
 pub(in crate::cli) fn write_verification_report(
@@ -264,55 +357,11 @@ pub(in crate::cli) fn write_verification_report(
     Ok(())
 }
 
-fn collect_stage<T>(result: Result<T, Vec<PlcError>>, errors: &mut Vec<PlcError>) -> Option<T> {
-    match result {
-        Ok(value) => Some(value),
-        Err(mut stage_errors) => {
-            errors.append(&mut stage_errors);
-            None
-        }
-    }
-}
-
 fn format_plc_errors(errors: Vec<PlcError>, input: &LoadedPlcSource) -> Vec<String> {
     errors
         .into_iter()
         .map(|error| remap_plc_error(error, &input.source_map).to_string())
         .collect()
-}
-
-fn format_topology_gate_error(
-    gate_error: rust_plc::topology_semantic_gate::TopologySemanticGateError,
-    input: &LoadedPlcSource,
-) -> String {
-    let mut rendered = format!(
-        "ERROR [{}] Topology semantic gate rejected the program\n",
-        gate_error.code
-    );
-    for issue in gate_error.issues {
-        if let Some(location) = input.source_map.remap_location(issue.line.max(1), 1) {
-            let _ = writeln!(
-                rendered,
-                "  - [{}] {}:{}:{}",
-                issue.code.as_str(),
-                location.file,
-                location.line.max(1),
-                location.column.max(1)
-            );
-        } else {
-            let _ = writeln!(
-                rendered,
-                "  - [{}] {}:{}:{}",
-                issue.code.as_str(),
-                input.requested_path.display(),
-                issue.line.max(1),
-                1
-            );
-        }
-        let _ = writeln!(rendered, "    cause: {}", issue.message);
-        let _ = writeln!(rendered, "    suggestion: {}", issue.suggestion);
-    }
-    rendered.trim_end().to_string()
 }
 
 fn analyze_runtime_budget(
@@ -589,6 +638,13 @@ fn apply_axis_move_blocking_migration_warning(
     });
 }
 
+fn strip_axis_move_blocking_migration_warning(verification: &mut VerificationSummary) {
+    verification
+        .liveness
+        .warnings
+        .retain(|warning| warning.code.as_deref() != Some(AXIS_BLOCKING_MIGRATION_WARNING_CODE));
+}
+
 fn statements_include_axis_move(statements: &[rust_plc::ast::StepStatement]) -> bool {
     statements.iter().any(statement_includes_axis_move)
 }
@@ -658,5 +714,43 @@ fn estimate_budget_time_values(
         total_estimate_us,
         max_allowed_us,
         exceeds_budget: total_estimate_us > max_allowed_us,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use rust_plc::parser::parse_plc;
+    use rust_plc::semantic::compile_semantic_program_with_library;
+
+    #[test]
+    fn shared_semantic_compile_service_builds_expected_outputs() {
+        let source = r#"
+[topology]
+device plc_main: plc {
+    purpose: "parallel semantic stage fixture controller"
+    model_ref: openplc_softplc
+}
+
+[constraints]
+
+[tasks]
+task main:
+    step idle:
+        action: log "ok"
+"#;
+        let program = parse_plc(source).expect("fixture should parse");
+        let semantic = compile_semantic_program_with_library(&program, None)
+            .expect("semantic compile service should build all IR stages");
+
+        assert_eq!(semantic.expanded_program.tasks.tasks.len(), 1);
+        assert!(
+            semantic
+                .state_machine
+                .states
+                .iter()
+                .any(|state| state.step_name == "idle")
+        );
+        assert!(semantic.constraints.safety.is_empty());
+        assert!(semantic.timing_model.intervals.is_empty());
     }
 }

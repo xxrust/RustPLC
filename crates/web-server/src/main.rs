@@ -1,39 +1,78 @@
+mod artifact_store;
+mod collab;
+mod config;
+mod run_service;
+mod security;
+
 use axum::{
-    extract::{Path, Query, State},
-    http::StatusCode,
-    response::Json,
+    body::Body,
+    extract::{
+        ws::{Message, WebSocket, WebSocketUpgrade},
+        DefaultBodyLimit, Path, Query, State,
+    },
+    http::{header, StatusCode},
+    middleware,
+    response::{IntoResponse, Json, Response},
     routing::{get, post},
     Router,
 };
+use futures_util::{SinkExt, StreamExt};
 use rust_plc::ast::{
     DeviceDeclaration, DevicePort, DeviceType, PortRole, PortType, TopologyConnection,
     TopologyRelation,
 };
 use rust_plc::component_scenario::parse_component_scenario_value;
 use rust_plc::component_topology::parse_component_topology_value;
+use rust_plc::device_library::DeviceLibrary;
+use rust_plc::dsl_capabilities::{build_dsl_capabilities_report, DslCapabilitiesReport};
+use rust_plc::error::PlcError;
+use rust_plc::lsp::{language_snapshot_for_source, LspLanguageSnapshot};
 use rust_plc::parser::parse_plc;
+use rust_plc::semantic::compile_semantic_program_with_library;
 use rust_plc::topology_semantic_gate::{
     collect_topology_deprecation_warnings, validate_device_purpose_required,
-    validate_removed_legacy_io_model, validate_topology_semantics,
+    validate_removed_legacy_io_model, validate_topology_semantics, TopologySemanticGateError,
 };
+use rust_plc::verification::{verify_all, VerificationIssue, WarningLevel};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path as StdPath, PathBuf};
-use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::sync::{Arc, OnceLock};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
-use tokio::process::Command;
-use tokio::sync::RwLock;
-use tower_http::cors::CorsLayer;
-use tower_http::services::ServeDir;
+use tokio::sync::{broadcast, RwLock, Semaphore};
 use tracing::{error, info};
+use uuid::Uuid;
+
+use artifact_store::{
+    artifact_href, artifact_href_any, is_safe_relative_path, read_text_file_limited,
+    resolve_artifact_reference, resolve_workspace_input, resolve_workspace_output_path,
+    workspace_output_root,
+};
+use collab::{
+    build_collab_event, collab_comment_history, collab_room_sender, is_safe_collab_room,
+    record_collab_comment, CollabClientEvent, CollabEvent,
+};
+#[cfg(test)]
+use config::validate_bind_security;
+use config::{RustPlcLauncher, WebConfig, WebSecurityConfig};
+use run_service::{
+    first_failure_message, public_command_error, public_command_failure, run_rust_plc,
+};
+use security::{authorize_mutations, cors_layer};
 
 #[derive(Clone)]
 struct AppState {
     workspace_root: PathBuf,
     runs: Arc<RwLock<BTreeMap<String, RunRecord>>>,
+    collab_rooms: Arc<RwLock<HashMap<String, broadcast::Sender<CollabEvent>>>>,
+    collab_comments: Arc<RwLock<HashMap<String, Vec<CollabEvent>>>>,
+    security: WebSecurityConfig,
+    run_semaphore: Arc<Semaphore>,
+    run_timeout: Duration,
+    rust_plc_launcher: RustPlcLauncher,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -106,7 +145,355 @@ struct ParsePlcTopologyRequest {
     content: String,
 }
 
+#[derive(Debug, Deserialize)]
+struct PlcDiagnosticsRequest {
+    content: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct PlcLanguageRequest {
+    content: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct FlowchartGeneratePlcRequest {
+    project_id: Option<String>,
+    task_name: String,
+    steps: Vec<FlowchartEditorStep>,
+    transitions: Vec<FlowchartEditorTransition>,
+}
+
+#[derive(Debug, Deserialize)]
+struct FlowchartEditorStep {
+    id: String,
+    label: Option<String>,
+    action: Option<String>,
+    delay_ms: Option<u64>,
+}
+
+#[derive(Debug, Deserialize)]
+struct FlowchartEditorTransition {
+    from: String,
+    to: String,
+    guard: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct FlowchartGeneratePlcResponse {
+    source: String,
+    valid: bool,
+    diagnostics: PlcDiagnosticsResponse,
+    normalized_task_name: String,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ExampleTemplateDef {
+    id: &'static str,
+    name: &'static str,
+    category: &'static str,
+    path: &'static str,
+    template_type: &'static str,
+    summary: &'static str,
+    scenario_path: Option<&'static str>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ExampleTemplate {
+    id: String,
+    name: String,
+    category: String,
+    path: String,
+    #[serde(rename = "type")]
+    template_type: String,
+    summary: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    scenario_path: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ExampleCatalog {
+    schema_version: u32,
+    #[serde(default)]
+    categories: Vec<ExampleCatalogCategory>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ExampleCatalogCategory {
+    name: String,
+    #[serde(default)]
+    examples: Vec<ExampleCatalogEntry>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ExampleCatalogEntry {
+    id: String,
+    title: String,
+    path: String,
+    kind: String,
+    purpose: String,
+    #[serde(default)]
+    scenario_path: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct PlcRealtimeRequest {
+    content: String,
+    request_id: Option<u64>,
+}
+
+#[derive(Debug, Serialize)]
+struct PlcRealtimeResponse {
+    request_id: Option<u64>,
+    diagnostics: PlcDiagnosticsResponse,
+    language: LspLanguageSnapshot,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+struct PlcDiagnosticsResponse {
+    valid: bool,
+    stage: String,
+    errors: Vec<String>,
+    issues: Vec<PlcDiagnosticIssue>,
+    summary: PlcDiagnosticsSummary,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+struct PlcDiagnosticIssue {
+    severity: String,
+    stage: String,
+    message: String,
+    line: usize,
+    column: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    code: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    suggestion: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+struct PlcDiagnosticsSummary {
+    topology_devices: usize,
+    tasks: usize,
+    states: usize,
+    transitions: usize,
+    constraints: usize,
+    verification_warnings: usize,
+}
+
 const TAGS_SCHEMA_VERSION: u64 = 1;
+const MAX_COLLAB_COMMENT_HISTORY: usize = 50;
+const COLLAB_COMMENT_HISTORY_DIR: &str = "web_collab/comments";
+const DEFAULT_MAX_CONCURRENT_RUNS: usize = 2;
+const DEFAULT_RUN_TIMEOUT_SECS: u64 = 120;
+const MAX_RUN_RECORDS: usize = 200;
+const MAX_ARTIFACT_BYTES: u64 = 16 * 1024 * 1024;
+const MAX_INPUT_FILE_BYTES: u64 = 8 * 1024 * 1024;
+const MAX_COMMAND_OUTPUT_BYTES: usize = 4 * 1024 * 1024;
+const MIN_SCENARIO_TICK_MS: u64 = 1;
+const MAX_SCENARIO_TICK_MS: u64 = 60_000;
+const MAX_SCENARIO_DURATION_MS: u64 = 24 * 60 * 60 * 1000;
+const MAX_SCENARIO_TICKS: u64 = 1_000_000;
+
+const EXAMPLE_TEMPLATES: &[ExampleTemplateDef] = &[
+    ExampleTemplateDef {
+        id: "demo",
+        name: "demo",
+        category: "01 Basics",
+        path: "examples/demo.plc",
+        template_type: "plc",
+        summary: "Minimal language and device demonstration.",
+        scenario_path: Some("examples/demo.scenario.json"),
+    },
+    ExampleTemplateDef {
+        id: "process_device_demo",
+        name: "process_device_demo",
+        category: "01 Basics",
+        path: "examples/process_device_demo.plc",
+        template_type: "plc",
+        summary: "Process-device topology and task flow example.",
+        scenario_path: None,
+    },
+    ExampleTemplateDef {
+        id: "quadratic_fit",
+        name: "quadratic_fit",
+        category: "01 Basics",
+        path: "examples/quadratic_fit.plc",
+        template_type: "plc",
+        summary: "Compute and extern-style numeric workflow fixture.",
+        scenario_path: None,
+    },
+    ExampleTemplateDef {
+        id: "dual_axis_platform",
+        name: "dual_axis_platform",
+        category: "02 Motion Control",
+        path: "examples/dual_axis_platform.plc",
+        template_type: "plc",
+        summary: "Canonical dual-axis motion example used by quickstart docs.",
+        scenario_path: None,
+    },
+    ExampleTemplateDef {
+        id: "rp2040_motion_minimal",
+        name: "rp2040_motion_minimal",
+        category: "02 Motion Control",
+        path: "examples/rp2040_motion_minimal.plc",
+        template_type: "plc",
+        summary: "Board-oriented motion example paired with RP2040 scenarios and IO map.",
+        scenario_path: None,
+    },
+    ExampleTemplateDef {
+        id: "stepper_collision_guard",
+        name: "stepper_collision_guard",
+        category: "02 Motion Control",
+        path: "examples/stepper_collision_guard.plc",
+        template_type: "plc",
+        summary: "Stepper safety and collision-guard scenario fixture.",
+        scenario_path: None,
+    },
+    ExampleTemplateDef {
+        id: "three_station_assembly",
+        name: "three_station_assembly",
+        category: "03 Process And Station Flow",
+        path: "examples/three_station_assembly.plc",
+        template_type: "plc",
+        summary: "Multi-station assembly sequence.",
+        scenario_path: None,
+    },
+    ExampleTemplateDef {
+        id: "welding_station",
+        name: "welding_station",
+        category: "03 Process And Station Flow",
+        path: "examples/welding_station.plc",
+        template_type: "plc",
+        summary: "Welding station sequence and constraints.",
+        scenario_path: None,
+    },
+    ExampleTemplateDef {
+        id: "load_unload_concurrent_tasks",
+        name: "load_unload_concurrent_tasks",
+        category: "03 Process And Station Flow",
+        path: "examples/load_unload_concurrent_tasks.plc",
+        template_type: "plc",
+        summary: "Concurrent load/unload task fixture.",
+        scenario_path: None,
+    },
+    ExampleTemplateDef {
+        id: "realtime_stress_stress_case",
+        name: "realtime_stress/stress_case",
+        category: "03 Process And Station Flow",
+        path: "examples/realtime_stress/stress_case.plc",
+        template_type: "plc",
+        summary: "No-board gate and realtime stress playbook fixture.",
+        scenario_path: Some("examples/realtime_stress/scenarios/safe.yaml"),
+    },
+    ExampleTemplateDef {
+        id: "project_scaffold_demo_main",
+        name: "project_scaffold_demo/plc/main",
+        category: "03 Process And Station Flow",
+        path: "examples/project_scaffold_demo/plc/main.plc",
+        template_type: "plc",
+        summary: "Structured project scaffold reference used by scenario tools.",
+        scenario_path: Some("examples/project_scaffold_demo/scenarios/nominal/normal.yaml"),
+    },
+    ExampleTemplateDef {
+        id: "workpiece_phase1_transfer",
+        name: "workpiece_phase1_transfer",
+        category: "04 Workpiece And Material Flow",
+        path: "examples/workpiece_phase1_transfer.plc",
+        template_type: "plc",
+        summary: "Phase 1 acquire/transfer/finish workpiece flow.",
+        scenario_path: None,
+    },
+    ExampleTemplateDef {
+        id: "workpiece_carrier_slot_transfer",
+        name: "workpiece_carrier_slot_transfer",
+        category: "04 Workpiece And Material Flow",
+        path: "examples/workpiece_carrier_slot_transfer.plc",
+        template_type: "plc",
+        summary: "Carrier slot transfer fixture.",
+        scenario_path: None,
+    },
+    ExampleTemplateDef {
+        id: "workpiece_split_merge",
+        name: "workpiece_split_merge",
+        category: "04 Workpiece And Material Flow",
+        path: "examples/workpiece_split_merge.plc",
+        template_type: "plc",
+        summary: "Split/merge lineage fixture.",
+        scenario_path: None,
+    },
+    ExampleTemplateDef {
+        id: "nuclear_coolant_isolation",
+        name: "nuclear_coolant_isolation",
+        category: "05 Safety, Recovery, And Diagnostics",
+        path: "examples/nuclear_coolant_isolation.plc",
+        template_type: "plc",
+        summary: "High-criticality safety example.",
+        scenario_path: None,
+    },
+    ExampleTemplateDef {
+        id: "force_override_demo",
+        name: "force_override_demo",
+        category: "05 Safety, Recovery, And Diagnostics",
+        path: "examples/force_override_demo.plc",
+        template_type: "plc",
+        summary: "Online force, retain, commissioning, and control-plane fixture.",
+        scenario_path: None,
+    },
+    ExampleTemplateDef {
+        id: "recovery_templates_estop_recovery",
+        name: "recovery_templates/estop_recovery",
+        category: "05 Safety, Recovery, And Diagnostics",
+        path: "examples/recovery_templates/estop_recovery.plc",
+        template_type: "plc",
+        summary: "Emergency-stop recovery template.",
+        scenario_path: None,
+    },
+    ExampleTemplateDef {
+        id: "recovery_templates_power_loss_recovery",
+        name: "recovery_templates/power_loss_recovery",
+        category: "05 Safety, Recovery, And Diagnostics",
+        path: "examples/recovery_templates/power_loss_recovery.plc",
+        template_type: "plc",
+        summary: "Power-loss recovery template.",
+        scenario_path: None,
+    },
+    ExampleTemplateDef {
+        id: "recovery_templates_sensor_stuck_recovery",
+        name: "recovery_templates/sensor_stuck_recovery",
+        category: "05 Safety, Recovery, And Diagnostics",
+        path: "examples/recovery_templates/sensor_stuck_recovery.plc",
+        template_type: "plc",
+        summary: "Sensor-stuck recovery template.",
+        scenario_path: None,
+    },
+    ExampleTemplateDef {
+        id: "topology_perf_500",
+        name: "topology_perf_500",
+        category: "06 Performance And Deployment Fixtures",
+        path: "examples/topology_perf_500.plc",
+        template_type: "plc",
+        summary: "Large topology performance fixture.",
+        scenario_path: Some("examples/topology_perf_500.scenario.json"),
+    },
+    ExampleTemplateDef {
+        id: "pil_baselines_case_timeout",
+        name: "pil_baselines/case_timeout/case",
+        category: "06 Performance And Deployment Fixtures",
+        path: "examples/pil_baselines/case_timeout/case.plc",
+        template_type: "plc",
+        summary: "PIL/Renode timeout baseline.",
+        scenario_path: Some("examples/pil_baselines/case_timeout/scenarios/base.yaml"),
+    },
+    ExampleTemplateDef {
+        id: "component_model",
+        name: "component_model",
+        category: "07 Component Simulation",
+        path: "examples/component_model/topology.json",
+        template_type: "component_topology",
+        summary: "Component simulation topology with normal and fault scenarios.",
+        scenario_path: Some("examples/component_model/scenario_normal.json"),
+    },
+];
 
 #[tokio::main]
 async fn main() {
@@ -115,47 +502,73 @@ async fn main() {
         .init();
 
     let workspace_root = find_workspace_root();
+    let config = WebConfig::from_env().unwrap_or_else(|message| {
+        eprintln!("rustplc-web configuration error: {message}");
+        std::process::exit(2);
+    });
     let state = Arc::new(AppState {
         workspace_root: workspace_root.clone(),
         runs: Arc::new(RwLock::new(BTreeMap::new())),
+        collab_rooms: Arc::new(RwLock::new(HashMap::new())),
+        collab_comments: Arc::new(RwLock::new(HashMap::new())),
+        security: config.security.clone(),
+        run_semaphore: Arc::new(Semaphore::new(config.max_concurrent_runs)),
+        run_timeout: config.run_timeout,
+        rust_plc_launcher: config.rust_plc_launcher.clone(),
     });
 
-    let api_routes = Router::new()
-        .route("/projects", get(list_projects))
-        .route("/topology/parse-plc", post(parse_plc_topology))
-        .route("/topology/:id", get(get_topology).put(save_topology))
-        .route("/topology/validate", post(validate_topology))
-        .route("/scenario/:id", get(get_scenario).put(save_scenario))
-        .route("/scenario/validate", post(validate_scenario))
-        .route("/run/no-board-gate", post(trigger_no_board))
-        .route("/run/:id/status", get(get_run_status))
-        .route("/run/list", get(list_runs))
-        .route("/geometry/export", post(export_geometry))
-        .route("/geometry/:id", get(get_geometry))
-        .route("/trace/:id", get(get_trace))
-        .route("/trace/:id/range", get(get_trace_range))
-        .route("/trace/:id/keypoints", get(get_keypoints))
-        .route("/diagnosis/:id", get(get_diagnosis))
-        .route("/timing/:id", get(get_timing))
-        .route("/alarms", get(get_alarms))
-        .route("/alarms/:id/ack", post(ack_alarm))
-        .with_state(state.clone());
+    let app = build_app(state.clone());
 
-    let artifacts_dir = workspace_root.join("out");
-    let static_dist = workspace_root.join("web-ui/dist");
-    let app = Router::new()
-        .nest("/api", api_routes)
-        .nest_service("/artifacts", ServeDir::new(artifacts_dir))
-        .fallback_service(ServeDir::new(static_dist))
-        .layer(CorsLayer::permissive());
+    info!("RustPLC Web Server listening on {}", config.bind_addr);
 
-    let addr = "0.0.0.0:8080";
-    info!("RustPLC Web Server listening on {}", addr);
-
-    let listener = tokio::net::TcpListener::bind(addr)
+    let listener = tokio::net::TcpListener::bind(config.bind_addr)
         .await
         .expect("bind web server");
     axum::serve(listener, app).await.expect("run web server");
+}
+
+fn build_app(state: Arc<AppState>) -> Router {
+    let api_routes = Router::new()
+        .route("/projects", get(list_projects))
+        .route("/project-templates", get(list_project_templates))
+        .route("/projects/{id}/source", get(get_project_source))
+        .route("/plc/diagnostics", post(plc_diagnostics))
+        .route("/plc/language", post(plc_language_snapshot))
+        .route("/dsl/capabilities", get(dsl_capabilities))
+        .route("/flowchart/generate-plc", post(flowchart_generate_plc))
+        .route("/topology/parse-plc", post(parse_plc_topology))
+        .route("/topology/{id}", get(get_topology).put(save_topology))
+        .route("/topology/validate", post(validate_topology))
+        .route("/scenario/{id}", get(get_scenario).put(save_scenario))
+        .route("/scenario/validate", post(validate_scenario))
+        .route("/run/no-board-gate", post(trigger_no_board))
+        .route("/run/{id}/status", get(get_run_status))
+        .route("/run/list", get(list_runs))
+        .route("/geometry/export", post(export_geometry))
+        .route("/geometry/{id}", get(get_geometry))
+        .route("/trace/{id}", get(get_trace))
+        .route("/trace/{id}/range", get(get_trace_range))
+        .route("/trace/{id}/keypoints", get(get_keypoints))
+        .route("/diagnosis/{id}", get(get_diagnosis))
+        .route("/timing/{id}", get(get_timing))
+        .route("/alarms", get(get_alarms))
+        .route("/alarms/{id}/ack", post(ack_alarm));
+
+    let static_dist = state.workspace_root.join("web-ui/dist");
+    let cors = cors_layer(&state.security);
+    Router::new()
+        .route("/ws/plc", get(plc_realtime_ws))
+        .route("/ws/collab/{room}", get(collab_ws))
+        .nest("/api", api_routes)
+        .route("/artifacts/{*path}", get(get_artifact))
+        .fallback_service(tower_http::services::ServeDir::new(static_dist))
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            authorize_mutations,
+        ))
+        .layer(DefaultBodyLimit::max(MAX_INPUT_FILE_BYTES as usize))
+        .layer(cors)
+        .with_state(state)
 }
 
 fn find_workspace_root() -> PathBuf {
@@ -164,60 +577,202 @@ fn find_workspace_root() -> PathBuf {
 }
 
 async fn list_projects(State(state): State<Arc<AppState>>) -> Json<Value> {
-    let examples = state.workspace_root.join("examples");
-    let mut projects = Vec::<Value>::new();
-
-    if let Ok(entries) = std::fs::read_dir(&examples) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.extension().and_then(|s| s.to_str()) == Some("plc") {
-                let stem = path
-                    .file_stem()
-                    .and_then(|s| s.to_str())
-                    .unwrap_or("unknown")
-                    .to_string();
-                projects.push(serde_json::json!({
-                    "id": stem,
-                    "name": stem,
-                    "path": display_rel(&state.workspace_root, &path),
-                    "type": "plc"
-                }));
-            }
-        }
-    }
-
-    let component_topology = examples.join("component_model/topology.json");
-    if component_topology.exists() {
-        projects.push(serde_json::json!({
-            "id": "component_model",
-            "name": "component_model",
-            "path": display_rel(&state.workspace_root, &component_topology),
-            "type": "component_topology"
-        }));
-    }
-
-    projects.sort_by(|a, b| {
-        a.get("name")
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .cmp(b.get("name").and_then(Value::as_str).unwrap_or(""))
-    });
-
+    let projects = collect_example_templates(&state.workspace_root);
     Json(serde_json::json!({ "projects": projects }))
+}
+
+async fn list_project_templates(State(state): State<Arc<AppState>>) -> Json<Value> {
+    let templates = collect_example_templates(&state.workspace_root);
+    let mut categories = BTreeMap::<String, Vec<ExampleTemplate>>::new();
+    for template in templates {
+        categories
+            .entry(template.category.clone())
+            .or_default()
+            .push(template);
+    }
+
+    Json(serde_json::json!({
+        "categories": categories
+            .into_iter()
+            .map(|(category, templates)| {
+                serde_json::json!({
+                    "category": category,
+                    "templates": templates,
+                })
+            })
+            .collect::<Vec<_>>()
+    }))
+}
+
+async fn get_project_source(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    if !is_safe_project_id(&id) {
+        return Err(bad_request("invalid project id"));
+    }
+
+    let path = match resolve_example_template(&state.workspace_root, &id) {
+        Some(template) if template.path.ends_with(".plc") => {
+            resolve_workspace_input(&state.workspace_root, &template.path).map_err(bad_request)?
+        }
+        Some(_) => {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({
+                    "error": "project template is not a PLC source",
+                    "id": id
+                })),
+            ));
+        }
+        None => workspace_path_for_id(&state.workspace_root, "examples", &id, ".plc")
+            .map_err(bad_request)?,
+    };
+    let content = std::fs::read_to_string(&path).map_err(|_| {
+        (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({
+                "error": "project source not found",
+                "id": id
+            })),
+        )
+    })?;
+
+    Ok(Json(serde_json::json!({
+        "id": id,
+        "path": display_rel(&state.workspace_root, &path),
+        "content": content
+    })))
+}
+
+fn is_safe_project_id(id: &str) -> bool {
+    is_safe_resource_id(id)
+}
+
+fn collect_example_templates(workspace_root: &StdPath) -> Vec<ExampleTemplate> {
+    let catalog_templates = collect_example_templates_from_catalog(workspace_root);
+    if !catalog_templates.is_empty() {
+        return catalog_templates;
+    }
+
+    collect_example_templates_from_static_defs(workspace_root)
+}
+
+fn collect_example_templates_from_catalog(workspace_root: &StdPath) -> Vec<ExampleTemplate> {
+    let catalog_path = workspace_root.join("examples/catalog.toml");
+    let Ok(text) = std::fs::read_to_string(&catalog_path) else {
+        return Vec::new();
+    };
+    let Ok(catalog) = toml::from_str::<ExampleCatalog>(&text) else {
+        error!(
+            path = %catalog_path.display(),
+            "failed to parse examples catalog for web project templates"
+        );
+        return Vec::new();
+    };
+    if catalog.schema_version != 1 {
+        error!(
+            path = %catalog_path.display(),
+            schema_version = catalog.schema_version,
+            "unsupported examples catalog schema version"
+        );
+        return Vec::new();
+    }
+
+    catalog
+        .categories
+        .into_iter()
+        .flat_map(|category| {
+            category.examples.into_iter().filter_map(move |entry| {
+                let path = resolve_workspace_input(workspace_root, &entry.path).ok()?;
+                let scenario_path = entry.scenario_path.as_ref().and_then(|scenario| {
+                    resolve_workspace_input(workspace_root, scenario)
+                        .ok()
+                        .map(|path| display_rel(workspace_root, &path))
+                });
+
+                Some(ExampleTemplate {
+                    id: entry.id,
+                    name: entry.title,
+                    category: category.name.clone(),
+                    path: display_rel(workspace_root, &path),
+                    template_type: entry.kind,
+                    summary: entry.purpose,
+                    scenario_path,
+                })
+            })
+        })
+        .collect()
+}
+
+fn collect_example_templates_from_static_defs(workspace_root: &StdPath) -> Vec<ExampleTemplate> {
+    EXAMPLE_TEMPLATES
+        .iter()
+        .filter_map(|template| {
+            let path = resolve_workspace_input(workspace_root, template.path).ok()?;
+            let scenario_path = template
+                .scenario_path
+                .and_then(|scenario| resolve_workspace_input(workspace_root, scenario).ok())
+                .map(|scenario| display_rel(workspace_root, &scenario));
+
+            Some(ExampleTemplate {
+                id: template.id.to_string(),
+                name: template.name.to_string(),
+                category: template.category.to_string(),
+                path: display_rel(workspace_root, &path),
+                template_type: template.template_type.to_string(),
+                summary: template.summary.to_string(),
+                scenario_path,
+            })
+        })
+        .collect()
+}
+
+fn resolve_example_template(workspace_root: &StdPath, id: &str) -> Option<ExampleTemplate> {
+    collect_example_templates(workspace_root)
+        .into_iter()
+        .find(|template| template.id == id)
+        .or_else(|| resolve_static_example_template(workspace_root, id))
+}
+
+fn resolve_static_example_template(workspace_root: &StdPath, id: &str) -> Option<ExampleTemplate> {
+    EXAMPLE_TEMPLATES
+        .iter()
+        .find(|template| {
+            template.id == id && resolve_workspace_input(workspace_root, template.path).is_ok()
+        })
+        .map(|template| {
+            let path = resolve_workspace_input(workspace_root, template.path)
+                .expect("static example path was validated");
+            let scenario_path = template
+                .scenario_path
+                .and_then(|scenario| resolve_workspace_input(workspace_root, scenario).ok())
+                .map(|scenario| display_rel(workspace_root, &scenario));
+            ExampleTemplate {
+                id: template.id.to_string(),
+                name: template.name.to_string(),
+                category: template.category.to_string(),
+                path: display_rel(workspace_root, &path),
+                template_type: template.template_type.to_string(),
+                summary: template.summary.to_string(),
+                scenario_path,
+            }
+        })
 }
 
 async fn get_topology(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    let json_path = topology_path_for_id(&state.workspace_root, &id);
+    let json_path = topology_path_for_id(&state.workspace_root, &id).map_err(bad_request)?;
     if json_path.exists() {
         let mut value = read_json_value(&json_path)?;
         normalize_topology_tags_in_place(&mut value);
         return Ok(Json(value));
     }
 
-    let plc_path = state.workspace_root.join(format!("examples/{id}.plc"));
+    let plc_path = workspace_path_for_id(&state.workspace_root, "examples", &id, ".plc")
+        .map_err(bad_request)?;
     if plc_path.exists() {
         let content = std::fs::read_to_string(&plc_path).map_err(internal_error)?;
         return Ok(Json(serde_json::json!({
@@ -244,7 +799,7 @@ async fn save_topology(
     Json(mut payload): Json<Value>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     normalize_topology_tags_in_place(&mut payload);
-    let path = topology_path_for_id(&state.workspace_root, &id);
+    let path = topology_path_for_id(&state.workspace_root, &id).map_err(bad_request)?;
     write_json_pretty(&path, &payload).map_err(internal_error)?;
     Ok(Json(serde_json::json!({
         "saved": true,
@@ -275,6 +830,738 @@ async fn validate_topology(Json(payload): Json<Value>) -> Json<Value> {
             Json(serde_json::json!({ "valid": false, "errors": errors, "issues": issues }))
         }
     }
+}
+
+async fn plc_diagnostics(
+    State(state): State<Arc<AppState>>,
+    Json(payload): Json<PlcDiagnosticsRequest>,
+) -> Json<PlcDiagnosticsResponse> {
+    let normalized = payload.content.trim_start_matches('\u{feff}');
+    Json(build_plc_diagnostics(&state.workspace_root, normalized))
+}
+
+async fn plc_language_snapshot(
+    Json(payload): Json<PlcLanguageRequest>,
+) -> Json<LspLanguageSnapshot> {
+    let normalized = payload.content.trim_start_matches('\u{feff}');
+    Json(language_snapshot_for_source(normalized))
+}
+
+async fn dsl_capabilities() -> Json<DslCapabilitiesReport> {
+    Json(build_dsl_capabilities_report("json"))
+}
+
+async fn flowchart_generate_plc(
+    State(state): State<Arc<AppState>>,
+    Json(payload): Json<FlowchartGeneratePlcRequest>,
+) -> Result<Json<FlowchartGeneratePlcResponse>, (StatusCode, Json<Value>)> {
+    let generated = generate_plc_from_flowchart(&payload).map_err(bad_request)?;
+    let diagnostics = build_plc_diagnostics(&state.workspace_root, &generated.source);
+
+    Ok(Json(FlowchartGeneratePlcResponse {
+        valid: diagnostics.valid,
+        diagnostics,
+        normalized_task_name: generated.normalized_task_name,
+        source: generated.source,
+    }))
+}
+
+async fn plc_realtime_ws(
+    State(state): State<Arc<AppState>>,
+    ws: WebSocketUpgrade,
+) -> impl IntoResponse {
+    ws.on_upgrade(move |socket| plc_realtime_socket(socket, state))
+}
+
+async fn plc_realtime_socket(mut socket: WebSocket, state: Arc<AppState>) {
+    while let Some(Ok(message)) = socket.recv().await {
+        match message {
+            Message::Text(text) => {
+                let payload = match serde_json::from_str::<PlcRealtimeRequest>(&text) {
+                    Ok(request) => serde_json::to_string(&build_plc_realtime_response(
+                        &state.workspace_root,
+                        request,
+                    )),
+                    Err(err) => serde_json::to_string(&serde_json::json!({
+                        "error": format!("invalid PLC realtime request: {err}")
+                    })),
+                };
+                let Ok(payload) = payload else {
+                    break;
+                };
+                if socket.send(Message::Text(payload.into())).await.is_err() {
+                    break;
+                }
+            }
+            Message::Ping(bytes) => {
+                if socket.send(Message::Pong(bytes)).await.is_err() {
+                    break;
+                }
+            }
+            Message::Close(_) => break,
+            Message::Binary(_) | Message::Pong(_) => {}
+        }
+    }
+}
+
+async fn collab_ws(
+    State(state): State<Arc<AppState>>,
+    Path(room): Path<String>,
+    ws: WebSocketUpgrade,
+) -> impl IntoResponse {
+    if !is_safe_collab_room(&room) {
+        return bad_request("invalid collaboration room").into_response();
+    }
+    ws.on_upgrade(move |socket| collab_socket(socket, state, room))
+        .into_response()
+}
+
+async fn collab_socket(socket: WebSocket, state: Arc<AppState>, room: String) {
+    let sender = collab_room_sender(&state, &room).await;
+    let mut receiver = sender.subscribe();
+    let (mut outbound, mut inbound) = socket.split();
+
+    for event in collab_comment_history(&state, &room).await {
+        let Ok(payload) = serde_json::to_string(&event) else {
+            continue;
+        };
+        if outbound.send(Message::Text(payload.into())).await.is_err() {
+            return;
+        }
+    }
+
+    loop {
+        tokio::select! {
+            inbound_message = inbound.next() => {
+                match inbound_message {
+                    Some(Ok(Message::Text(text))) => {
+                        match serde_json::from_str::<CollabClientEvent>(&text) {
+                            Ok(request) => {
+                                let event = build_collab_event(&room, request);
+                                record_collab_comment(&state, &event).await;
+                                let _ = sender.send(event);
+                            }
+                            Err(err) => {
+                                let payload = serde_json::json!({
+                                    "room": room,
+                                    "kind": "error",
+                                    "message": format!("invalid collaboration event: {err}"),
+                                    "at_ms": now_ms(),
+                                });
+                                if outbound
+                                    .send(Message::Text(payload.to_string().into()))
+                                    .await
+                                    .is_err()
+                                {
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    Some(Ok(Message::Ping(bytes))) => {
+                        if outbound.send(Message::Pong(bytes)).await.is_err() {
+                            break;
+                        }
+                    }
+                    Some(Ok(Message::Close(_))) | None => break,
+                    Some(Ok(Message::Binary(_) | Message::Pong(_))) => {}
+                    Some(Err(_)) => break,
+                }
+            }
+            broadcast_event = receiver.recv() => {
+                match broadcast_event {
+                    Ok(event) => {
+                        let Ok(payload) = serde_json::to_string(&event) else {
+                            continue;
+                        };
+                        if outbound.send(Message::Text(payload.into())).await.is_err() {
+                            break;
+                        }
+                    }
+                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(broadcast::error::RecvError::Closed) => break,
+                }
+            }
+        }
+    }
+}
+
+fn build_plc_realtime_response(
+    workspace_root: &StdPath,
+    request: PlcRealtimeRequest,
+) -> PlcRealtimeResponse {
+    let normalized = request.content.trim_start_matches('\u{feff}');
+    PlcRealtimeResponse {
+        request_id: request.request_id,
+        diagnostics: build_plc_diagnostics(workspace_root, normalized),
+        language: language_snapshot_for_source(normalized),
+    }
+}
+
+#[derive(Debug)]
+struct GeneratedFlowchartPlc {
+    source: String,
+    normalized_task_name: String,
+}
+
+fn generate_plc_from_flowchart(
+    request: &FlowchartGeneratePlcRequest,
+) -> Result<GeneratedFlowchartPlc, String> {
+    if request.steps.is_empty() {
+        return Err("flowchart must contain at least one step".to_string());
+    }
+    if request.steps.len() > 128 {
+        return Err("flowchart step limit is 128".to_string());
+    }
+    if request.transitions.len() > 256 {
+        return Err("flowchart transition limit is 256".to_string());
+    }
+
+    let normalized_task_name = sanitize_plc_identifier(&request.task_name, "main");
+    let mut used_step_names = HashSet::<String>::new();
+    let mut step_names = HashMap::<String, String>::new();
+    let mut ordered_steps = Vec::<(&FlowchartEditorStep, String)>::new();
+
+    for (index, step) in request.steps.iter().enumerate() {
+        let raw_name = if step.id.trim().is_empty() {
+            step.label.as_deref().unwrap_or_default()
+        } else {
+            step.id.as_str()
+        };
+        let base_name = sanitize_plc_identifier(raw_name, &format!("step_{}", index + 1));
+        let unique_name = make_unique_identifier(&base_name, &mut used_step_names);
+        step_names.insert(step.id.clone(), unique_name.clone());
+        if let Some(label) = step.label.as_ref() {
+            if !label.trim().is_empty() {
+                step_names
+                    .entry(label.clone())
+                    .or_insert(unique_name.clone());
+            }
+        }
+        ordered_steps.push((step, unique_name));
+    }
+
+    let mut outgoing = HashMap::<String, Vec<ResolvedFlowchartTransition>>::new();
+    for transition in &request.transitions {
+        let Some(from) = step_names.get(&transition.from) else {
+            return Err(format!(
+                "transition source `{}` does not match a step",
+                transition.from
+            ));
+        };
+        let Some(to) = step_names.get(&transition.to) else {
+            return Err(format!(
+                "transition target `{}` does not match a step",
+                transition.to
+            ));
+        };
+        let guard = transition.guard.as_deref().map(str::trim);
+        if transition.guard.is_some() && guard.unwrap_or_default().is_empty() {
+            return Err(format!(
+                "guarded transition from step `{}` to `{}` requires a non-empty guard expression",
+                transition.from, transition.to
+            ));
+        }
+        if let Some(guard) = guard {
+            validate_flowchart_guard(guard)?;
+        }
+        outgoing
+            .entry(from.clone())
+            .or_default()
+            .push(ResolvedFlowchartTransition {
+                target: to.clone(),
+                guard: guard.map(str::to_string),
+            });
+    }
+
+    let project_label = request
+        .project_id
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or("flowchart_editor");
+    let mut source = String::new();
+    source.push_str("[topology]\n");
+    source.push_str("device plc_main: plc {\n");
+    source.push_str("    purpose: \"Generated from Web IDE flowchart editor");
+    source.push_str(" for ");
+    source.push_str(&escape_plc_string(project_label));
+    source.push_str("\"\n");
+    source.push_str("    model_ref: openplc_softplc\n");
+    source.push_str("}\n\n");
+    source.push_str("[constraints]\n\n");
+    source.push_str("[tasks]\n");
+    source.push_str("task ");
+    source.push_str(&normalized_task_name);
+    source.push_str(":\n");
+
+    for (step, step_name) in ordered_steps {
+        let label = step
+            .label
+            .as_deref()
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or(step.id.as_str());
+        let action = step
+            .action
+            .as_deref()
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or(label);
+        source.push_str("    step ");
+        source.push_str(&step_name);
+        source.push_str(":\n");
+        source.push_str("        action: log \"");
+        source.push_str(&escape_plc_string(action));
+        source.push_str("\"\n");
+        if let Some(delay_ms) = step.delay_ms {
+            if delay_ms > 3_600_000 {
+                return Err(format!(
+                    "step `{}` delay_ms exceeds the 3600000ms limit",
+                    step.id
+                ));
+            }
+            if delay_ms > 0 {
+                source.push_str("        delay: ");
+                source.push_str(&delay_ms.to_string());
+                source.push_str("ms\n");
+            }
+        }
+        if let Some(transitions) = outgoing.get(&step_name) {
+            write_flowchart_transitions(
+                &mut source,
+                &normalized_task_name,
+                &step_name,
+                transitions,
+                &mut used_step_names,
+            )?;
+        }
+        source.push('\n');
+    }
+
+    Ok(GeneratedFlowchartPlc {
+        source,
+        normalized_task_name,
+    })
+}
+
+#[derive(Debug, Clone)]
+struct ResolvedFlowchartTransition {
+    target: String,
+    guard: Option<String>,
+}
+
+fn write_flowchart_transitions(
+    source: &mut String,
+    task_name: &str,
+    source_step_name: &str,
+    transitions: &[ResolvedFlowchartTransition],
+    used_step_names: &mut HashSet<String>,
+) -> Result<(), String> {
+    let default_edges = transitions
+        .iter()
+        .filter(|transition| transition.guard.is_none())
+        .collect::<Vec<_>>();
+    let guarded_edges = transitions
+        .iter()
+        .filter(|transition| transition.guard.is_some())
+        .collect::<Vec<_>>();
+
+    match (default_edges.as_slice(), guarded_edges.as_slice()) {
+        ([], []) => Ok(()),
+        ([default_edge], []) => {
+            write_goto(source, task_name, &default_edge.target);
+            Ok(())
+        }
+        ([default_edge], [guarded_edge]) => {
+            write_if_else(
+                source,
+                task_name,
+                guarded_edge.guard.as_deref().unwrap_or_default(),
+                &guarded_edge.target,
+                &default_edge.target,
+            );
+            Ok(())
+        }
+        ([default_edge], guarded_edges) => {
+            if guarded_edges.is_empty() {
+                return Ok(());
+            }
+
+            let mut decision_steps = Vec::<String>::new();
+            for index in 1..guarded_edges.len() {
+                let base = format!("{source_step_name}_branch_{}", index + 1);
+                decision_steps.push(make_unique_identifier(&base, used_step_names));
+            }
+
+            let first_else = decision_steps
+                .first()
+                .map(String::as_str)
+                .unwrap_or(default_edge.target.as_str());
+            write_if_else(
+                source,
+                task_name,
+                guarded_edges[0].guard.as_deref().unwrap_or_default(),
+                &guarded_edges[0].target,
+                first_else,
+            );
+
+            for (index, guarded_edge) in guarded_edges.iter().enumerate().skip(1) {
+                let decision_step = &decision_steps[index - 1];
+                let else_target = decision_steps
+                    .get(index)
+                    .map(String::as_str)
+                    .unwrap_or(default_edge.target.as_str());
+                source.push_str("    step ");
+                source.push_str(decision_step);
+                source.push_str(":\n");
+                write_if_else(
+                    source,
+                    task_name,
+                    guarded_edge.guard.as_deref().unwrap_or_default(),
+                    &guarded_edge.target,
+                    else_target,
+                );
+            }
+
+            Ok(())
+        }
+        ([], [_]) => Err(format!(
+            "guarded transition from step `{source_step_name}` requires one unguarded default transition"
+        )),
+        ([], _) => Err(format!(
+            "guarded transitions from step `{source_step_name}` require one unguarded default transition"
+        )),
+        _ => Err(format!(
+            "step `{source_step_name}` has unsupported branching; use exactly one unguarded default transition"
+        )),
+    }
+}
+
+fn write_if_else(
+    source: &mut String,
+    task_name: &str,
+    guard: &str,
+    then_target: &str,
+    else_target: &str,
+) {
+    source.push_str("        if: ");
+    source.push_str(guard);
+    source.push_str(" goto ");
+    source.push_str(task_name);
+    source.push('.');
+    source.push_str(then_target);
+    source.push_str(" else: goto ");
+    source.push_str(task_name);
+    source.push('.');
+    source.push_str(else_target);
+    source.push('\n');
+}
+
+fn write_goto(source: &mut String, task_name: &str, target: &str) {
+    source.push_str("        goto ");
+    source.push_str(task_name);
+    source.push('.');
+    source.push_str(target);
+    source.push('\n');
+}
+
+fn validate_flowchart_guard(guard: &str) -> Result<(), String> {
+    if guard.len() > 160 {
+        return Err("flowchart guard expression limit is 160 characters".to_string());
+    }
+    if guard.contains('\n') || guard.contains('\r') {
+        return Err("flowchart guard expression must stay on one line".to_string());
+    }
+    if guard
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || " _().=!<>+-*/&|".contains(ch))
+    {
+        Ok(())
+    } else {
+        Err("flowchart guard expression contains unsupported characters".to_string())
+    }
+}
+
+fn sanitize_plc_identifier(raw: &str, fallback: &str) -> String {
+    let mut sanitized = String::new();
+    let mut previous_was_separator = false;
+
+    for ch in raw.trim().chars() {
+        if ch.is_ascii_alphanumeric() || ch == '_' {
+            sanitized.push(ch.to_ascii_lowercase());
+            previous_was_separator = false;
+        } else if !previous_was_separator {
+            sanitized.push('_');
+            previous_was_separator = true;
+        }
+    }
+
+    let sanitized = sanitized.trim_matches('_').to_string();
+    let mut identifier = if sanitized.is_empty() {
+        fallback.to_string()
+    } else {
+        sanitized
+    };
+    if identifier
+        .chars()
+        .next()
+        .is_some_and(|ch| ch.is_ascii_digit())
+    {
+        identifier = format!("{fallback}_{identifier}");
+    }
+    identifier
+}
+
+fn make_unique_identifier(base: &str, used: &mut HashSet<String>) -> String {
+    if used.insert(base.to_string()) {
+        return base.to_string();
+    }
+    for index in 2.. {
+        let candidate = format!("{base}_{index}");
+        if used.insert(candidate.clone()) {
+            return candidate;
+        }
+    }
+    unreachable!("identifier uniquifier should always find a suffix")
+}
+
+fn escape_plc_string(value: &str) -> String {
+    value
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('\r', " ")
+        .replace('\n', " ")
+        .replace('\t', " ")
+}
+
+fn build_plc_diagnostics(workspace_root: &StdPath, source: &str) -> PlcDiagnosticsResponse {
+    let mut issues = Vec::<PlcDiagnosticIssue>::new();
+
+    let program = match parse_plc(source) {
+        Ok(program) => program,
+        Err(error) => {
+            let issue = plc_error_to_issue("parse", error);
+            return diagnostics_failure("parse", vec![issue]);
+        }
+    };
+
+    for warning in collect_topology_deprecation_warnings(&program.topology) {
+        issues.push(PlcDiagnosticIssue {
+            severity: "warning".to_string(),
+            stage: "topology_gate".to_string(),
+            message: warning,
+            line: 1,
+            column: 1,
+            code: Some("TOPOLOGY-DEPRECATION".to_string()),
+            suggestion: None,
+        });
+    }
+
+    if let Err(error) = validate_removed_legacy_io_model(&program.topology)
+        .and_then(|_| validate_device_purpose_required(&program.topology))
+        .and_then(|_| validate_topology_semantics(&program.topology))
+    {
+        issues.extend(topology_gate_to_issues("topology_gate", error));
+        return diagnostics_failure("topology_gate", issues);
+    }
+
+    let device_library = match load_web_device_library(workspace_root) {
+        Ok(library) => library,
+        Err(errors) => {
+            issues.extend(
+                errors
+                    .into_iter()
+                    .map(|error| plc_error_to_issue("preprocess", error)),
+            );
+            return diagnostics_failure("preprocess", issues);
+        }
+    };
+
+    let semantic = match compile_semantic_program_with_library(
+        &program,
+        if device_library.is_empty() {
+            None
+        } else {
+            Some(&device_library)
+        },
+    ) {
+        Ok(semantic) => semantic,
+        Err(errors) => {
+            issues.extend(
+                errors
+                    .into_iter()
+                    .map(|error| plc_error_to_issue("semantic", error)),
+            );
+            return diagnostics_failure("semantic", issues);
+        }
+    };
+
+    let expanded = semantic.expanded_program;
+    let topology = semantic.topology;
+    let state_machine = semantic.state_machine;
+    let constraints = semantic.constraints;
+
+    let mut summary = PlcDiagnosticsSummary {
+        topology_devices: topology.graph.node_count(),
+        tasks: expanded.tasks.tasks.len(),
+        states: state_machine.states.len(),
+        transitions: state_machine.transitions.len(),
+        constraints: constraint_count(&constraints),
+        verification_warnings: 0,
+    };
+
+    match verify_all(&expanded, &topology, &constraints, &state_machine) {
+        Ok(verification) => {
+            let warning_issues = verification_warning_issues(&verification);
+            summary.verification_warnings = warning_issues.len();
+            issues.extend(warning_issues);
+            PlcDiagnosticsResponse {
+                valid: !issues.iter().any(|issue| issue.severity == "error"),
+                stage: "verification".to_string(),
+                errors: Vec::new(),
+                issues,
+                summary,
+            }
+        }
+        Err(verification_issues) => {
+            issues.extend(
+                verification_issues
+                    .into_iter()
+                    .map(verification_issue_to_diagnostic),
+            );
+            PlcDiagnosticsResponse {
+                valid: false,
+                stage: "verification".to_string(),
+                errors: error_messages(&issues),
+                issues,
+                summary,
+            }
+        }
+    }
+}
+
+fn load_web_device_library(workspace_root: &StdPath) -> Result<DeviceLibrary, Vec<PlcError>> {
+    static DEVICE_LIBRARY: OnceLock<Result<DeviceLibrary, Vec<PlcError>>> = OnceLock::new();
+    DEVICE_LIBRARY
+        .get_or_init(|| DeviceLibrary::load(&workspace_root.join("devices")))
+        .clone()
+}
+
+fn diagnostics_failure(stage: &str, issues: Vec<PlcDiagnosticIssue>) -> PlcDiagnosticsResponse {
+    PlcDiagnosticsResponse {
+        valid: false,
+        stage: stage.to_string(),
+        errors: error_messages(&issues),
+        issues,
+        summary: PlcDiagnosticsSummary::default(),
+    }
+}
+
+fn error_messages(issues: &[PlcDiagnosticIssue]) -> Vec<String> {
+    issues
+        .iter()
+        .filter(|issue| issue.severity == "error")
+        .map(|issue| issue.message.clone())
+        .collect()
+}
+
+fn topology_gate_to_issues(
+    stage: &str,
+    error: TopologySemanticGateError,
+) -> Vec<PlcDiagnosticIssue> {
+    error
+        .issues
+        .into_iter()
+        .map(|issue| PlcDiagnosticIssue {
+            severity: "error".to_string(),
+            stage: stage.to_string(),
+            message: issue.message,
+            line: issue.line.max(1),
+            column: 1,
+            code: Some(issue.code.as_str().to_string()),
+            suggestion: Some(issue.suggestion),
+        })
+        .collect()
+}
+
+fn plc_error_to_issue(stage: &str, error: PlcError) -> PlcDiagnosticIssue {
+    let code = match &error {
+        PlcError::ParseError { .. } => "parse",
+        PlcError::SemanticError { .. } => "semantic",
+        PlcError::UndefinedReference { .. } => "undefined_reference",
+        PlcError::TypeMismatch { .. } => "type_mismatch",
+        PlcError::DuplicateDefinition { .. } => "duplicate_definition",
+    };
+    PlcDiagnosticIssue {
+        severity: "error".to_string(),
+        stage: stage.to_string(),
+        message: error.to_string(),
+        line: error.line().max(1),
+        column: error.column().max(1),
+        code: Some(code.to_string()),
+        suggestion: None,
+    }
+}
+
+fn verification_issue_to_diagnostic(issue: VerificationIssue) -> PlcDiagnosticIssue {
+    let mut message = issue.reason;
+    if !issue.details.is_empty() {
+        message.push_str(": ");
+        message.push_str(&issue.details.join("; "));
+    }
+    PlcDiagnosticIssue {
+        severity: "error".to_string(),
+        stage: "verification".to_string(),
+        message,
+        line: issue.line.max(1),
+        column: 1,
+        code: Some(issue.checker),
+        suggestion: Some(issue.suggestion),
+    }
+}
+
+fn verification_warning_issues(
+    summary: &rust_plc::verification::VerificationSummary,
+) -> Vec<PlcDiagnosticIssue> {
+    let mut issues = Vec::new();
+    collect_checker_warnings("safety", &summary.safety.warnings, &mut issues);
+    collect_checker_warnings("liveness", &summary.liveness.warnings, &mut issues);
+    collect_checker_warnings("timing", &summary.timing.warnings, &mut issues);
+    collect_checker_warnings("causality", &summary.causality.warnings, &mut issues);
+    issues
+}
+
+fn collect_checker_warnings(
+    stage: &str,
+    warnings: &[rust_plc::verification::WarningEntry],
+    issues: &mut Vec<PlcDiagnosticIssue>,
+) {
+    for warning in warnings {
+        let severity = match &warning.level {
+            WarningLevel::Error => "error",
+            WarningLevel::Warn => "warning",
+            WarningLevel::Info => "info",
+        };
+        issues.push(PlcDiagnosticIssue {
+            severity: severity.to_string(),
+            stage: format!("verification.{stage}"),
+            message: warning.message.clone(),
+            line: 1,
+            column: 1,
+            code: warning.code.clone(),
+            suggestion: None,
+        });
+    }
+}
+
+fn constraint_count(constraints: &rust_plc::ir::ConstraintSet) -> usize {
+    constraints.safety.len()
+        + constraints.timing.len()
+        + constraints.causality.len()
+        + constraints.semantic_resources.len()
+        + constraints.resource_claims.len()
+        + constraints.workpiece_types.len()
+        + constraints.workpiece_sites.len()
+        + constraints.workpiece_holders.len()
+        + constraints.workpiece_carriers.len()
 }
 
 async fn parse_plc_topology(
@@ -683,14 +1970,14 @@ async fn get_scenario(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    let json_path = scenario_path_for_id(&state.workspace_root, &id);
+    let json_path = scenario_path_for_id(&state.workspace_root, &id).map_err(bad_request)?;
     if json_path.exists() {
         return read_json_file(&json_path);
     }
 
-    let legacy_yaml = state
-        .workspace_root
-        .join(format!("examples/{id}_scenario.yaml"));
+    let legacy_yaml =
+        workspace_path_for_id(&state.workspace_root, "examples", &id, "_scenario.yaml")
+            .map_err(bad_request)?;
     if legacy_yaml.exists() {
         let content = std::fs::read_to_string(&legacy_yaml).map_err(internal_error)?;
         return Ok(Json(serde_json::json!({
@@ -716,7 +2003,8 @@ async fn save_scenario(
     Path(id): Path<String>,
     Json(payload): Json<Value>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    let path = scenario_path_for_id(&state.workspace_root, &id);
+    validate_scenario_limits(&payload).map_err(bad_request)?;
+    let path = scenario_path_for_id(&state.workspace_root, &id).map_err(bad_request)?;
     write_json_pretty(&path, &payload).map_err(internal_error)?;
     Ok(Json(serde_json::json!({
         "saved": true,
@@ -725,6 +2013,17 @@ async fn save_scenario(
 }
 
 async fn validate_scenario(Json(payload): Json<Value>) -> Json<Value> {
+    if let Err(message) = validate_scenario_limits(&payload) {
+        return Json(serde_json::json!({
+            "valid": false,
+            "errors": [message],
+            "issues": [{
+                "code": "WEB-SCENARIO-LIMIT",
+                "path": "$",
+                "message": message
+            }]
+        }));
+    }
     match parse_component_scenario_value(&payload) {
         Ok(_) => Json(serde_json::json!({ "valid": true, "errors": [], "issues": [] })),
         Err(err) => {
@@ -753,7 +2052,13 @@ async fn trigger_no_board(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<TriggerRunRequest>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    let run_id = format!("run-{}", now_ms());
+    validate_run_request(&state.workspace_root, &payload)?;
+    let permit = state
+        .run_semaphore
+        .clone()
+        .try_acquire_owned()
+        .map_err(|_| too_many_requests("run concurrency limit reached"))?;
+    let run_id = new_run_id("run");
     let triggered_at_ms = now_ms();
     let triggered_by = payload
         .triggered_by
@@ -771,6 +2076,10 @@ async fn trigger_no_board(
 
     {
         let mut runs = state.runs.write().await;
+        prune_run_records(&mut runs);
+        if runs.len() >= MAX_RUN_RECORDS {
+            return Err(too_many_requests("run record limit reached"));
+        }
         runs.insert(
             run_id.clone(),
             RunRecord {
@@ -794,12 +2103,13 @@ async fn trigger_no_board(
     let task_payload = payload.clone();
     let task_run_id = run_id.clone();
     tokio::spawn(async move {
+        let _permit = permit;
         if let Err(err) = execute_run(task_state.clone(), task_run_id.clone(), task_payload).await {
             error!("run {} failed: {}", task_run_id, err);
             let mut runs = task_state.runs.write().await;
             if let Some(run) = runs.get_mut(&task_run_id) {
                 run.status = "fail".to_string();
-                run.failure_summary = Some(err);
+                run.failure_summary = Some(public_command_error(&task_state.workspace_root, &err));
             }
         }
     });
@@ -812,21 +2122,32 @@ async fn execute_run(
     run_id: String,
     payload: TriggerRunRequest,
 ) -> Result<(), String> {
-    let out_dir = state.workspace_root.join("out/web_runs").join(&run_id);
+    let out_dir = workspace_output_root(&state.workspace_root)?
+        .join("web_runs")
+        .join(&run_id);
     std::fs::create_dir_all(&out_dir)
         .map_err(|err| format!("failed to create run output directory: {err}"))?;
 
     let scenario_file = payload
         .scenario_file
-        .clone()
-        .ok_or_else(|| "scenario_file is required".to_string())?;
+        .as_deref()
+        .ok_or_else(|| "scenario_file is required".to_string())
+        .and_then(|path| resolve_workspace_input(&state.workspace_root, path))?
+        .display()
+        .to_string();
 
     let mut record_updates = RunArtifacts::default();
     let mut status = "fail".to_string();
     let mut failure_summary: Option<String> = None;
     let parsed_tick_ms = parse_tick_ms_from_scenario(&state.workspace_root, &payload.scenario_file);
 
-    if let Some(topology_file) = payload.topology_file.clone() {
+    if let Some(topology_file) = payload
+        .topology_file
+        .as_deref()
+        .map(|path| resolve_workspace_input(&state.workspace_root, path))
+        .transpose()?
+        .map(|path| path.display().to_string())
+    {
         let trace_path = out_dir.join("component_trace.jsonl");
         let fault_audit_path = out_dir.join("fault_audit.jsonl");
         let diagnosis_path = out_dir.join("component_diagnosis.json");
@@ -849,7 +2170,7 @@ async fn execute_run(
             "json".to_string(),
         ];
 
-        let command = run_rust_plc(&state.workspace_root, &args).await?;
+        let command = run_rust_plc(&state, &args).await?;
         let output_json = serde_json::from_str::<Value>(&command.stdout).ok();
 
         if command.success
@@ -861,7 +2182,7 @@ async fn execute_run(
         {
             status = "pass".to_string();
         } else {
-            failure_summary = Some(first_failure_message(&command.stderr, &command.stdout));
+            failure_summary = Some(public_command_failure(&state.workspace_root, &command));
         }
 
         record_updates.trace = Some(artifact_href(&state.workspace_root, &trace_path));
@@ -880,8 +2201,11 @@ async fn execute_run(
     } else {
         let plc_file = payload
             .plc_file
-            .clone()
-            .ok_or_else(|| "plc_file is required for no-board-gate mode".to_string())?;
+            .as_deref()
+            .ok_or_else(|| "plc_file is required for no-board-gate mode".to_string())
+            .and_then(|path| resolve_workspace_input(&state.workspace_root, path))?
+            .display()
+            .to_string();
 
         let args = vec![
             "no-board-gate".to_string(),
@@ -894,7 +2218,7 @@ async fn execute_run(
             "json".to_string(),
         ];
 
-        let command = run_rust_plc(&state.workspace_root, &args).await?;
+        let command = run_rust_plc(&state, &args).await?;
         let output_json = serde_json::from_str::<Value>(&command.stdout).ok();
 
         if command.success
@@ -906,26 +2230,26 @@ async fn execute_run(
         {
             status = "pass".to_string();
         } else {
-            failure_summary = Some(first_failure_message(&command.stderr, &command.stdout));
+            failure_summary = Some(public_command_failure(&state.workspace_root, &command));
         }
 
         if let Some(v) = output_json {
             record_updates.trace = v
                 .get("sil_trace")
                 .and_then(Value::as_str)
-                .map(|path| artifact_href_any(&state.workspace_root, path));
+                .and_then(|path| artifact_href_any(&state.workspace_root, path));
             record_updates.diff = v
                 .get("diff_report")
                 .and_then(Value::as_str)
-                .map(|path| artifact_href_any(&state.workspace_root, path));
+                .and_then(|path| artifact_href_any(&state.workspace_root, path));
             record_updates.timing = v
                 .get("timing_report")
                 .and_then(Value::as_str)
-                .map(|path| artifact_href_any(&state.workspace_root, path));
+                .and_then(|path| artifact_href_any(&state.workspace_root, path));
             record_updates.diagnosis = v
                 .get("diagnosis_report")
                 .and_then(Value::as_str)
-                .map(|path| artifact_href_any(&state.workspace_root, path));
+                .and_then(|path| artifact_href_any(&state.workspace_root, path));
         }
 
         // Replay needs per-tick IO snapshots, while no-board-gate primarily exports event traces.
@@ -942,7 +2266,7 @@ async fn execute_run(
             "--io-snapshot-out".to_string(),
             io_snapshot_path.display().to_string(),
         ];
-        let replay_command = run_rust_plc(&state.workspace_root, &replay_args).await?;
+        let replay_command = run_rust_plc(&state, &replay_args).await?;
         if !replay_command.success {
             info!(
                 "run {} replay snapshot generation failed: {}",
@@ -952,7 +2276,7 @@ async fn execute_run(
         }
 
         if let Some(geometry_href) = generate_geometry_for_run(
-            &state.workspace_root,
+            &state,
             &out_dir,
             &payload.plc_file,
             record_updates.trace.as_deref(),
@@ -1015,13 +2339,28 @@ async fn export_geometry(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<GeometryExportRequest>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    let export_id = format!("geometry-{}", now_ms());
-    let out_dir = state.workspace_root.join("out/web_geometry");
+    resolve_workspace_input(&state.workspace_root, &payload.plc_file).map_err(bad_request)?;
+    for reference in [payload.trace.as_deref(), payload.intent_report.as_deref()]
+        .into_iter()
+        .flatten()
+    {
+        resolve_artifact_reference(&state.workspace_root, reference)
+            .ok_or_else(|| bad_request("invalid artifact reference"))?;
+    }
+    let _permit = state
+        .run_semaphore
+        .clone()
+        .try_acquire_owned()
+        .map_err(|_| too_many_requests("run concurrency limit reached"))?;
+    let export_id = new_run_id("geometry");
+    let out_dir = workspace_output_root(&state.workspace_root)
+        .map_err(internal_error)?
+        .join("web_geometry");
     std::fs::create_dir_all(&out_dir).map_err(internal_error)?;
     let out_path = out_dir.join(format!("{export_id}.json"));
 
     let geometry_href = generate_geometry_artifact(
-        &state.workspace_root,
+        &state,
         &out_path,
         &payload.plc_file,
         payload.trace.as_deref(),
@@ -1161,7 +2500,7 @@ fn preferred_replay_trace_path(trace_path: &StdPath) -> PathBuf {
 }
 
 async fn generate_geometry_for_run(
-    workspace_root: &StdPath,
+    state: &Arc<AppState>,
     out_dir: &StdPath,
     plc_file: &Option<String>,
     trace_href: Option<&str>,
@@ -1172,38 +2511,31 @@ async fn generate_geometry_for_run(
     };
 
     let out_path = out_dir.join("geometry.json");
-    generate_geometry_artifact(
-        workspace_root,
-        &out_path,
-        plc_file,
-        trace_href,
-        intent_report_href,
-    )
-    .await
+    generate_geometry_artifact(state, &out_path, plc_file, trace_href, intent_report_href).await
 }
 
 async fn generate_geometry_artifact(
-    workspace_root: &StdPath,
+    state: &Arc<AppState>,
     out_path: &StdPath,
     plc_file: &str,
     trace_href: Option<&str>,
     intent_report_href: Option<&str>,
 ) -> Result<Option<String>, String> {
     let args = build_geometry_export_args(
-        workspace_root,
+        &state.workspace_root,
         out_path,
         plc_file,
         trace_href,
         intent_report_href,
     );
-    let command = run_rust_plc(workspace_root, &args).await?;
+    let command = run_rust_plc(state, &args).await?;
     if !command.success {
-        return Err(first_failure_message(&command.stderr, &command.stdout));
+        return Err(public_command_failure(&state.workspace_root, &command));
     }
     if !out_path.exists() {
         return Ok(None);
     }
-    Ok(Some(artifact_href(workspace_root, out_path)))
+    Ok(Some(artifact_href(&state.workspace_root, out_path)))
 }
 
 fn build_geometry_export_args(
@@ -1215,9 +2547,13 @@ fn build_geometry_export_args(
 ) -> Vec<String> {
     let mut args = vec![
         "geometry-export".to_string(),
-        resolve_relative_or_absolute(workspace_root, plc_file)
-            .display()
-            .to_string(),
+        (if is_safe_relative_path(plc_file) {
+            workspace_root.join(plc_file)
+        } else {
+            workspace_root.join("__invalid_web_input__")
+        })
+        .display()
+        .to_string(),
         "--out".to_string(),
         out_path.display().to_string(),
         "--output".to_string(),
@@ -1380,86 +2716,134 @@ async fn ack_alarm(Path(id): Path<String>, Json(payload): Json<AckAlarmRequest>)
     }))
 }
 
-async fn run_rust_plc(workspace_root: &StdPath, args: &[String]) -> Result<CommandOutput, String> {
-    let bin_name = if cfg!(windows) {
-        "rust_plc.exe"
-    } else {
-        "rust_plc"
-    };
-    let bin_path = workspace_root.join("target/debug").join(bin_name);
-
-    let output = if bin_path.exists() {
-        info!("run {:?} {:?}", bin_path, args);
-        Command::new(&bin_path)
-            .args(args)
-            .current_dir(workspace_root)
-            .output()
-            .await
-            .map_err(|err| format!("failed to run rust_plc binary: {err}"))?
-    } else {
-        info!("run cargo {:?}", args);
-        let mut cargo_args = vec!["run".to_string(), "--quiet".to_string(), "--".to_string()];
-        cargo_args.extend(args.iter().cloned());
-        Command::new("cargo")
-            .args(cargo_args)
-            .current_dir(workspace_root)
-            .output()
-            .await
-            .map_err(|err| format!("failed to run cargo command: {err}"))?
-    };
-
-    Ok(CommandOutput {
-        success: output.status.success(),
-        stdout: String::from_utf8_lossy(&output.stdout).to_string(),
-        stderr: String::from_utf8_lossy(&output.stderr).to_string(),
-    })
-}
-
-#[derive(Debug)]
-struct CommandOutput {
-    success: bool,
-    stdout: String,
-    stderr: String,
-}
-
-fn first_failure_message(stderr: &str, stdout: &str) -> String {
-    if let Some(line) = stderr.lines().find(|line| !line.trim().is_empty()) {
-        return line.trim().to_string();
-    }
-    if let Some(line) = stdout.lines().find(|line| !line.trim().is_empty()) {
-        return line.trim().to_string();
-    }
-    "command failed without details".to_string()
-}
-
 fn parse_tick_ms_from_scenario(workspace_root: &StdPath, scenario: &Option<String>) -> Option<u64> {
     let raw = scenario.as_ref()?;
-    let path = resolve_relative_or_absolute(workspace_root, raw);
-    let text = std::fs::read_to_string(path).ok()?;
-    let value = serde_json::from_str::<Value>(&text).ok()?;
+    let path = resolve_workspace_input(workspace_root, raw).ok()?;
+    let value = read_scenario_value(&path).ok()?;
     value.get("tick_ms").and_then(Value::as_u64)
 }
 
-fn topology_path_for_id(workspace_root: &StdPath, id: &str) -> PathBuf {
+fn topology_path_for_id(workspace_root: &StdPath, id: &str) -> Result<PathBuf, String> {
     if id == "component_model" {
-        workspace_root.join("examples/component_model/topology.json")
+        resolve_workspace_output_path(workspace_root, "examples/component_model/topology.json")
     } else {
-        workspace_root.join(format!("examples/{id}.topology.json"))
+        workspace_path_for_id(workspace_root, "examples", id, ".topology.json")
     }
 }
 
-fn scenario_path_for_id(workspace_root: &StdPath, id: &str) -> PathBuf {
+fn scenario_path_for_id(workspace_root: &StdPath, id: &str) -> Result<PathBuf, String> {
     if id == "component_model" {
-        workspace_root.join("examples/component_model/scenario_normal.json")
+        resolve_workspace_output_path(
+            workspace_root,
+            "examples/component_model/scenario_normal.json",
+        )
     } else {
-        workspace_root.join(format!("examples/{id}.scenario.json"))
+        workspace_path_for_id(workspace_root, "examples", id, ".scenario.json")
+    }
+}
+
+fn workspace_path_for_id(
+    workspace_root: &StdPath,
+    directory: &str,
+    id: &str,
+    suffix: &str,
+) -> Result<PathBuf, String> {
+    if !is_safe_resource_id(id) {
+        return Err("invalid resource id".to_string());
+    }
+    resolve_workspace_output_path(workspace_root, &format!("{directory}/{id}{suffix}"))
+}
+
+fn is_safe_resource_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= 128
+        && id
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-'))
+}
+
+fn validate_run_request(
+    workspace_root: &StdPath,
+    payload: &TriggerRunRequest,
+) -> Result<(), (StatusCode, Json<Value>)> {
+    let scenario = payload
+        .scenario_file
+        .as_deref()
+        .ok_or_else(|| bad_request("scenario_file is required"))?;
+    let scenario_path = resolve_workspace_input(workspace_root, scenario).map_err(bad_request)?;
+    let scenario_value = read_scenario_value(&scenario_path).map_err(bad_request)?;
+    validate_scenario_limits(&scenario_value).map_err(bad_request)?;
+
+    if let Some(plc_file) = payload.plc_file.as_deref() {
+        resolve_workspace_input(workspace_root, plc_file).map_err(bad_request)?;
+    }
+    if let Some(topology_file) = payload.topology_file.as_deref() {
+        resolve_workspace_input(workspace_root, topology_file).map_err(bad_request)?;
+    }
+    if payload.topology_file.is_none() && payload.plc_file.is_none() {
+        return Err(bad_request("plc_file or topology_file is required"));
+    }
+    Ok(())
+}
+
+fn read_scenario_value(path: &StdPath) -> Result<Value, String> {
+    let text = read_text_file_limited(path, MAX_INPUT_FILE_BYTES)
+        .map_err(|_| "scenario file could not be read".to_string())?;
+    serde_json::from_str::<Value>(&text)
+        .or_else(|_| serde_yaml::from_str::<Value>(&text))
+        .map_err(|_| "scenario file must contain valid JSON or YAML".to_string())
+}
+
+fn validate_scenario_limits(payload: &Value) -> Result<(), String> {
+    let tick_ms = payload.get("tick_ms").and_then(Value::as_u64);
+    let duration_ms = payload.get("duration_ms").and_then(Value::as_u64);
+    if let Some(tick_ms) = tick_ms {
+        if !(MIN_SCENARIO_TICK_MS..=MAX_SCENARIO_TICK_MS).contains(&tick_ms) {
+            return Err(format!(
+                "tick_ms must be between {MIN_SCENARIO_TICK_MS} and {MAX_SCENARIO_TICK_MS}"
+            ));
+        }
+    }
+    if let Some(duration_ms) = duration_ms {
+        if duration_ms > MAX_SCENARIO_DURATION_MS {
+            return Err(format!(
+                "duration_ms must not exceed {MAX_SCENARIO_DURATION_MS}"
+            ));
+        }
+    }
+    if let (Some(tick_ms), Some(duration_ms)) = (tick_ms, duration_ms) {
+        let ticks = duration_ms.saturating_add(tick_ms - 1) / tick_ms;
+        if ticks > MAX_SCENARIO_TICKS {
+            return Err(format!(
+                "scenario must not exceed {MAX_SCENARIO_TICKS} ticks"
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn prune_run_records(runs: &mut BTreeMap<String, RunRecord>) {
+    while runs.len() >= MAX_RUN_RECORDS {
+        let Some(oldest_id) = runs
+            .values()
+            .filter(|run| run.status != "running")
+            .min_by_key(|run| run.triggered_at_ms)
+            .map(|run| run.run_id.clone())
+        else {
+            break;
+        };
+        runs.remove(&oldest_id);
     }
 }
 
 fn display_rel(workspace_root: &StdPath, path: &StdPath) -> String {
-    path.strip_prefix(workspace_root)
-        .map(|p| p.to_string_lossy().to_string())
-        .unwrap_or_else(|_| path.to_string_lossy().to_string())
+    let root = workspace_root
+        .canonicalize()
+        .unwrap_or_else(|_| workspace_root.to_path_buf());
+    let path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    path.strip_prefix(root)
+        .map(|p| p.to_string_lossy().replace('\\', "/"))
+        .unwrap_or_else(|_| path.to_string_lossy().replace('\\', "/"))
 }
 
 fn write_json_pretty(path: &StdPath, payload: &Value) -> Result<(), String> {
@@ -1479,9 +2863,8 @@ fn read_json_file(path: &StdPath) -> Result<Json<Value>, (StatusCode, Json<Value
 }
 
 fn read_json_value(path: &StdPath) -> Result<Value, (StatusCode, Json<Value>)> {
-    let text = std::fs::read_to_string(path).map_err(internal_error)?;
-    serde_json::from_str::<Value>(&text)
-        .map_err(|err| bad_request(format!("invalid JSON {}: {err}", path.display())))
+    let text = read_text_file_limited(path, MAX_ARTIFACT_BYTES).map_err(internal_error)?;
+    serde_json::from_str::<Value>(&text).map_err(|_| bad_request("file contains invalid JSON"))
 }
 
 fn normalize_topology_tags_in_place(value: &mut Value) {
@@ -1545,38 +2928,36 @@ fn normalize_tag_dimension(source: Option<&Map<String, Value>>, key: &str) -> Ve
         .unwrap_or_default()
 }
 
-fn artifact_href(workspace_root: &StdPath, path: &StdPath) -> String {
-    let rel = path
-        .strip_prefix(workspace_root.join("out"))
-        .map(|p| p.to_string_lossy().replace('\\', "/"));
-    match rel {
-        Ok(rel) => format!("/artifacts/{rel}"),
-        Err(_) => path.to_string_lossy().to_string(),
+async fn get_artifact(
+    State(state): State<Arc<AppState>>,
+    Path(path): Path<String>,
+) -> Result<Response, (StatusCode, Json<Value>)> {
+    let reference = format!("/artifacts/{path}");
+    let artifact = resolve_artifact_reference(&state.workspace_root, &reference)
+        .ok_or_else(|| not_found("artifact not found"))?;
+    let metadata = std::fs::metadata(&artifact).map_err(|_| not_found("artifact not found"))?;
+    if !metadata.is_file() {
+        return Err(not_found("artifact not found"));
     }
-}
-
-fn artifact_href_any(workspace_root: &StdPath, raw_path: &str) -> String {
-    let path = resolve_relative_or_absolute(workspace_root, raw_path);
-    artifact_href(workspace_root, &path)
-}
-
-fn resolve_artifact_reference(workspace_root: &StdPath, reference: &str) -> Option<PathBuf> {
-    if let Some(rel) = reference.strip_prefix("/artifacts/") {
-        return Some(workspace_root.join("out").join(rel));
+    if metadata.len() > MAX_ARTIFACT_BYTES {
+        return Err((
+            StatusCode::PAYLOAD_TOO_LARGE,
+            Json(serde_json::json!({ "error": "artifact exceeds download limit" })),
+        ));
     }
-    if reference.starts_with('/') || reference.contains(":\\") {
-        return Some(PathBuf::from(reference));
-    }
-    Some(workspace_root.join(reference))
-}
-
-fn resolve_relative_or_absolute(workspace_root: &StdPath, raw: &str) -> PathBuf {
-    let path = PathBuf::from(raw);
-    if path.is_absolute() {
-        path
-    } else {
-        workspace_root.join(path)
-    }
+    let body = std::fs::read(&artifact).map_err(internal_error)?;
+    let content_type = match artifact.extension().and_then(|value| value.to_str()) {
+        Some("json") | Some("jsonl") => "application/json",
+        Some("txt") | Some("log") => "text/plain; charset=utf-8",
+        Some("csv") => "text/csv; charset=utf-8",
+        _ => "application/octet-stream",
+    };
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, content_type)
+        .header(header::X_CONTENT_TYPE_OPTIONS, "nosniff")
+        .body(Body::from(body))
+        .map_err(internal_error)
 }
 
 fn infer_alarm_severity(run: &RunRecord) -> &'static str {
@@ -1592,6 +2973,10 @@ fn now_ms() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)
         .unwrap_or(0)
+}
+
+fn new_run_id(prefix: &str) -> String {
+    format!("{prefix}-{}", Uuid::new_v4())
 }
 
 fn iso_like_timestamp(ms: u64) -> String {
@@ -1694,590 +3079,24 @@ fn not_found(message: impl Into<String>) -> (StatusCode, Json<Value>) {
     )
 }
 
+fn too_many_requests(message: impl Into<String>) -> (StatusCode, Json<Value>) {
+    (
+        StatusCode::TOO_MANY_REQUESTS,
+        Json(serde_json::json!({
+            "error": message.into()
+        })),
+    )
+}
+
 fn internal_error<E: std::fmt::Display>(err: E) -> (StatusCode, Json<Value>) {
+    error!("internal web server error: {}", err);
     (
         StatusCode::INTERNAL_SERVER_ERROR,
         Json(serde_json::json!({
-            "error": err.to_string()
+            "error": "internal server error"
         })),
     )
 }
 
 #[cfg(test)]
-mod tests {
-    use super::{
-        build_geometry_export_args, get_geometry, get_keypoints, get_trace, get_trace_range,
-        normalize_topology_tags_in_place, parse_plc_topology, resolve_artifact_reference, AppState,
-        ParsePlcTopologyRequest, RunArtifacts, RunRecord, TickRangeQuery, TAGS_SCHEMA_VERSION,
-    };
-    use axum::extract::{Path, Query, State};
-    use axum::response::Json;
-    use serde_json::{json, Value};
-    use std::fs;
-    use std::path::PathBuf;
-    use std::sync::Arc;
-    use std::time::{SystemTime, UNIX_EPOCH};
-    use tokio::sync::RwLock;
-
-    fn find_component<'a>(payload: &'a Value, id: &str) -> &'a Value {
-        payload["components"]
-            .as_array()
-            .and_then(|components| {
-                components
-                    .iter()
-                    .find(|component| component.get("id").and_then(Value::as_str) == Some(id))
-            })
-            .expect("component should exist")
-    }
-
-    fn has_detects_connection(payload: &Value, from: &str, to: &str, signal: &str) -> bool {
-        payload["connections"]
-            .as_array()
-            .map(|connections| {
-                connections.iter().any(|connection| {
-                    connection.get("relation").and_then(Value::as_str) == Some("detects")
-                        && connection.get("from").and_then(Value::as_str) == Some(from)
-                        && connection.get("to").and_then(Value::as_str) == Some(to)
-                        && connection.get("signal").and_then(Value::as_str) == Some(signal)
-                        && connection.get("from_port").and_then(Value::as_str) == Some(signal)
-                })
-            })
-            .unwrap_or(false)
-    }
-
-    fn temp_workspace_root(label: &str) -> PathBuf {
-        let unique = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("system time should be after unix epoch")
-            .as_nanos();
-        let root = std::env::temp_dir().join(format!("rustplc-web-server-{label}-{unique}"));
-        fs::create_dir_all(&root).expect("temp workspace root should be created");
-        root
-    }
-
-    #[test]
-    fn topology_tag_normalization_adds_schema_and_default_dimensions() {
-        let mut payload = json!({
-            "schema_version": 1,
-            "component_library": { "schema_version": 1, "components": [] },
-            "components": [
-                {
-                    "id": "x0",
-                    "component_id": "sensor",
-                    "params": { "name": "x0" }
-                }
-            ],
-            "connections": []
-        });
-        normalize_topology_tags_in_place(&mut payload);
-        assert_eq!(
-            payload.get("tags_schema_version").and_then(|v| v.as_u64()),
-            Some(TAGS_SCHEMA_VERSION)
-        );
-        assert_eq!(
-            payload["components"][0]["params"]["tags"],
-            json!({
-                "functional_group": [],
-                "danger_level": [],
-                "location_group": []
-            })
-        );
-    }
-
-    #[test]
-    fn topology_tag_normalization_filters_non_string_values() {
-        let mut payload = json!({
-            "components": [
-                {
-                    "id": "x0",
-                    "component_id": "sensor",
-                    "params": {
-                        "tags": {
-                            "functional_group": ["press", 1, true],
-                            "danger_level": ["high"],
-                            "location_group": ["line_a/cell_2/station_7", null]
-                        }
-                    }
-                }
-            ]
-        });
-        normalize_topology_tags_in_place(&mut payload);
-        assert_eq!(
-            payload["components"][0]["params"]["tags"],
-            json!({
-                "functional_group": ["press"],
-                "danger_level": ["high"],
-                "location_group": ["line_a/cell_2/station_7"]
-            })
-        );
-    }
-
-    #[tokio::test]
-    async fn parse_plc_topology_returns_relation_port_and_tag_metadata() {
-        let plc = r#"
-[topology]
-device plc_main: plc {
-    purpose: "fixture plc"
-    model_ref: rp2040_softplc
-}
-device valve_A: solenoid_valve {
-    purpose: "fixture valve"
-    ports: [coil:digital:consumer, feedback:logical:producer]
-    tags: {
-        functional_group: [actuation]
-        danger_level: [high]
-        location_group: ["line_a/cell_2/station_7"]
-    }
-}
-device sensor_A: sensor {
-    purpose: "fixture sensor"
-    ports: [sense:logical:consumer, out:digital:producer]
-}
-
-relation { from: plc_main.Y0, to: valve_A.coil, via: driven_by }
-relation { from: valve_A.feedback, to: sensor_A.sense, via: detects }
-relation { from: sensor_A.out, to: plc_main.X0, via: reports_to }
-
-[constraints]
-
-[tasks]
-task main:
-    step idle:
-        action: log "ok"
-"#;
-
-        let response = parse_plc_topology(Json(ParsePlcTopologyRequest {
-            content: plc.to_string(),
-        }))
-        .await
-        .expect("parse-plc API should succeed")
-        .0;
-        assert!(response.get("semantic_gate").is_some());
-
-        let valve = find_component(&response, "valve_A");
-        assert_eq!(
-            valve["params"]["ports"],
-            json!([
-                {"id": "coil", "type": "digital", "role": "consumer"},
-                {"id": "feedback", "type": "logical", "role": "producer"}
-            ])
-        );
-        assert_eq!(
-            valve["params"]["tags"],
-            json!({
-                "functional_group": ["actuation"],
-                "danger_level": ["high"],
-                "location_group": ["line_a/cell_2/station_7"]
-            })
-        );
-        let detects = response["connections"]
-            .as_array()
-            .and_then(|connections| {
-                connections.iter().find(|connection| {
-                    connection.get("relation").and_then(Value::as_str) == Some("detects")
-                        && connection.get("from").and_then(Value::as_str) == Some("valve_A")
-                        && connection.get("to").and_then(Value::as_str) == Some("sensor_A")
-                })
-            })
-            .expect("detects connection should exist");
-        assert_eq!(detects["signal"], json!("feedback"));
-        assert_eq!(detects["from_port"], json!("feedback"));
-        assert_eq!(detects["to_port"], json!("sense"));
-    }
-
-    #[tokio::test]
-    async fn parse_plc_topology_keeps_extended_and_retracted_edges_distinct() {
-        let plc = r#"
-[topology]
-device plc_main: plc {
-    purpose: "topology parse fixture controller"
-    model_ref: rp2040_softplc
-}
-
-device cyl_A: cylinder {
-    purpose: "fixture actuator"
-}
-
-device cyl_B: cylinder {
-    purpose: "fixture actuator"
-}
-
-device sensor_A_ext: sensor {
-    purpose: "fixture sensor"
-}
-
-device sensor_A_ret: sensor {
-    purpose: "fixture sensor"
-}
-
-device sensor_B_ext: sensor {
-    purpose: "fixture sensor"
-}
-
-device sensor_B_ret: sensor {
-    purpose: "fixture sensor"
-}
-
-relation { from: cyl_A.extended, to: sensor_A_ext.sense, via: detects }
-relation { from: cyl_A.retracted, to: sensor_A_ret.sense, via: detects }
-relation { from: cyl_B.extended, to: sensor_B_ext.sense, via: detects }
-relation { from: cyl_B.retracted, to: sensor_B_ret.sense, via: detects }
-
-[constraints]
-
-[tasks]
-task main:
-    step idle:
-        action: log "ok"
-"#
-        .to_string();
-
-        let response = parse_plc_topology(Json(ParsePlcTopologyRequest { content: plc }))
-            .await
-            .expect("parse-plc API should parse fixture")
-            .0;
-        assert_eq!(
-            response["semantic_gate"]["valid"],
-            json!(true),
-            "fixture should pass topology semantic gate"
-        );
-
-        assert!(
-            has_detects_connection(&response, "cyl_A", "sensor_A_ext", "extended"),
-            "should keep cyl_A.extended detects edge"
-        );
-        assert!(
-            has_detects_connection(&response, "cyl_A", "sensor_A_ret", "retracted"),
-            "should keep cyl_A.retracted detects edge"
-        );
-        assert!(
-            has_detects_connection(&response, "cyl_B", "sensor_B_ext", "extended"),
-            "should keep cyl_B.extended detects edge"
-        );
-        assert!(
-            has_detects_connection(&response, "cyl_B", "sensor_B_ret", "retracted"),
-            "should keep cyl_B.retracted detects edge"
-        );
-    }
-
-    #[test]
-    fn build_geometry_export_args_includes_optional_overlay_paths() {
-        let workspace_root = PathBuf::from("E:/workspace");
-        let out_path = workspace_root.join("out/web_runs/run-1/geometry.json");
-        let args = build_geometry_export_args(
-            &workspace_root,
-            &out_path,
-            "examples/demo.plc",
-            Some("/artifacts/web_runs/run-1/sil_trace.jsonl"),
-            Some("/artifacts/web_runs/run-1/intent_alignment/report.json"),
-        );
-
-        assert_eq!(args[0], "geometry-export");
-        assert!(
-            args.contains(
-                &workspace_root
-                    .join("examples/demo.plc")
-                    .display()
-                    .to_string()
-            ),
-            "expected absolute plc path in args: {args:?}"
-        );
-        assert!(args.contains(&"--trace".to_string()));
-        assert!(args.iter().any(|arg| {
-            PathBuf::from(arg).ends_with(PathBuf::from("out/web_runs/run-1/sil_trace.jsonl"))
-        }));
-        assert!(args.contains(&"--intent-report".to_string()));
-        assert!(args.iter().any(|arg| {
-            PathBuf::from(arg).ends_with(PathBuf::from(
-                "out/web_runs/run-1/intent_alignment/report.json",
-            ))
-        }));
-    }
-
-    #[test]
-    fn resolve_artifact_reference_understands_geometry_artifact_href() {
-        let workspace_root = PathBuf::from("E:/workspace");
-        let resolved =
-            resolve_artifact_reference(&workspace_root, "/artifacts/web_runs/run-1/geometry.json")
-                .expect("geometry artifact href should resolve");
-        assert_eq!(
-            resolved,
-            workspace_root.join("out/web_runs/run-1/geometry.json")
-        );
-    }
-
-    #[tokio::test]
-    async fn get_geometry_returns_missing_payload_when_run_has_no_geometry_artifact() {
-        let state = Arc::new(AppState {
-            workspace_root: PathBuf::from("E:/workspace"),
-            runs: Arc::new(RwLock::new(std::collections::BTreeMap::from([(
-                "run-1".to_string(),
-                RunRecord {
-                    run_id: "run-1".to_string(),
-                    status: "pass".to_string(),
-                    triggered_by: "test".to_string(),
-                    triggered_at: "0".to_string(),
-                    triggered_at_ms: 0,
-                    mode: "no_board_gate".to_string(),
-                    artifacts: RunArtifacts::default(),
-                    failure_summary: None,
-                    plc_file: Some("examples/demo.plc".to_string()),
-                    scenario_file: Some("scenarios/demo.yaml".to_string()),
-                    topology_file: None,
-                    tick_ms: Some(10),
-                },
-            )]))),
-        });
-
-        let Json(payload) = get_geometry(State(state), Path("run-1".to_string()))
-            .await
-            .expect("geometry endpoint should return a payload");
-        assert_eq!(payload["status"], json!("missing"));
-        assert_eq!(payload["artifact_kind"], json!("semantic_twin_geometry"));
-    }
-
-    #[tokio::test]
-    async fn get_trace_returns_empty_ticks_when_run_has_no_trace_artifact() {
-        let state = Arc::new(AppState {
-            workspace_root: PathBuf::from("E:/workspace"),
-            runs: Arc::new(RwLock::new(std::collections::BTreeMap::from([(
-                "run-1".to_string(),
-                RunRecord {
-                    run_id: "run-1".to_string(),
-                    status: "pass".to_string(),
-                    triggered_by: "test".to_string(),
-                    triggered_at: "0".to_string(),
-                    triggered_at_ms: 0,
-                    mode: "no_board_gate".to_string(),
-                    artifacts: RunArtifacts::default(),
-                    failure_summary: None,
-                    plc_file: Some("examples/demo.plc".to_string()),
-                    scenario_file: Some("examples/demo.scenario.json".to_string()),
-                    topology_file: None,
-                    tick_ms: Some(10),
-                },
-            )]))),
-        });
-
-        let Json(payload) = get_trace(State(state), Path("run-1".to_string()))
-            .await
-            .expect("trace endpoint should return a payload");
-        assert_eq!(payload["tick_ms"], json!(10));
-        assert_eq!(payload["ticks"], json!([]));
-    }
-
-    #[tokio::test]
-    async fn get_trace_converts_component_trace_jsonl_into_replay_ticks() {
-        let workspace_root = temp_workspace_root("component-trace");
-        let trace_path = workspace_root.join("out/web_runs/run-1/component_trace.jsonl");
-        fs::create_dir_all(trace_path.parent().expect("trace parent")).expect("trace dir");
-        fs::write(
-            &trace_path,
-            concat!(
-                "{\"tick\":0,\"components\":{\"s_start\":{\"state\":\"on\",\"component_type\":\"switch\"}}}\n",
-                "{\"tick\":1,\"components\":{\"m1\":{\"state\":\"enabled\",\"component_type\":\"stepper_pd\",\"outputs\":{\"position_steps\":42}}}}\n"
-            ),
-        )
-        .expect("component trace should be written");
-
-        let state = Arc::new(AppState {
-            workspace_root: workspace_root.clone(),
-            runs: Arc::new(RwLock::new(std::collections::BTreeMap::from([(
-                "run-1".to_string(),
-                RunRecord {
-                    run_id: "run-1".to_string(),
-                    status: "pass".to_string(),
-                    triggered_by: "test".to_string(),
-                    triggered_at: "0".to_string(),
-                    triggered_at_ms: 0,
-                    mode: "component_sim".to_string(),
-                    artifacts: RunArtifacts {
-                        trace: Some("/artifacts/web_runs/run-1/component_trace.jsonl".to_string()),
-                        ..RunArtifacts::default()
-                    },
-                    failure_summary: None,
-                    plc_file: None,
-                    scenario_file: Some(
-                        "examples/component_model/scenario_normal.json".to_string(),
-                    ),
-                    topology_file: Some("examples/component_model/topology.json".to_string()),
-                    tick_ms: Some(20),
-                },
-            )]))),
-        });
-
-        let Json(payload) = get_trace(State(state), Path("run-1".to_string()))
-            .await
-            .expect("trace endpoint should parse component trace");
-
-        assert_eq!(payload["tick_ms"], json!(20));
-        assert_eq!(payload["ticks"][0]["tick"], json!(0));
-        assert_eq!(
-            payload["ticks"][0]["component_states"]["s_start"]["state"],
-            json!("on")
-        );
-        assert_eq!(
-            payload["ticks"][1]["component_states"]["m1"]["outputs"]["position_steps"],
-            json!(42)
-        );
-    }
-
-    #[tokio::test]
-    async fn get_trace_prefers_io_snapshot_sidecar_for_sil_trace_replay() {
-        let workspace_root = temp_workspace_root("io-snapshot-replay");
-        let trace_path = workspace_root.join("out/web_runs/run-1/sil_trace.jsonl");
-        let io_snapshot_path = workspace_root.join("out/web_runs/run-1/io_snapshot.json");
-        fs::create_dir_all(trace_path.parent().expect("trace parent")).expect("trace dir");
-        fs::write(
-            &trace_path,
-            "{\"tick\":0,\"task\":0,\"from_step\":0,\"to_step\":1,\"reason\":\"action\"}\n",
-        )
-        .expect("sil trace should be written");
-        fs::write(
-            &io_snapshot_path,
-            serde_json::to_string_pretty(&json!({
-                "schema_version": 1,
-                "tick_ms": 25,
-                "ticks": [
-                    {
-                        "tick": 0,
-                        "digital_inputs": [false, true],
-                        "analog_inputs": [],
-                        "digital_outputs": [true],
-                        "analog_outputs": []
-                    },
-                    {
-                        "tick": 1,
-                        "digital_inputs": [true, true],
-                        "analog_inputs": [],
-                        "digital_outputs": [true],
-                        "analog_outputs": []
-                    }
-                ]
-            }))
-            .expect("serialize io snapshot"),
-        )
-        .expect("io snapshot should be written");
-
-        let state = Arc::new(AppState {
-            workspace_root: workspace_root.clone(),
-            runs: Arc::new(RwLock::new(std::collections::BTreeMap::from([(
-                "run-1".to_string(),
-                RunRecord {
-                    run_id: "run-1".to_string(),
-                    status: "pass".to_string(),
-                    triggered_by: "test".to_string(),
-                    triggered_at: "0".to_string(),
-                    triggered_at_ms: 0,
-                    mode: "no_board_gate".to_string(),
-                    artifacts: RunArtifacts {
-                        trace: Some("/artifacts/web_runs/run-1/sil_trace.jsonl".to_string()),
-                        ..RunArtifacts::default()
-                    },
-                    failure_summary: None,
-                    plc_file: Some("examples/demo.plc".to_string()),
-                    scenario_file: Some("examples/demo.scenario.json".to_string()),
-                    topology_file: None,
-                    tick_ms: Some(25),
-                },
-            )]))),
-        });
-
-        let Json(payload) = get_trace(State(state), Path("run-1".to_string()))
-            .await
-            .expect("trace endpoint should prefer io snapshot");
-
-        assert_eq!(payload["tick_ms"], json!(25));
-        assert_eq!(payload["ticks"][0]["digital_inputs"][1], json!(true));
-        assert_eq!(payload["ticks"][1]["tick"], json!(1));
-    }
-
-    #[tokio::test]
-    async fn get_trace_range_filters_ticks_in_jsonl_trace() {
-        let workspace_root = temp_workspace_root("trace-range");
-        let trace_path = workspace_root.join("out/web_runs/run-1/sil_trace.jsonl");
-        fs::create_dir_all(trace_path.parent().expect("trace parent")).expect("trace dir");
-        fs::write(
-            &trace_path,
-            concat!(
-                "{\"tick\":0,\"digital_inputs\":[false],\"analog_inputs\":[],\"digital_outputs\":[false],\"analog_outputs\":[]}\n",
-                "{\"tick\":1,\"digital_inputs\":[true],\"analog_inputs\":[],\"digital_outputs\":[true],\"analog_outputs\":[]}\n",
-                "{\"tick\":2,\"digital_inputs\":[false],\"analog_inputs\":[],\"digital_outputs\":[false],\"analog_outputs\":[]}\n"
-            ),
-        )
-        .expect("trace should be written");
-
-        let state = Arc::new(AppState {
-            workspace_root: workspace_root.clone(),
-            runs: Arc::new(RwLock::new(std::collections::BTreeMap::from([(
-                "run-1".to_string(),
-                RunRecord {
-                    run_id: "run-1".to_string(),
-                    status: "pass".to_string(),
-                    triggered_by: "test".to_string(),
-                    triggered_at: "0".to_string(),
-                    triggered_at_ms: 0,
-                    mode: "no_board_gate".to_string(),
-                    artifacts: RunArtifacts {
-                        trace: Some("/artifacts/web_runs/run-1/sil_trace.jsonl".to_string()),
-                        ..RunArtifacts::default()
-                    },
-                    failure_summary: None,
-                    plc_file: Some("examples/demo.plc".to_string()),
-                    scenario_file: Some("examples/demo.scenario.json".to_string()),
-                    topology_file: None,
-                    tick_ms: Some(10),
-                },
-            )]))),
-        });
-
-        let Json(payload) = get_trace_range(
-            State(state),
-            Path("run-1".to_string()),
-            Query(TickRangeQuery {
-                start: Some(1),
-                end: Some(1),
-            }),
-        )
-        .await
-        .expect("trace range endpoint should filter trace");
-
-        assert_eq!(
-            payload["ticks"].as_array().map(|ticks| ticks.len()),
-            Some(1)
-        );
-        assert_eq!(payload["ticks"][0]["tick"], json!(1));
-    }
-
-    #[tokio::test]
-    async fn get_keypoints_returns_empty_payload_when_artifact_is_missing() {
-        let state = Arc::new(AppState {
-            workspace_root: PathBuf::from("E:/workspace"),
-            runs: Arc::new(RwLock::new(std::collections::BTreeMap::from([(
-                "run-1".to_string(),
-                RunRecord {
-                    run_id: "run-1".to_string(),
-                    status: "pass".to_string(),
-                    triggered_by: "test".to_string(),
-                    triggered_at: "0".to_string(),
-                    triggered_at_ms: 0,
-                    mode: "component_sim".to_string(),
-                    artifacts: RunArtifacts::default(),
-                    failure_summary: None,
-                    plc_file: None,
-                    scenario_file: Some(
-                        "examples/component_model/scenario_normal.json".to_string(),
-                    ),
-                    topology_file: Some("examples/component_model/topology.json".to_string()),
-                    tick_ms: Some(10),
-                },
-            )]))),
-        });
-
-        let Json(payload) = get_keypoints(State(state), Path("run-1".to_string()))
-            .await
-            .expect("keypoints endpoint should return fallback payload");
-        assert_eq!(payload["tick_ms"], json!(10));
-        assert_eq!(payload["keypoints"], json!([]));
-    }
-}
+mod tests;

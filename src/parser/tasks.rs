@@ -1,13 +1,89 @@
-﻿fn parse_tasks_section(pair: Pair<Rule>) -> Result<TasksSection, PlcError> {
+fn parse_tasks_section(pair: Pair<Rule>) -> Result<TasksSection, PlcError> {
+    let mut task_templates = Vec::new();
+    let mut task_instances = Vec::new();
     let mut tasks = Vec::new();
 
     for item in pair.into_inner() {
-        if item.as_rule() == Rule::task_declaration {
-            tasks.push(parse_task_declaration(item)?);
+        match item.as_rule() {
+            Rule::task_template_declaration => {
+                task_templates.push(parse_task_template_declaration(item)?)
+            }
+            Rule::task_instance_declaration => {
+                task_instances.push(parse_task_instance_declaration(item)?)
+            }
+            Rule::task_declaration => tasks.push(parse_task_declaration(item)?),
+            _ => {}
         }
     }
 
-    Ok(TasksSection { tasks })
+    Ok(TasksSection {
+        task_templates,
+        task_instances,
+        tasks,
+    })
+}
+
+fn parse_task_template_declaration(pair: Pair<Rule>) -> Result<TaskTemplateDeclaration, PlcError> {
+    let line = line_of(&pair);
+    let mut name = None;
+    let mut params = Vec::new();
+    let mut tasks = Vec::new();
+
+    for part in pair.into_inner() {
+        match part.as_rule() {
+            Rule::identifier if name.is_none() => name = Some(part.as_str().to_string()),
+            Rule::template_param_list => {
+                params = part
+                    .into_inner()
+                    .filter(|item| item.as_rule() == Rule::identifier)
+                    .map(|item| item.as_str().to_string())
+                    .collect();
+            }
+            Rule::task_declaration => tasks.push(parse_task_declaration(part)?),
+            _ => {}
+        }
+    }
+
+    Ok(TaskTemplateDeclaration {
+        line,
+        name: name.ok_or_else(|| PlcError::parse(line, "task_template missing name"))?,
+        params,
+        tasks,
+    })
+}
+
+fn parse_task_instance_declaration(pair: Pair<Rule>) -> Result<TaskInstanceDeclaration, PlcError> {
+    let line = line_of(&pair);
+    let mut identifiers = Vec::new();
+
+    for part in pair.into_inner() {
+        match part.as_rule() {
+            Rule::identifier => identifiers.push(part.as_str().to_string()),
+            Rule::template_identifier_arg_list => identifiers.extend(
+                part.into_inner()
+                    .filter(|item| item.as_rule() == Rule::identifier)
+                    .map(|item| item.as_str().to_string()),
+            ),
+            _ => {}
+        }
+    }
+
+    if identifiers.len() < 2 {
+        return Err(PlcError::parse(
+            line,
+            "task_instance requires instance name and template name",
+        ));
+    }
+
+    let name = identifiers.remove(0);
+    let template = identifiers.remove(0);
+
+    Ok(TaskInstanceDeclaration {
+        line,
+        name,
+        template,
+        args: identifiers,
+    })
 }
 
 fn parse_task_declaration(pair: Pair<Rule>) -> Result<TaskDeclaration, PlcError> {
@@ -74,6 +150,7 @@ fn parse_step_statement(pair: Pair<Rule>) -> Result<StepStatement, PlcError> {
         Rule::effect_statement => Ok(StepStatement::Effect(parse_effect_statement_v2(pair)?)),
         Rule::wait_statement => Ok(StepStatement::Wait(parse_wait_statement(pair)?)),
         Rule::if_else_statement => Ok(parse_if_else_statement(pair)?),
+        Rule::match_statement => parse_match_statement(pair),
         Rule::delay_statement => Ok(StepStatement::Delay {
             duration_ms: parse_delay_statement(pair)?,
         }),
@@ -331,6 +408,97 @@ fn parse_if_else_statement(pair: Pair<Rule>) -> Result<StepStatement, PlcError> 
     })
 }
 
+fn parse_match_statement(pair: Pair<Rule>) -> Result<StepStatement, PlcError> {
+    let line = line_of(&pair);
+    let mut selector = None;
+    let mut cases = Vec::new();
+    let mut default = None;
+
+    for part in pair.into_inner() {
+        match part.as_rule() {
+            Rule::condition_operand => {
+                let inner = first_inner(part, line, "match selector")?;
+                selector = Some(inner.as_str().to_string());
+            }
+            Rule::match_case => cases.push(parse_match_case(part)?),
+            Rule::match_default => {
+                let goto = part
+                    .into_inner()
+                    .find(|item| item.as_rule() == Rule::goto_statement)
+                    .ok_or_else(|| PlcError::parse(line, "match default missing goto"))?;
+                default = Some(parse_goto_statement(goto)?);
+            }
+            _ => {}
+        }
+    }
+
+    if cases.len() != 1 {
+        return Err(PlcError::parse(
+            line,
+            "match currently supports exactly one case plus default",
+        ));
+    }
+
+    let case = cases
+        .into_iter()
+        .next()
+        .ok_or_else(|| PlcError::parse(line, "match requires one case"))?;
+
+    Ok(StepStatement::IfElse {
+        condition: ConditionExpression::legacy(
+            selector.ok_or_else(|| PlcError::parse(line, "match missing selector"))?,
+            ComparisonOperator::Eq,
+            case.pattern,
+        ),
+        then_goto: case.target,
+        else_goto: default.ok_or_else(|| PlcError::parse(line, "match missing default branch"))?,
+    })
+}
+
+struct ParsedMatchCase {
+    pattern: LiteralValue,
+    target: GotoDirective,
+}
+
+fn parse_match_case(pair: Pair<Rule>) -> Result<ParsedMatchCase, PlcError> {
+    let line = line_of(&pair);
+    let mut pattern = None;
+    let mut target = None;
+
+    for part in pair.into_inner() {
+        match part.as_rule() {
+            Rule::match_pattern => pattern = Some(parse_match_pattern(part)?),
+            Rule::goto_statement => target = Some(parse_goto_statement(part)?),
+            _ => {}
+        }
+    }
+
+    Ok(ParsedMatchCase {
+        pattern: pattern.ok_or_else(|| PlcError::parse(line, "match case missing pattern"))?,
+        target: target.ok_or_else(|| PlcError::parse(line, "match case missing goto"))?,
+    })
+}
+
+fn parse_match_pattern(pair: Pair<Rule>) -> Result<LiteralValue, PlcError> {
+    let line = line_of(&pair);
+    let value = first_inner(pair, line, "match pattern")?;
+
+    match value.as_rule() {
+        Rule::boolean_value => Ok(LiteralValue::Boolean(value.as_str() == "true")),
+        Rule::number => {
+            let parsed = parse_finite_f64(value.as_str(), line, "match pattern")
+                .map_err(|_| PlcError::parse(line, "match number pattern parse failed"))?;
+            Ok(LiteralValue::Number(parsed))
+        }
+        Rule::string_literal => Ok(LiteralValue::String(parse_string_literal(value)?)),
+        Rule::identifier => Ok(LiteralValue::String(value.as_str().to_string())),
+        rule => Err(PlcError::parse(
+            line,
+            format!("unsupported match pattern: {rule:?}"),
+        )),
+    }
+}
+
 fn parse_repeat_block(pair: Pair<Rule>) -> Result<(u64, Vec<StepStatement>), PlcError> {
     let line = line_of(&pair);
     let mut count = None;
@@ -411,9 +579,7 @@ fn parse_action_statement(pair: Pair<Rule>) -> Result<ActionStatement, PlcError>
             let value_pair = parts
                 .next()
                 .ok_or_else(|| PlcError::parse(line, "set_analog 缺少数值"))?;
-            let value = value_pair
-                .as_str()
-                .parse::<f64>()
+            let value = parse_finite_f64(value_pair.as_str(), line, "set_analog")
                 .map_err(|_| PlcError::parse(line, "set_analog 数值解析失败"))?;
             Ok(ActionStatement::SetAnalog { target, value })
         }
@@ -1096,9 +1262,7 @@ fn parse_axis_move_numeric_arg(pair: Pair<Rule>, field_name: &str) -> Result<f64
         .find(|part| part.as_rule() == Rule::number)
         .ok_or_else(|| PlcError::parse(line, format!("axis.move 缺少 {field_name} 数值")))?;
 
-    number
-        .as_str()
-        .parse::<f64>()
+    parse_finite_f64(number.as_str(), line, &format!("axis.move {field_name}"))
         .map_err(|_| PlcError::parse(line, format!("axis.move 参数 {field_name} 数值解析失败")))
 }
 
@@ -1473,9 +1637,7 @@ fn parse_condition_value(pair: Pair<Rule>) -> Result<LiteralValue, PlcError> {
         Rule::boolean_value => Ok(LiteralValue::Boolean(value.as_str() == "true")),
         Rule::measured_value => Ok(LiteralValue::Measured(parse_measured_value(value)?)),
         Rule::number => {
-            let parsed = value
-                .as_str()
-                .parse::<f64>()
+            let parsed = parse_finite_f64(value.as_str(), line, "literal")
                 .map_err(|_| PlcError::parse(line, "数字字面量解析失败"))?;
             Ok(LiteralValue::Number(parsed))
         }
@@ -1489,20 +1651,52 @@ fn parse_condition_value(pair: Pair<Rule>) -> Result<LiteralValue, PlcError> {
     }
 }
 
+const MAX_EXPRESSION_DEPTH: usize = 128;
+const MAX_EXPRESSION_NODES: usize = 4096;
+
+#[derive(Default)]
+struct ExpressionParseBudget {
+    nodes: usize,
+}
+
 fn parse_expression(pair: Pair<Rule>) -> Result<Expression, PlcError> {
+    let mut budget = ExpressionParseBudget::default();
+    parse_expression_with_budget(pair, 0, &mut budget)
+}
+
+fn parse_expression_with_budget(
+    pair: Pair<Rule>,
+    depth: usize,
+    budget: &mut ExpressionParseBudget,
+) -> Result<Expression, PlcError> {
     let line = line_of(&pair);
+    if depth > MAX_EXPRESSION_DEPTH {
+        return Err(PlcError::parse_with_reason(
+            line,
+            format!("expression depth exceeds limit {MAX_EXPRESSION_DEPTH}"),
+            "split the expression into intermediate variables",
+        ));
+    }
+    budget.nodes = budget.nodes.saturating_add(1);
+    if budget.nodes > MAX_EXPRESSION_NODES {
+        return Err(PlcError::parse_with_reason(
+            line,
+            format!("expression node budget exceeds limit {MAX_EXPRESSION_NODES}"),
+            "split the expression into smaller compute statements",
+        ));
+    }
     match pair.as_rule() {
         Rule::expression | Rule::expr_or | Rule::expr_and | Rule::expr_add | Rule::expr_mul => {
             let mut inner = pair.into_inner();
             let first = inner
                 .next()
                 .ok_or_else(|| PlcError::parse(line, "表达式为空"))?;
-            let mut expr = parse_expression(first)?;
+            let mut expr = parse_expression_with_budget(first, depth + 1, budget)?;
             while let Some(op) = inner.next() {
                 let rhs_pair = inner
                     .next()
                     .ok_or_else(|| PlcError::parse(line, "表达式缺少右操作数"))?;
-                let rhs = parse_expression(rhs_pair)?;
+                let rhs = parse_expression_with_budget(rhs_pair, depth + 1, budget)?;
                 expr = Expression::BinaryOp {
                     op: parse_binary_operator(op)?,
                     left: Box::new(expr),
@@ -1516,12 +1710,12 @@ fn parse_expression(pair: Pair<Rule>) -> Result<Expression, PlcError> {
             let first = inner
                 .next()
                 .ok_or_else(|| PlcError::parse(line, "比较表达式为空"))?;
-            let mut expr = parse_expression(first)?;
+            let mut expr = parse_expression_with_budget(first, depth + 1, budget)?;
             if let Some(op) = inner.next() {
                 let rhs_pair = inner
                     .next()
                     .ok_or_else(|| PlcError::parse(line, "比较表达式缺少右操作数"))?;
-                let rhs = parse_expression(rhs_pair)?;
+                let rhs = parse_expression_with_budget(rhs_pair, depth + 1, budget)?;
                 expr = Expression::BinaryOp {
                     op: parse_binary_operator(op)?,
                     left: Box::new(expr),
@@ -1545,7 +1739,7 @@ fn parse_expression(pair: Pair<Rule>) -> Result<Expression, PlcError> {
             let inner_pair = inner
                 .next()
                 .ok_or_else(|| PlcError::parse(line, "一元表达式为空"))?;
-            let mut expr = parse_expression(inner_pair)?;
+            let mut expr = parse_expression_with_budget(inner_pair, depth + 1, budget)?;
             for _ in 0..not_count {
                 expr = Expression::UnaryNot(Box::new(expr));
             }
@@ -1560,15 +1754,14 @@ fn parse_expression(pair: Pair<Rule>) -> Result<Expression, PlcError> {
                 .into_inner()
                 .next()
                 .ok_or_else(|| PlcError::parse(line, "表达式原子为空"))?;
-            parse_expression(inner)
+            parse_expression_with_budget(inner, depth + 1, budget)
         }
-        Rule::expr_func_call => parse_function_call_expression(pair),
+        Rule::expr_func_call => parse_function_call_expression(pair, depth, budget),
         Rule::expr_literal => match pair.as_str() {
             "true" => Ok(Expression::Boolean(true)),
             "false" => Ok(Expression::Boolean(false)),
             raw => {
-                let parsed = raw
-                    .parse::<f64>()
+                let parsed = parse_finite_f64(raw, line, "expression literal")
                     .map_err(|_| PlcError::parse(line, "数字字面量解析失败"))?;
                 Ok(Expression::Literal(parsed))
             }
@@ -1581,7 +1774,11 @@ fn parse_expression(pair: Pair<Rule>) -> Result<Expression, PlcError> {
     }
 }
 
-fn parse_function_call_expression(pair: Pair<Rule>) -> Result<Expression, PlcError> {
+fn parse_function_call_expression(
+    pair: Pair<Rule>,
+    depth: usize,
+    budget: &mut ExpressionParseBudget,
+) -> Result<Expression, PlcError> {
     let line = line_of(&pair);
     let mut inner = pair.into_inner();
     let name = inner
@@ -1592,7 +1789,7 @@ fn parse_function_call_expression(pair: Pair<Rule>) -> Result<Expression, PlcErr
     let mut args = Vec::new();
     for item in inner {
         if item.as_rule() == Rule::expression {
-            args.push(parse_expression(item)?);
+            args.push(parse_expression_with_budget(item, depth + 1, budget)?);
         }
     }
     Ok(Expression::FunctionCall { name, args })
@@ -1860,14 +2057,13 @@ fn parse_duration_value(pair: Pair<Rule>) -> Result<DurationValue, PlcError> {
         return Err(PlcError::parse(line, format!("不支持的时间单位: {raw}")));
     };
 
-    let value = value_raw
-        .parse::<f64>()
+    let value = parse_finite_f64(value_raw, line, "duration")
         .map_err(|_| PlcError::parse(line, format!("时间值解析失败: {raw}")))?;
 
-    if value < 0.0 || value.fract() != 0.0 {
+    if value < 0.0 || value.fract() != 0.0 || value >= u64::MAX as f64 {
         return Err(PlcError::parse(
             line,
-            format!("时间值必须为非负整数: {raw}"),
+            format!("时间值必须为可表示的非负整数: {raw}"),
         ));
     }
 
@@ -1891,8 +2087,7 @@ fn parse_measured_value(pair: Pair<Rule>) -> Result<MeasuredValue, PlcError> {
         .find(|c: char| c.is_ascii_alphabetic())
         .ok_or_else(|| PlcError::parse(line, format!("带单位数值格式错误: {raw}")))?;
 
-    let value = raw[..idx]
-        .parse::<f64>()
+    let value = parse_finite_f64(&raw[..idx], line, "measured value")
         .map_err(|_| PlcError::parse(line, format!("数值解析失败: {raw}")))?;
 
     Ok(MeasuredValue {
@@ -1922,11 +2117,9 @@ fn parse_range_value(pair: Pair<Rule>) -> Result<crate::ast::AnalogRange, PlcErr
         let (min_str, max_str) = raw
             .split_once("..")
             .ok_or_else(|| PlcError::parse(line, format!("range 格式错误: {raw}")))?;
-        let min = min_str
-            .parse::<f64>()
+        let min = parse_finite_f64(min_str, line, "range minimum")
             .map_err(|_| PlcError::parse(line, format!("range 最小值解析失败: {min_str}")))?;
-        let max = max_str
-            .parse::<f64>()
+        let max = parse_finite_f64(max_str, line, "range maximum")
             .map_err(|_| PlcError::parse(line, format!("range 最大值解析失败: {max_str}")))?;
         Ok(crate::ast::AnalogRange { min, max })
     } else {
@@ -1943,7 +2136,7 @@ fn parse_range_value(pair: Pair<Rule>) -> Result<crate::ast::AnalogRange, PlcErr
 fn expect_number(pair: Pair<Rule>, field_name: &str) -> Result<f64, PlcError> {
     let line = line_of(&pair);
     if matches!(pair.as_rule(), Rule::number | Rule::integer) {
-        pair.as_str().parse::<f64>().map_err(|_| {
+        parse_finite_f64(pair.as_str(), line, &format!("attribute {field_name}")).map_err(|_| {
             PlcError::parse(
                 line,
                 format!("属性 {field_name} 数值解析失败: {}", pair.as_str()),
@@ -1981,9 +2174,11 @@ fn expect_pid_setpoint(pair: Pair<Rule>, field_name: &str) -> Result<LiteralValu
     let line = line_of(&pair);
     match pair.as_rule() {
         Rule::number | Rule::integer => {
-            let value = pair
-                .as_str()
-                .parse::<f64>()
+            let value = parse_finite_f64(
+                pair.as_str(),
+                line,
+                &format!("attribute {field_name}"),
+            )
                 .map_err(|_| PlcError::parse(line, format!("属性 {field_name} 数值解析失败")))?;
             Ok(LiteralValue::Number(value))
         }

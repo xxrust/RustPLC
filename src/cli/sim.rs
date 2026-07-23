@@ -1815,17 +1815,18 @@ fn run_sim_plc_subcommand(
         write_online_variable_audit(path, &variable_audit)?;
     }
 
-    let program = compile_loaded_plc_to_runtime_program(&loaded, scenario.tick_ms)?;
+    let compiled_program = compile_loaded_plc_to_runtime_program(&loaded, scenario.tick_ms)?;
+    let program = compiled_program.program();
 
-    let (num_di, num_do, num_ai, num_ao) = io_sizes_for_program_and_scenario(&program, &scenario);
+    let (num_di, num_do, num_ai, num_ao) = io_sizes_for_program_and_scenario(program, &scenario);
     let mut io = sim::SimIo::new(num_di, num_do, num_ai, num_ao);
     let mut io_snapshots = Vec::new();
     let run = if io_snapshot_out.is_some() {
-        sim::run_program_for_scenario_with_tick_observer(&program, &scenario, &mut io, |io| {
+        sim::run_program_for_scenario_with_tick_observer(program, &scenario, &mut io, |io| {
             io_snapshots.push(capture_io_tick_snapshot(io));
         })
     } else {
-        sim::run_program_for_scenario(&program, &scenario, &mut io)
+        sim::run_program_for_scenario(program, &scenario, &mut io)
     }
     .map_err(|e| {
         let mut msg = format!("{e}");
@@ -2042,8 +2043,9 @@ model:\n\
     })?;
     let scenario = sim::PidControlScenario::from_yaml_str(&scenario_yaml)
         .map_err(|err| format!("Failed to parse PID scenario YAML: {err}\n\n{pid_example}"))?;
-    let runtime_program = compile_loaded_plc_to_runtime_program(&loaded, scenario.tick_ms)?;
-    let report = sim::run_pid_kpi(&runtime_program, &scenario)
+    let compiled_runtime_program =
+        compile_loaded_plc_to_runtime_program(&loaded, scenario.tick_ms)?;
+    let report = sim::run_pid_kpi(compiled_runtime_program.program(), &scenario)
         .map_err(|err| format!("Failed to run PID KPI simulation: {err}"))?;
 
     let mut json = serde_json::to_string_pretty(&report)

@@ -5,12 +5,10 @@ interface CanvasInteractionState {
   liveSimulationEnabled: boolean;
 }
 
-const CanvasInteractionContext = createContext<CanvasInteractionState>({
+export const CanvasInteractionContext = createContext<CanvasInteractionState>({
   readOnly: false,
   liveSimulationEnabled: false,
 });
-
-export const CanvasInteractionProvider = CanvasInteractionContext.Provider;
 
 export function useCanvasInteraction(): CanvasInteractionState {
   return useContext(CanvasInteractionContext);

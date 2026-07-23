@@ -1,9 +1,19 @@
+/// Build topology IR from source AST, including all semantic preprocessing.
 pub fn build_topology_graph(program: &PlcProgram) -> Result<TopologyGraph, Vec<PlcError>> {
+    let expanded = preprocess_program(program)?;
+    build_topology_graph_from_preprocessed(&expanded)
+}
+
+fn build_topology_graph_from_preprocessed(
+    program: &PlcProgram,
+) -> Result<TopologyGraph, Vec<PlcError>> {
     build_topology_from_ast(&program.topology)
 }
 
 pub fn validate_source_topology_semantics(program: &PlcProgram) -> Result<(), Vec<PlcError>> {
-    let mut errors = Vec::new();
+    let mut errors = validate_unique_source_device_names(&program.topology)
+        .err()
+        .unwrap_or_default();
 
     if let Err(gate_error) = validate_removed_legacy_io_model(&program.topology) {
         errors.extend(topology_gate_error_to_plc_errors(gate_error));
@@ -19,29 +29,56 @@ pub fn validate_source_topology_semantics(program: &PlcProgram) -> Result<(), Ve
     }
 }
 
+/// Build executable state-machine IR from source AST after source gates and preprocessing.
 pub fn build_state_machine(program: &PlcProgram) -> Result<StateMachine, Vec<PlcError>> {
+    build_state_machine_with_source_policy(program, true)
+}
+
+#[cfg(test)]
+pub(crate) fn build_state_machine_allow_raw_io_for_test(
+    program: &PlcProgram,
+) -> Result<StateMachine, Vec<PlcError>> {
+    build_state_machine_with_source_policy(program, false)
+}
+
+fn build_state_machine_with_source_policy(
+    program: &PlcProgram,
+    enforce_raw_io_gate: bool,
+) -> Result<StateMachine, Vec<PlcError>> {
+    validate_state_machine_source(program, enforce_raw_io_gate)?;
+    let expanded = preprocess_program(program)?;
+    build_state_machine_from_preprocessed(expanded)
+}
+
+fn validate_state_machine_source(
+    program: &PlcProgram,
+    enforce_raw_io_gate: bool,
+) -> Result<(), Vec<PlcError>> {
     if source_topology_gates_required(program) {
         validate_source_topology_semantics(program)?;
     }
     let mut source_errors = Vec::new();
     validate_station_protocol_semantics(program, &mut source_errors);
-    if !source_errors.is_empty() {
-        return Err(source_errors);
-    }
-    validate_raw_io_bypass_in_tasks(program, &mut source_errors);
-    if !source_errors.is_empty() {
-        return Err(source_errors);
-    }
-    if source_topology_gates_required(program) {
-        device_semantics::process::validate_process_device_source_contracts(
-            &program.topology,
-            &mut source_errors,
-        );
+    if enforce_raw_io_gate {
+        validate_raw_io_bypass_in_tasks(program, &mut source_errors);
     }
     if !source_errors.is_empty() {
         return Err(source_errors);
     }
-    let mut expanded = preprocess_program(program)?;
+    device_semantics::process::validate_process_device_source_contracts(
+        &program.topology,
+        &mut source_errors,
+    );
+    if source_errors.is_empty() {
+        Ok(())
+    } else {
+        Err(source_errors)
+    }
+}
+
+fn build_state_machine_from_preprocessed(
+    mut expanded: PlcProgram,
+) -> Result<StateMachine, Vec<PlcError>> {
     let variable_types = collect_variable_types(&expanded.topology);
     let mut expr_errors = Vec::new();
     validate_expression_actions_in_tasks(&expanded.tasks, &variable_types, &mut expr_errors);
@@ -133,6 +170,7 @@ fn validate_station_protocol_semantics(program: &PlcProgram, errors: &mut Vec<Pl
     if program.topology.stations.is_empty()
         && program.topology.handshakes.is_empty()
         && program.topology.transfer_points.is_empty()
+        && program.topology.controller_syncs.is_empty()
     {
         return;
     }
@@ -142,6 +180,15 @@ fn validate_station_protocol_semantics(program: &PlcProgram, errors: &mut Vec<Pl
         .devices
         .iter()
         .map(|device| device.name.as_str())
+        .chain(program.topology.controller_inventory.iter().map(String::as_str))
+        .collect::<HashSet<_>>();
+    let controllers = program
+        .topology
+        .devices
+        .iter()
+        .filter(|device| matches!(device.device_type, DeviceType::Plc))
+        .map(|device| device.name.as_str())
+        .chain(program.topology.controller_inventory.iter().map(String::as_str))
         .collect::<HashSet<_>>();
     let tasks = collect_task_steps(&program.tasks);
     let task_names = tasks.keys().cloned().collect::<HashSet<_>>();
@@ -240,6 +287,91 @@ fn validate_station_protocol_semantics(program: &PlcProgram, errors: &mut Vec<Pl
     validate_station_task_ownership(program, &device_owner, &task_owner, errors);
     validate_handshakes(program, &station_names, &tasks, errors);
     validate_transfer_points(program, &station_names, &sites, errors);
+    validate_controller_syncs(program, &controllers, errors);
+}
+
+fn validate_controller_syncs(
+    program: &PlcProgram,
+    controllers: &HashSet<&str>,
+    errors: &mut Vec<PlcError>,
+) {
+    let mut names = HashSet::new();
+    for sync in &program.topology.controller_syncs {
+        if !names.insert(sync.name.clone()) {
+            errors.push(PlcError::duplicate_definition_with_reason(
+                sync.line.max(1),
+                "controller_sync",
+                &sync.name,
+                "controller_sync names must be unique",
+            ));
+        }
+        if sync.controllers.len() < 2 {
+            errors.push(PlcError::semantic_with_reason(
+                sync.line.max(1),
+                format!(
+                    "[SEM-231] controller_sync '{}' must reference at least two PLC controllers.",
+                    sync.name
+                ),
+                "Add at least two PLC controllers to controller_sync.controllers.".to_string(),
+            ));
+        }
+        let mut local = HashSet::new();
+        for controller in &sync.controllers {
+            if !local.insert(controller.as_str()) {
+                errors.push(PlcError::semantic_with_reason(
+                    sync.line.max(1),
+                    format!(
+                        "[SEM-232] controller_sync '{}' references duplicate controller '{}'.",
+                        sync.name, controller
+                    ),
+                    "List each PLC controller once.".to_string(),
+                ));
+            }
+            if !controllers.contains(controller.as_str()) {
+                errors.push(PlcError::undefined_reference_with_reason(
+                    sync.line.max(1),
+                    "PLC controller",
+                    controller,
+                    format!(
+                        "[SEM-233] controller_sync '{}' references undefined PLC controller",
+                        sync.name
+                    ),
+                ));
+            }
+        }
+        let max_skew_ms = duration_value_to_ms(&sync.max_skew);
+        let heartbeat_ms = duration_value_to_ms(&sync.heartbeat);
+        if max_skew_ms == 0 {
+            errors.push(PlcError::semantic_with_reason(
+                sync.line.max(1),
+                format!(
+                    "[SEM-234] controller_sync '{}' max_skew must be greater than 0ms.",
+                    sync.name
+                ),
+                "Use a positive max_skew.".to_string(),
+            ));
+        }
+        if heartbeat_ms == 0 {
+            errors.push(PlcError::semantic_with_reason(
+                sync.line.max(1),
+                format!(
+                    "[SEM-235] controller_sync '{}' heartbeat must be greater than 0ms.",
+                    sync.name
+                ),
+                "Use a positive heartbeat.".to_string(),
+            ));
+        }
+        if heartbeat_ms > 0 && max_skew_ms > heartbeat_ms {
+            errors.push(PlcError::semantic_with_reason(
+                sync.line.max(1),
+                format!(
+                    "[SEM-236] controller_sync '{}' max_skew {}ms exceeds heartbeat {}ms.",
+                    sync.name, max_skew_ms, heartbeat_ms
+                ),
+                "Keep max_skew less than or equal to heartbeat.".to_string(),
+            ));
+        }
+    }
 }
 
 fn validate_station_task_ownership(
@@ -552,10 +684,6 @@ fn source_topology_gates_required(program: &PlcProgram) -> bool {
 }
 
 fn validate_raw_io_bypass_in_tasks(program: &PlcProgram, errors: &mut Vec<PlcError>) {
-    if !source_topology_gates_required(program) {
-        return;
-    }
-
     let device_types = program
         .topology
         .devices
@@ -583,6 +711,29 @@ fn validate_raw_io_bypass_in_tasks(program: &PlcProgram, errors: &mut Vec<PlcErr
                 errors,
             );
         }
+    }
+}
+
+fn validate_unique_source_device_names(
+    topology: &TopologySection,
+) -> Result<(), Vec<PlcError>> {
+    let mut seen = HashSet::<&str>::new();
+    let mut errors = Vec::new();
+    for device in &topology.devices {
+        if !seen.insert(device.name.as_str()) {
+            errors.push(PlcError::duplicate_definition_with_reason(
+                device.line.max(1),
+                "device",
+                &device.name,
+                "device names must be unique before semantic lowering",
+            ));
+        }
+    }
+
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(errors)
     }
 }
 
@@ -669,7 +820,7 @@ fn raw_io_bypass_message(
 
     match device_type {
         DeviceType::StepperMotor | DeviceType::ServoDrive
-            if matches!(target.port.as_str(), "enable" | "pulse" | "direction") =>
+            if matches!(target.port.as_str(), "pulse" | "direction") =>
         {
             Some(format!(
                 "normal task action writes low-level axis port `{target}` directly"

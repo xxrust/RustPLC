@@ -106,12 +106,27 @@ struct EdgeSummary {
 struct TopologySummary {
     device_count: usize,
     link_count: usize,
+    station_protocol: StationProtocolSummary,
     devices: Vec<String>,
     variables: Vec<String>,
     workpiece_sites: Vec<String>,
     workpiece_holders: Vec<String>,
     workpiece_types: Vec<String>,
     links: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct StationProtocolSummary {
+    controller_count: usize,
+    station_count: usize,
+    handshake_count: usize,
+    transfer_point_count: usize,
+    controller_sync_count: usize,
+    controllers: Vec<String>,
+    stations: Vec<String>,
+    handshakes: Vec<String>,
+    transfer_points: Vec<String>,
+    controller_syncs: Vec<String>,
 }
 
 fn run_flowchart_subcommand(
@@ -495,6 +510,38 @@ fn summarize_topology(program: &PlcProgram, topology: &TopologyGraph) -> Topolog
     TopologySummary {
         device_count: topology.graph.node_count(),
         link_count: links.len(),
+        station_protocol: StationProtocolSummary {
+            controller_count: topology.station_protocol.controllers.len(),
+            station_count: topology.station_protocol.stations.len(),
+            handshake_count: topology.station_protocol.handshakes.len(),
+            transfer_point_count: topology.station_protocol.transfer_points.len(),
+            controller_sync_count: topology.station_protocol.controller_syncs.len(),
+            controllers: topology.station_protocol.controllers.clone(),
+            stations: topology
+                .station_protocol
+                .stations
+                .iter()
+                .map(|station| station.name.clone())
+                .collect(),
+            handshakes: topology
+                .station_protocol
+                .handshakes
+                .iter()
+                .map(|handshake| handshake.name.clone())
+                .collect(),
+            transfer_points: topology
+                .station_protocol
+                .transfer_points
+                .iter()
+                .map(|transfer| transfer.name.clone())
+                .collect(),
+            controller_syncs: topology
+                .station_protocol
+                .controller_syncs
+                .iter()
+                .map(|sync| sync.name.clone())
+                .collect(),
+        },
         devices: program
             .topology
             .devices
@@ -2723,9 +2770,10 @@ fn render_task_table(task: &TaskDiagram) -> String {
 
 fn render_topology_html(topology: &TopologySummary) -> String {
     format!(
-        "<div class=\"topology-grid\"><div class=\"card\"><h3>Counts</h3><p>devices: <code>{}</code></p><p>links: <code>{}</code></p></div><div class=\"card\"><h3>Devices</h3>{}</div><div class=\"card\"><h3>Variables</h3>{}</div><div class=\"card\"><h3>Workpieces</h3>{}</div><div class=\"card\"><h3>Links</h3>{}</div></div>",
+        "<div class=\"topology-grid\"><div class=\"card\"><h3>Counts</h3><p>devices: <code>{}</code></p><p>links: <code>{}</code></p></div>{}<div class=\"card\"><h3>Devices</h3>{}</div><div class=\"card\"><h3>Variables</h3>{}</div><div class=\"card\"><h3>Workpieces</h3>{}</div><div class=\"card\"><h3>Links</h3>{}</div></div>",
         topology.device_count,
         topology.link_count,
+        render_station_protocol_html(&topology.station_protocol),
         render_compact_list(&topology.devices),
         render_compact_list(&topology.variables),
         render_compact_list(
@@ -2738,6 +2786,34 @@ fn render_topology_html(topology: &TopologySummary) -> String {
                 .collect::<Vec<_>>()
         ),
         render_compact_list(&topology.links)
+    )
+}
+
+fn render_station_protocol_html(station_protocol: &StationProtocolSummary) -> String {
+    format!(
+        "<div class=\"card\"><h3>Station Protocol</h3><p>controllers: <code>{}</code></p><p>stations: <code>{}</code></p><p>handshakes: <code>{}</code></p><p>transfer points: <code>{}</code></p><p>controller syncs: <code>{}</code></p>{}{}</div>",
+        station_protocol.controller_count,
+        station_protocol.station_count,
+        station_protocol.handshake_count,
+        station_protocol.transfer_point_count,
+        station_protocol.controller_sync_count,
+        render_compact_list(
+            &station_protocol
+                .controllers
+                .iter()
+                .chain(station_protocol.stations.iter())
+                .cloned()
+                .collect::<Vec<_>>()
+        ),
+        render_compact_list(
+            &station_protocol
+                .handshakes
+                .iter()
+                .chain(station_protocol.transfer_points.iter())
+                .chain(station_protocol.controller_syncs.iter())
+                .cloned()
+                .collect::<Vec<_>>()
+        )
     )
 }
 

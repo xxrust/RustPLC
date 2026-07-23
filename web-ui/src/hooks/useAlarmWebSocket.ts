@@ -1,13 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-
-export interface AlarmEvent {
-  id: string;
-  timestamp: number;
-  severity: 'info' | 'warning' | 'critical';
-  source: string;
-  message: string;
-  acknowledged?: boolean;
-}
+import type { AlarmEvent } from '../types';
 
 export const useAlarmWebSocket = () => {
   const [connected, setConnected] = useState(false);
@@ -18,7 +10,6 @@ export const useAlarmWebSocket = () => {
 
   useEffect(() => {
     if (!wsEnabled) {
-      setConnected(false);
       return undefined;
     }
 

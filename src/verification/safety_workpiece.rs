@@ -1,4 +1,4 @@
-﻿fn verify_workpiece_flow(
+fn verify_workpiece_flow(
     program: &PlcProgram,
     constraints: &ConstraintSet,
     state_machine: &StateMachine,
@@ -13,6 +13,10 @@
             .all(|transition| transition.effects.is_empty())
     {
         return Vec::new();
+    }
+
+    if let Some(diagnostic) = validate_workpiece_carrier_slot_budget(constraints) {
+        return vec![diagnostic];
     }
 
     let registry = WorkpieceFlowRegistry::from_constraints(constraints);
@@ -412,7 +416,7 @@ fn axis_branch_target_task_names_for_workpiece_roots(actions: &[TransitionAction
 #[derive(Debug, Clone)]
 struct WorkpieceEndpointRegistry {
     names: Vec<String>,
-    capacities: Vec<u16>,
+    capacities: Vec<u32>,
     index: HashMap<String, usize>,
 }
 
@@ -422,7 +426,7 @@ impl WorkpieceEndpointRegistry {
         let mut capacities = Vec::new();
         let mut index = HashMap::new();
 
-        let mut push_endpoint = |name: String, capacity: u16| {
+        let mut push_endpoint = |name: String, capacity: u32| {
             if index.contains_key(&name) {
                 return;
             }
@@ -433,11 +437,11 @@ impl WorkpieceEndpointRegistry {
 
         for site in &constraints.workpiece_sites {
             if site.kind == WorkpieceSiteKind::WorkpieceLocation {
-                push_endpoint(site.name.clone(), site.capacity as u16);
+                push_endpoint(site.name.clone(), site.capacity);
             }
         }
         for holder in &constraints.workpiece_holders {
-            push_endpoint(holder.name.clone(), holder.capacity as u16);
+            push_endpoint(holder.name.clone(), holder.capacity);
         }
         for carrier in &constraints.workpiece_carriers {
             match &carrier.layout {
@@ -471,6 +475,32 @@ impl WorkpieceEndpointRegistry {
             .map(|(idx, count)| format!("{}({})", self.names[idx], count))
             .collect()
     }
+}
+
+fn validate_workpiece_carrier_slot_budget(constraints: &ConstraintSet) -> Option<SafetyDiagnostic> {
+    let mut total_slots = 0u64;
+    for carrier in &constraints.workpiece_carriers {
+        let slots = match &carrier.layout {
+            WorkpieceCarrierLayoutDef::Slots { count } => u64::from(*count),
+            WorkpieceCarrierLayoutDef::Grid { rows, cols } => u64::from(*rows) * u64::from(*cols),
+        };
+        total_slots = total_slots.checked_add(slots).unwrap_or(u64::MAX);
+        if total_slots > crate::runtime_bridge::MAX_RUNTIME_CARRIER_SLOTS as u64 {
+            return Some(SafetyDiagnostic {
+                line: 1,
+                constraint: "workpiece_carrier_capacity".to_string(),
+                reason: format!(
+                    "workpiece carriers expand to {total_slots} slots, exceeding runtime/verification limit {}",
+                    crate::runtime_bridge::MAX_RUNTIME_CARRIER_SLOTS
+                ),
+                violation_path: vec![format!("carrier {}", carrier.name)],
+                suggestion:
+                    "reduce carrier dimensions or split the physical layout into bounded carriers"
+                        .to_string(),
+            });
+        }
+    }
+    None
 }
 
 #[derive(Debug, Clone)]
@@ -761,6 +791,7 @@ fn apply_workpiece_effects(
                     "acquire",
                     Some(false),
                     None,
+                    None,
                 ) {
                     return Some(diag);
                 }
@@ -777,11 +808,16 @@ fn apply_workpiece_effects(
                     "transfer",
                     Some(false),
                     None,
+                    None,
                 ) {
                     return Some(diag);
                 }
             }
-            WorkpieceEffect::Unmount { slot, to, .. } => {
+            WorkpieceEffect::Unmount {
+                workpiece_type,
+                slot,
+                to,
+            } => {
                 if let Some(diag) = move_workpiece(
                     program,
                     transition,
@@ -793,6 +829,7 @@ fn apply_workpiece_effects(
                     "unmount",
                     Some(true),
                     None,
+                    Some(workpiece_type),
                 ) {
                     return Some(diag);
                 }
@@ -890,6 +927,7 @@ fn move_workpiece(
     effect_name: &str,
     source_mounted: Option<bool>,
     destination_mounted: Option<&str>,
+    expected_workpiece_type: Option<&str>,
 ) -> Option<SafetyDiagnostic> {
     let token_idx = match unique_active_workpiece(
         program,
@@ -904,6 +942,23 @@ fn move_workpiece(
         Ok(token_idx) => token_idx,
         Err(diag) => return Some(diag),
     };
+    if let Some(expected_type) = expected_workpiece_type {
+        let actual_type =
+            &registry.workpiece_types[flow_state.tokens[token_idx].workpiece_type_idx].name;
+        if actual_type != expected_type {
+            return Some(SafetyDiagnostic {
+                line: find_state_line(program, &transition.from),
+                constraint: "workpiece_flow".to_string(),
+                reason: format!(
+                    "{effect_name} declares workpiece type '{expected_type}', but mounted token at '{from}' has type '{actual_type}'"
+                ),
+                violation_path: extend_path(path, transition),
+                suggestion:
+                    "make the unmount type match the token introduced or mounted at this slot"
+                        .to_string(),
+            });
+        }
+    }
     let Some(endpoint_idx) = registry.endpoint_idx(to) else {
         return Some(SafetyDiagnostic {
             line: find_state_line(program, &transition.from),
@@ -1618,4 +1673,3 @@ fn parse_slot_reference(raw: &str) -> Option<(String, Vec<String>)> {
     }
     Some((carrier.to_string(), values))
 }
-

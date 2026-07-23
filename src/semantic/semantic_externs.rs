@@ -127,6 +127,12 @@ fn is_phase1_supported_extern_type(var_type: &AstVariableType) -> bool {
 
 pub fn build_constraint_set(program: &PlcProgram) -> Result<ConstraintSet, Vec<PlcError>> {
     let expanded = preprocess_program(program)?;
+    build_constraint_set_from_preprocessed(&expanded)
+}
+
+fn build_constraint_set_from_preprocessed(
+    expanded: &PlcProgram,
+) -> Result<ConstraintSet, Vec<PlcError>> {
     let mut errors = Vec::new();
     device_semantics::axis::validate_vertical_axis_brake_sequence_in_tasks(
         &expanded.tasks,
@@ -146,6 +152,12 @@ pub fn build_constraint_set(program: &PlcProgram) -> Result<ConstraintSet, Vec<P
 
 pub fn build_timing_model(program: &PlcProgram) -> Result<TimingModel, Vec<PlcError>> {
     let expanded = preprocess_program(program)?;
+    build_timing_model_from_preprocessed(&expanded)
+}
+
+fn build_timing_model_from_preprocessed(
+    expanded: &PlcProgram,
+) -> Result<TimingModel, Vec<PlcError>> {
     build_timing_model_from_ast(&expanded.topology, &expanded.tasks)
 }
 

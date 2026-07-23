@@ -229,10 +229,14 @@ fn reject_extern_calls_in_expression(
 
 fn parse_topology_section(pair: Pair<Rule>) -> Result<TopologySection, PlcError> {
     let mut devices = Vec::new();
+    let mut device_templates = Vec::new();
+    let mut device_instances = Vec::new();
+    let controller_inventory = Vec::new();
     let mut controller_io = Vec::new();
     let mut stations = Vec::new();
     let mut handshakes = Vec::new();
     let mut transfer_points = Vec::new();
+    let mut controller_syncs = Vec::new();
     let mut workpiece_types = Vec::new();
     let mut workpiece_sites = Vec::new();
     let mut workpiece_holders = Vec::new();
@@ -247,6 +251,12 @@ fn parse_topology_section(pair: Pair<Rule>) -> Result<TopologySection, PlcError>
     for entry in pair.into_inner() {
         match entry.as_rule() {
             Rule::device_declaration => devices.push(parse_device_declaration(entry)?),
+            Rule::device_template_declaration => {
+                device_templates.push(parse_device_template_declaration(entry)?);
+            }
+            Rule::device_instance_declaration => {
+                device_instances.push(parse_device_instance_declaration(entry)?);
+            }
             Rule::controller_io_declaration => {
                 controller_io.push(parse_controller_io_declaration(entry)?);
             }
@@ -254,6 +264,9 @@ fn parse_topology_section(pair: Pair<Rule>) -> Result<TopologySection, PlcError>
             Rule::handshake_declaration => handshakes.push(parse_handshake_declaration(entry)?),
             Rule::transfer_point_declaration => {
                 transfer_points.push(parse_transfer_point_declaration(entry)?);
+            }
+            Rule::controller_sync_declaration => {
+                controller_syncs.push(parse_controller_sync_declaration(entry)?);
             }
             Rule::workpiece_type_declaration => {
                 workpiece_types.push(parse_workpiece_type_declaration(entry)?);
@@ -287,10 +300,14 @@ fn parse_topology_section(pair: Pair<Rule>) -> Result<TopologySection, PlcError>
 
     Ok(TopologySection {
         devices,
+        device_templates,
+        device_instances,
+        controller_inventory,
         controller_io,
         stations,
         handshakes,
         transfer_points,
+        controller_syncs,
         workpiece_types,
         workpiece_sites,
         workpiece_holders,
@@ -603,6 +620,57 @@ fn parse_transfer_point_declaration(
         site: site.ok_or_else(|| PlcError::parse(line, "transfer_point 缺少 site"))?,
         handshake: handshake
             .ok_or_else(|| PlcError::parse(line, "transfer_point 缺少 handshake"))?,
+    })
+}
+
+fn parse_controller_sync_declaration(
+    pair: Pair<Rule>,
+) -> Result<ControllerSyncDeclaration, PlcError> {
+    let line = line_of(&pair);
+    let mut name = None;
+    let mut controllers = None;
+    let mut max_skew = None;
+    let mut heartbeat = None;
+
+    for part in pair.into_inner() {
+        match part.as_rule() {
+            Rule::identifier => name = Some(part.as_str().to_string()),
+            Rule::controller_sync_block => {
+                for field in part.into_inner() {
+                    if field.as_rule() != Rule::controller_sync_field {
+                        continue;
+                    }
+                    let raw = field.as_str().trim_start().to_string();
+                    for item in field.into_inner() {
+                        match item.as_rule() {
+                            Rule::identifier_list => {
+                                controllers = Some(expect_identifier_list(item, "controllers")?);
+                            }
+                            Rule::duration_value => {
+                                if raw.starts_with("max_skew") {
+                                    max_skew = Some(parse_duration_value(item)?);
+                                } else {
+                                    heartbeat = Some(parse_duration_value(item)?);
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    Ok(ControllerSyncDeclaration {
+        line,
+        name: name.ok_or_else(|| PlcError::parse(line, "controller_sync missing name"))?,
+        controllers: controllers
+            .ok_or_else(|| PlcError::parse(line, "controller_sync missing controllers"))?,
+        max_skew: max_skew
+            .ok_or_else(|| PlcError::parse(line, "controller_sync missing max_skew"))?,
+        heartbeat: heartbeat
+            .ok_or_else(|| PlcError::parse(line, "controller_sync missing heartbeat"))?,
     })
 }
 
@@ -1635,6 +1703,105 @@ fn parse_device_declaration(pair: Pair<Rule>) -> Result<DeviceDeclaration, PlcEr
     })
 }
 
+fn parse_device_template_declaration(
+    pair: Pair<Rule>,
+) -> Result<DeviceTemplateDeclaration, PlcError> {
+    let line = line_of(&pair);
+    let mut name = None;
+    let mut params = Vec::new();
+    let mut devices = Vec::new();
+
+    for part in pair.into_inner() {
+        match part.as_rule() {
+            Rule::identifier if name.is_none() => name = Some(part.as_str().to_string()),
+            Rule::template_param_list => {
+                params = part
+                    .into_inner()
+                    .filter(|item| item.as_rule() == Rule::identifier)
+                    .map(|item| item.as_str().to_string())
+                    .collect();
+            }
+            Rule::template_device_declaration => {
+                devices.push(parse_template_device_declaration(part)?);
+            }
+            _ => {}
+        }
+    }
+
+    Ok(DeviceTemplateDeclaration {
+        line,
+        name: name.ok_or_else(|| PlcError::parse(line, "device_template missing name"))?,
+        params,
+        devices,
+    })
+}
+
+fn parse_template_device_declaration(
+    pair: Pair<Rule>,
+) -> Result<TemplateDeviceDeclaration, PlcError> {
+    let line = line_of(&pair);
+    let mut local_name = None;
+    let mut device_type = None;
+    let mut attributes = DeviceAttributes::default();
+
+    for part in pair.into_inner() {
+        match part.as_rule() {
+            Rule::identifier if local_name.is_none() => local_name = Some(part.as_str().to_string()),
+            Rule::template_device_type => {
+                let inner = first_inner(part, line, "template device type")?;
+                device_type = Some(match inner.as_rule() {
+                    Rule::device_type => TemplateDeviceType::Concrete(parse_device_type(inner)?),
+                    Rule::identifier => TemplateDeviceType::Parameter(inner.as_str().to_string()),
+                    _ => return Err(PlcError::parse(line, "unsupported template device type")),
+                });
+            }
+            Rule::attribute_block => attributes = parse_attribute_block(part)?,
+            _ => {}
+        }
+    }
+
+    Ok(TemplateDeviceDeclaration {
+        line,
+        local_name: local_name
+            .ok_or_else(|| PlcError::parse(line, "template device missing local name"))?,
+        device_type: device_type
+            .ok_or_else(|| PlcError::parse(line, "template device missing type"))?,
+        attributes,
+    })
+}
+
+fn parse_device_instance_declaration(
+    pair: Pair<Rule>,
+) -> Result<DeviceInstanceDeclaration, PlcError> {
+    let line = line_of(&pair);
+    let mut name = None;
+    let mut template = None;
+    let mut type_args = Vec::new();
+
+    for part in pair.into_inner() {
+        match part.as_rule() {
+            Rule::identifier if name.is_none() => name = Some(part.as_str().to_string()),
+            Rule::identifier if template.is_none() => template = Some(part.as_str().to_string()),
+            Rule::template_type_arg_list => {
+                for arg in part.into_inner() {
+                    if arg.as_rule() == Rule::device_type {
+                        type_args.push(parse_device_type(arg)?);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    Ok(DeviceInstanceDeclaration {
+        line,
+        name: name.ok_or_else(|| PlcError::parse(line, "device_instance missing name"))?,
+        template: template
+            .ok_or_else(|| PlcError::parse(line, "device_instance missing template"))?,
+        type_args,
+    })
+}
+
 fn parse_device_type(pair: Pair<Rule>) -> Result<DeviceType, PlcError> {
     let line = line_of(&pair);
     match pair.as_str() {
@@ -1938,9 +2105,7 @@ fn parse_cam_point(pair: Pair<Rule>) -> Result<CamPoint, PlcError> {
     let mut numbers = Vec::new();
     for part in pair.into_inner() {
         if part.as_rule() == Rule::number {
-            let parsed = part
-                .as_str()
-                .parse::<f64>()
+            let parsed = parse_finite_f64(part.as_str(), line, "cam_table point")
                 .map_err(|_| PlcError::parse(line, "cam_table 点位数值解析失败"))?;
             numbers.push(parsed);
         }

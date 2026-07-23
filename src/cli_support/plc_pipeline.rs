@@ -1,9 +1,9 @@
-use runtime_core::Program;
 use rust_plc::ast::{PlcProgram, StepStatement, TasksSection};
+use rust_plc::device_library::DeviceLibrary;
 use rust_plc::error::PlcError;
 use rust_plc::ir::{ConstraintSet, StateMachine, TopologyGraph};
 use rust_plc::parser::parse_plc;
-use rust_plc::runtime_bridge::state_machine_to_runtime_program;
+use rust_plc::runtime_bridge::{CompiledRuntimeProgram, state_machine_to_runtime_program};
 use rust_plc::semantic::{
     build_constraint_set, build_state_machine, build_topology_graph,
     preprocess_program_with_library,
@@ -18,6 +18,7 @@ use serde::Deserialize;
 use std::fmt::Write as _;
 use std::fs;
 use std::path::Path;
+use std::sync::OnceLock;
 
 pub(crate) struct RuntimeSemantics {
     pub(crate) topology: TopologyGraph,
@@ -103,6 +104,15 @@ pub(crate) fn format_loaded_plc_errors(
         .collect()
 }
 
+pub(crate) fn load_default_device_library() -> Result<DeviceLibrary, Vec<String>> {
+    static DEVICE_LIBRARY: OnceLock<Result<DeviceLibrary, Vec<String>>> = OnceLock::new();
+    DEVICE_LIBRARY
+        .get_or_init(|| {
+            DeviceLibrary::load(Path::new("devices")).map_err(flatten_semantic_errors_vec)
+        })
+        .clone()
+}
+
 pub(crate) fn compile_loaded_codegen_semantics(
     input: &LoadedPlcSource,
 ) -> Result<CodegenSemantics, Vec<String>> {
@@ -111,9 +121,7 @@ pub(crate) fn compile_loaded_codegen_semantics(
         eprintln!("WARNING [topology] {warning}");
     }
 
-    let devices_dir = Path::new("devices");
-    let device_library = rust_plc::device_library::DeviceLibrary::load(devices_dir)
-        .map_err(flatten_semantic_errors_vec)?;
+    let device_library = load_default_device_library()?;
 
     let expanded = preprocess_program_with_library(
         &program,
@@ -156,9 +164,7 @@ pub(crate) fn compile_loaded_codegen_semantics(
 
 pub(crate) fn build_runtime_semantics(plc_source: &str) -> Result<RuntimeSemantics, String> {
     let program = parse_plc_with_required_purpose(plc_source)?;
-    let devices_dir = Path::new("devices");
-    let device_library = rust_plc::device_library::DeviceLibrary::load(devices_dir)
-        .map_err(|errors| flatten_semantic_errors_vec(errors).join("\n"))?;
+    let device_library = load_default_device_library().map_err(|errors| errors.join("\n"))?;
 
     let expanded = preprocess_program_with_library(
         &program,
@@ -191,9 +197,7 @@ pub(crate) fn build_loaded_runtime_semantics(
     input: &LoadedPlcSource,
 ) -> Result<RuntimeSemantics, String> {
     let program = parse_loaded_plc_with_required_purpose(input)?;
-    let devices_dir = Path::new("devices");
-    let device_library = rust_plc::device_library::DeviceLibrary::load(devices_dir)
-        .map_err(|errors| flatten_semantic_errors_vec(errors).join("\n"))?;
+    let device_library = load_default_device_library().map_err(|errors| errors.join("\n"))?;
 
     let expanded = preprocess_program_with_library(
         &program,
@@ -226,7 +230,7 @@ pub(crate) fn build_loaded_runtime_semantics(
 pub(crate) fn compile_loaded_plc_to_runtime_program(
     input: &LoadedPlcSource,
     tick_ms: u64,
-) -> Result<Program<'static>, String> {
+) -> Result<CompiledRuntimeProgram, String> {
     let semantics = build_loaded_runtime_semantics(input)?;
     state_machine_to_runtime_program(
         &semantics.topology,

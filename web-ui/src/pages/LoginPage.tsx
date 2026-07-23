@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { authApi } from '../services/api';
@@ -28,9 +29,12 @@ const LoginPage: React.FC = () => {
       localStorage.setItem('auth_token', response.data.token);
       setCurrentUser(response.data.user);
       navigate('/');
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Login failed:', err);
-      setError(err.response?.data?.message || t('login.errorFailed'));
+      const message = axios.isAxiosError<{ message?: string }>(err)
+        ? err.response?.data?.message
+        : undefined;
+      setError(message || t('login.errorFailed'));
     } finally {
       setLoading(false);
     }

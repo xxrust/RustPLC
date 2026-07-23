@@ -289,7 +289,7 @@ fn format_action(a: &Action) -> String {
             format_axis_fault_routing(command.fault_routing),
         ),
         Action::ProcessDeviceAction { command } => format!(
-            "Action::ProcessDeviceAction {{ command: ProcessDeviceActionCommand {{ family: {:?}, action: {:?}, target: {:?}, port: {:?}, args: &{}, result_buckets: &{} }} }}",
+            "Action::ProcessDeviceAction {{ command: ProcessDeviceActionCommand {{ family: {:?}, action: {:?}, target: {:?}, port: {:?}, args: &{}, result_buckets: &{}, timeout: None }} }}",
             command.family,
             command.action,
             command.target,
@@ -431,7 +431,7 @@ fn format_digital_input_id_slice(values: &[DigitalInputId]) -> String {
     format!("[{}]", rendered)
 }
 
-fn format_static_str_slice(values: &[&'static str]) -> String {
+fn format_static_str_slice(values: &[&str]) -> String {
     let rendered = values
         .iter()
         .map(|value| format!("{value:?}"))
@@ -450,7 +450,7 @@ fn format_timeout_option(timeout: Option<Timeout>) -> String {
     }
 }
 
-fn format_optional_static_str(value: Option<&'static str>) -> String {
+fn format_optional_static_str(value: Option<&str>) -> String {
     match value {
         Some(value) => format!("Some({value:?})"),
         None => "None".to_string(),

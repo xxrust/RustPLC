@@ -1,16 +1,17 @@
 import React, { useState } from 'react';
 import { Card, Button, Space, Table, Tag, Typography, Modal, message } from 'antd';
+import type { TableColumnsType } from 'antd';
 import { WarningOutlined, CheckCircleOutlined, CloseCircleOutlined } from '@ant-design/icons';
 import { useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { alarmApi } from '../services/api';
-import type { DiagnosisCandidate } from '../types';
+import type { AlarmEvent, DiagnosisCandidate, EvidenceSource } from '../types';
 
 const { Title, Text, Paragraph } = Typography;
 
 const DiagnosisPage: React.FC = () => {
   const { t } = useTranslation();
-  const [selectedAlarm, setSelectedAlarm] = useState<any | null>(null);
+  const [selectedAlarm, setSelectedAlarm] = useState<AlarmEvent | null>(null);
   const [detailsVisible, setDetailsVisible] = useState(false);
 
   const { data: alarmsData, isLoading } = useQuery({
@@ -19,7 +20,7 @@ const DiagnosisPage: React.FC = () => {
     refetchInterval: 5000,
   });
 
-  const handleViewDetails = (alarm: any) => {
+  const handleViewDetails = (alarm: AlarmEvent) => {
     setSelectedAlarm(alarm);
     setDetailsVisible(true);
   };
@@ -28,12 +29,12 @@ const DiagnosisPage: React.FC = () => {
     try {
       await alarmApi.acknowledgeAlarm(alarmId, t('diagnosis.acknowledged'));
       message.success(t('diagnosis.ackSuccess'));
-    } catch (error) {
+    } catch {
       message.error(t('diagnosis.ackFailed'));
     }
   };
 
-  const columns = [
+  const columns: TableColumnsType<AlarmEvent> = [
     {
       title: t('diagnosis.severity'),
       dataIndex: 'severity',
@@ -52,7 +53,7 @@ const DiagnosisPage: React.FC = () => {
         { text: t('statusBar.warning'), value: 'warning' },
         { text: t('statusBar.info'), value: 'info' },
       ],
-      onFilter: (value: any, record: any) => record.severity === value,
+      onFilter: (value, record) => record.severity === value,
     },
     {
       title: t('diagnosis.alarmId'),
@@ -65,7 +66,7 @@ const DiagnosisPage: React.FC = () => {
       dataIndex: 'first_seen_ms',
       key: 'first_seen_ms',
       render: (ms: number) => new Date(ms).toLocaleString(),
-      sorter: (a: any, b: any) => a.first_seen_ms - b.first_seen_ms,
+      sorter: (a, b) => a.first_seen_ms - b.first_seen_ms,
     },
     {
       title: t('diagnosis.scenario'),
@@ -76,15 +77,20 @@ const DiagnosisPage: React.FC = () => {
       title: t('diagnosis.evidenceSource'),
       dataIndex: 'evidence_source',
       key: 'evidence_source',
-      render: (source: string) => {
-        const colorMap = { no_board: 'blue', hil_board: 'orange', runtime_live: 'green', mixed: 'purple' };
-        return <Tag color={colorMap[source as keyof typeof colorMap]}>{source}</Tag>;
+      render: (source: EvidenceSource) => {
+        const colorMap: Record<EvidenceSource, string> = {
+          no_board: 'blue',
+          hil_board: 'orange',
+          runtime_live: 'green',
+          mixed: 'purple',
+        };
+        return <Tag color={colorMap[source]}>{source}</Tag>;
       },
     },
     {
       title: t('diagnosis.actions'),
       key: 'action',
-      render: (_: any, record: any) => (
+      render: (_: unknown, record) => (
         <Space>
           <Button size="small" onClick={() => handleViewDetails(record)}>{t('diagnosis.viewDetails')}</Button>
           <Button size="small" type="primary" onClick={() => handleAcknowledge(record.alarm_id)}>{t('diagnosis.acknowledge')}</Button>
@@ -93,11 +99,11 @@ const DiagnosisPage: React.FC = () => {
     },
   ];
 
-  const alarms = alarmsData?.data || [];
+  const alarms = alarmsData?.data ?? [];
   const stats = {
-    critical: alarms.filter((a: any) => a.severity === 'critical').length,
-    warning: alarms.filter((a: any) => a.severity === 'warning').length,
-    info: alarms.filter((a: any) => a.severity === 'info').length,
+    critical: alarms.filter((alarm) => alarm.severity === 'critical').length,
+    warning: alarms.filter((alarm) => alarm.severity === 'warning').length,
+    info: alarms.filter((alarm) => alarm.severity === 'info').length,
   };
 
   return (
@@ -133,7 +139,17 @@ const DiagnosisPage: React.FC = () => {
         onCancel={() => setDetailsVisible(false)}
         footer={[
           <Button key="close" onClick={() => setDetailsVisible(false)}>{t('common.cancel')}</Button>,
-          <Button key="ack" type="primary" onClick={() => { handleAcknowledge(selectedAlarm?.alarm_id); setDetailsVisible(false); }}>
+          <Button
+            key="ack"
+            type="primary"
+            disabled={!selectedAlarm}
+            onClick={() => {
+              if (selectedAlarm) {
+                void handleAcknowledge(selectedAlarm.alarm_id);
+              }
+              setDetailsVisible(false);
+            }}
+          >
             {t('diagnosis.acknowledgeAlarm')}
           </Button>,
         ]}
@@ -145,7 +161,7 @@ const DiagnosisPage: React.FC = () => {
   );
 };
 
-const AlarmDetails: React.FC<{ alarm: any }> = ({ alarm }) => {
+const AlarmDetails: React.FC<{ alarm: AlarmEvent }> = ({ alarm }) => {
   const { t } = useTranslation();
   return (
     <Space direction="vertical" style={{ width: '100%' }} size="large">

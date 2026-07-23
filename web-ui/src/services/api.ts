@@ -8,9 +8,29 @@ import type {
   TraceKeypointArtifact,
   TimingReport,
   GeometryArtifactResponse,
+  PlcDiagnosticsResponse,
+  DslCapabilitiesReport,
+  FlowchartGeneratePlcRequest,
+  FlowchartGeneratePlcResponse,
+  PlcLanguageSnapshot,
+  AlarmEvent,
 } from '../types';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
+const WS_BASE_URL = import.meta.env.VITE_WS_BASE_URL || deriveWebSocketBaseUrl(API_BASE_URL);
+
+function deriveWebSocketBaseUrl(apiBaseUrl: string): string {
+  if (/^https?:\/\//.test(apiBaseUrl)) {
+    return apiBaseUrl.replace(/^http/, 'ws').replace(/\/api\/?$/, '');
+  }
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  return `${protocol}//${window.location.host}`;
+}
+
+export function buildWebSocketUrl(path: string): string {
+  const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+  return `${WS_BASE_URL}${normalizedPath}`;
+}
 
 const apiClient = axios.create({
   baseURL: API_BASE_URL,
@@ -23,9 +43,30 @@ const apiClient = axios.create({
 // Project API
 export const projectApi = {
   listProjects: () => apiClient.get('/projects'),
+
+  getProjectSource: (id: string) =>
+    apiClient.get<{ id: string; path: string; content: string }>(`/projects/${id}/source`),
+};
+
+export const plcApi = {
+  getDiagnostics: (content: string) =>
+    apiClient.post<PlcDiagnosticsResponse>('/plc/diagnostics', { content }),
+
+  getLanguageSnapshot: (content: string) =>
+    apiClient.post<PlcLanguageSnapshot>('/plc/language', { content }),
+};
+
+export const flowchartApi = {
+  generatePlc: (request: FlowchartGeneratePlcRequest) =>
+    apiClient.post<FlowchartGeneratePlcResponse>('/flowchart/generate-plc', request),
 };
 
 // 请求拦截器：添加 JWT token
+// DSL capability API
+export const dslApi = {
+  getCapabilities: () => apiClient.get<DslCapabilitiesReport>('/dsl/capabilities'),
+};
+
 apiClient.interceptors.request.use((config) => {
   const token = localStorage.getItem('auth_token');
   if (token) {
@@ -127,7 +168,7 @@ export const diagnosisApi = {
 // 告警相关 API
 export const alarmApi = {
   getAlarms: (params?: { severity?: string; limit?: number }) =>
-    apiClient.get('/alarms', { params }),
+    apiClient.get<AlarmEvent[]>('/alarms', { params }),
 
   acknowledgeAlarm: (alarmId: string, comment: string) =>
     apiClient.post(`/alarms/${alarmId}/ack`, { comment }),

@@ -13,6 +13,7 @@ import { useTranslation } from 'react-i18next';
 import { runApi, alarmApi } from '../services/api';
 import { useAppStore } from '../stores/appStore';
 import { formatTimestamp } from '../utils/time';
+import type { AlarmEvent } from '../types';
 
 const { Title, Text } = Typography;
 
@@ -150,7 +151,7 @@ const Dashboard: React.FC = () => {
           >
             <List
               dataSource={recentAlarms?.data || []}
-              renderItem={(alarm: any) => (
+              renderItem={(alarm: AlarmEvent) => (
                 <List.Item
                   actions={[
                     <Tag color={alarm.severity === 'critical' ? 'error' : alarm.severity === 'warning' ? 'warning' : 'info'}>

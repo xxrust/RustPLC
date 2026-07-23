@@ -44,12 +44,12 @@ task cycle:
         wait: start_button == true
         timeout: 20ms -> goto fault
     step run:
-        action: set run_lamp.coil on
+        action: set run_lamp on
     on_complete: goto done
 
 task fault:
     step safe_stop:
-        action: set run_lamp.coil off
+        action: set run_lamp off
 
 task done:
     step halt:

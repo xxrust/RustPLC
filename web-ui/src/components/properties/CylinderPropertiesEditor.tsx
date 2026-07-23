@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { cylinderSchema, type CylinderData } from '../../schemas/nodeSchemas';
+import type { NodeData } from '../../stores/topologyStore';
 
 interface CylinderPropertiesEditorProps {
   nodeId: string;
-  data: any;
-  onUpdate: (nodeId: string, data: Partial<any>) => void;
+  data: NodeData;
+  onUpdate: (nodeId: string, data: Partial<NodeData>) => void;
 }
 
 const CylinderPropertiesEditor: React.FC<CylinderPropertiesEditorProps> = ({
@@ -14,15 +15,11 @@ const CylinderPropertiesEditor: React.FC<CylinderPropertiesEditorProps> = ({
   onUpdate,
 }) => {
   const { t } = useTranslation();
-  const [formData, setFormData] = useState<CylinderData>({
-    label: data.label || '',
-    response_time: data.response_time || 100,
-    status: data.status || 'retracted',
-  });
+  const [formData, setFormData] = useState<CylinderData>(() => toCylinderData(data));
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [isDirty, setIsDirty] = useState(false);
 
-  const handleChange = (field: keyof CylinderData, value: any) => {
+  const handleChange = <K extends keyof CylinderData>(field: K, value: CylinderData[K]) => {
     setFormData({ ...formData, [field]: value });
     setIsDirty(true);
     // Clear error for this field
@@ -50,11 +47,7 @@ const CylinderPropertiesEditor: React.FC<CylinderPropertiesEditorProps> = ({
   };
 
   const handleRevert = () => {
-    setFormData({
-      label: data.label || '',
-      response_time: data.response_time || 100,
-      status: data.status || 'retracted',
-    });
+    setFormData(toCylinderData(data));
     setIsDirty(false);
     setErrors({});
   };
@@ -117,7 +110,7 @@ const CylinderPropertiesEditor: React.FC<CylinderPropertiesEditorProps> = ({
         </label>
         <select
           value={formData.status}
-          onChange={(e) => handleChange('status', e.target.value)}
+          onChange={(e) => handleChange('status', e.target.value as CylinderData['status'])}
           style={{
             width: '100%',
             padding: '6px 8px',
@@ -175,3 +168,15 @@ const CylinderPropertiesEditor: React.FC<CylinderPropertiesEditorProps> = ({
 };
 
 export default CylinderPropertiesEditor;
+
+function toCylinderData(data: NodeData): CylinderData {
+  const status = data.status;
+  return {
+    label: data.label || '',
+    response_time: typeof data.response_time === 'number' ? data.response_time : 100,
+    status:
+      status === 'retracted' || status === 'extended' || status === 'moving' || status === 'fault'
+        ? status
+        : 'retracted',
+  };
+}

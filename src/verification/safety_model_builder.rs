@@ -115,6 +115,20 @@ impl SafetyModel {
         let relevant_action_tags = collect_relevant_action_tags(constraints);
         let should_slice_active_tasks =
             !relevant_device_ids.is_empty() || !relevant_action_tags.is_empty();
+        let dependency_tasks = if should_slice_active_tasks {
+            collect_variable_dependency_tasks(
+                &runtime_root_tasks,
+                &task_entry_states,
+                &states,
+                &edges,
+                &outgoing,
+                &pending_action_tags,
+                &relevant_device_ids,
+                &relevant_action_tags,
+            )
+        } else {
+            HashSet::new()
+        };
         let mut active_task_names = Vec::new();
         let mut active_task_entries = Vec::new();
         let mut seen_task = HashSet::<String>::new();
@@ -124,6 +138,7 @@ impl SafetyModel {
             }
             if let Some(entry_state) = task_entry_states.get(&task_name).copied() {
                 if should_slice_active_tasks
+                    && !dependency_tasks.contains(&task_name)
                     && !task_entry_reaches_relevant_state(
                         entry_state,
                         &outgoing,
@@ -165,6 +180,145 @@ impl SafetyModel {
             suggested_depth,
             max_scc_depth,
         }
+    }
+}
+
+fn collect_variable_dependency_tasks(
+    root_tasks: &[String],
+    task_entry_states: &HashMap<String, usize>,
+    states: &[State],
+    edges: &[ModelEdge],
+    outgoing: &[Vec<usize>],
+    pending_action_tags: &HashMap<usize, Vec<String>>,
+    relevant_device_ids: &HashSet<usize>,
+    relevant_action_tags: &HashSet<String>,
+) -> HashSet<String> {
+    let mut retained = root_tasks
+        .iter()
+        .filter_map(|task_name| {
+            let entry_state = task_entry_states.get(task_name).copied()?;
+            task_entry_reaches_relevant_state(
+                entry_state,
+                outgoing,
+                edges,
+                pending_action_tags,
+                relevant_device_ids,
+                relevant_action_tags,
+            )
+            .then(|| task_name.clone())
+        })
+        .collect::<HashSet<_>>();
+
+    let mut changed = true;
+    while changed {
+        changed = false;
+        let mut required_variables = HashSet::new();
+        for task_name in &retained {
+            collect_task_variable_reads(task_name, states, edges, &mut required_variables);
+        }
+
+        for task_name in root_tasks {
+            if retained.contains(task_name) {
+                continue;
+            }
+            if task_writes_any_variable(task_name, states, edges, &required_variables) {
+                retained.insert(task_name.clone());
+                changed = true;
+            }
+        }
+    }
+
+    retained
+}
+
+fn collect_task_variable_reads(
+    task_name: &str,
+    states: &[State],
+    edges: &[ModelEdge],
+    variables: &mut HashSet<usize>,
+) {
+    for edge in edges.iter().filter(|edge| {
+        states
+            .get(edge.from)
+            .is_some_and(|state| state.task_name == task_name)
+    }) {
+        collect_guard_variables(&edge.guard, variables);
+        for effect in &edge.ordered_effects {
+            match effect {
+                ModelEffect::VariableAssignment(assignment) => {
+                    collect_model_expr_variables(&assignment.expr, variables);
+                }
+                ModelEffect::AnalogExpr(effect) => {
+                    collect_model_expr_variables(&effect.expr, variables);
+                }
+                ModelEffect::ExternCall(effect) => {
+                    for expr in &effect.arg_exprs {
+                        collect_model_expr_variables(expr, variables);
+                    }
+                }
+                ModelEffect::DeviceState { .. } => {}
+            }
+        }
+    }
+}
+
+fn task_writes_any_variable(
+    task_name: &str,
+    states: &[State],
+    edges: &[ModelEdge],
+    required_variables: &HashSet<usize>,
+) -> bool {
+    edges.iter().filter(|edge| {
+        states
+            .get(edge.from)
+            .is_some_and(|state| state.task_name == task_name)
+    }).any(|edge| {
+        edge.ordered_effects.iter().any(|effect| match effect {
+            ModelEffect::VariableAssignment(assignment) => {
+                required_variables.contains(&assignment.variable_id)
+            }
+            ModelEffect::ExternCall(effect) => effect
+                .bindings
+                .iter()
+                .any(|binding| required_variables.contains(&binding.variable_id)),
+            ModelEffect::DeviceState { .. } | ModelEffect::AnalogExpr(_) => false,
+        })
+    })
+}
+
+fn collect_guard_variables(guard: &ModelGuard, variables: &mut HashSet<usize>) {
+    match guard {
+        ModelGuard::VariableBool { variable_id, .. } => {
+            variables.insert(*variable_id);
+        }
+        ModelGuard::Expr(expr) => collect_model_expr_variables(expr, variables),
+        ModelGuard::Always
+        | ModelGuard::AnalogRegions { .. }
+        | ModelGuard::DeviceState { .. }
+        | ModelGuard::Timeout
+        | ModelGuard::Delay
+        | ModelGuard::Unsupported => {}
+    }
+}
+
+fn collect_model_expr_variables(expr: &ModelExpr, variables: &mut HashSet<usize>) {
+    match expr {
+        ModelExpr::Variable(variable_id) => {
+            variables.insert(*variable_id);
+        }
+        ModelExpr::Function { args, .. } => {
+            for arg in args {
+                collect_model_expr_variables(arg, variables);
+            }
+        }
+        ModelExpr::UnaryNeg(inner) | ModelExpr::UnaryNot(inner) => {
+            collect_model_expr_variables(inner, variables)
+        }
+        ModelExpr::Binary { left, right, .. } => {
+            collect_model_expr_variables(left, variables);
+            collect_model_expr_variables(right, variables);
+        }
+        ModelExpr::Literal(_) => {}
     }
 }
 

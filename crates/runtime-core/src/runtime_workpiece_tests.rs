@@ -1,4 +1,4 @@
-﻿    #[test]
+    #[test]
     fn workpiece_token_store_creates_tokens_with_active_occupancy() {
         let mut store = WorkpieceTokenStore::new();
 
@@ -1821,3 +1821,79 @@
         );
     }
 
+    #[test]
+    fn runtime_rejects_unmount_when_declared_type_differs_from_mounted_token() {
+        static MOUNT: [Action; 1] = [Action::WorkpieceMount {
+            workpiece_type: "rod",
+            slot: "plate.slot[0]",
+        }];
+        static UNMOUNT: [Action; 1] = [Action::WorkpieceUnmount {
+            workpiece_type: "cell",
+            slot: "plate.slot[0]",
+            to: "outfeed",
+        }];
+        static STEPS: [Step<'static>; 3] = [
+            Step {
+                name: "mount",
+                instr: Instr::Action {
+                    actions: &MOUNT,
+                    next: StepId(1),
+                },
+            },
+            Step {
+                name: "unmount",
+                instr: Instr::Action {
+                    actions: &UNMOUNT,
+                    next: StepId(2),
+                },
+            },
+            Step {
+                name: "done",
+                instr: Instr::Halt,
+            },
+        ];
+        static TASKS: [Task<'static>; 1] = [Task {
+            name: "main",
+            steps: &STEPS,
+            entry: StepId(0),
+        }];
+        static SITES: [WorkpieceSiteDef<'static>; 2] = [
+            WorkpieceSiteDef {
+                name: "plate.slot[0]",
+                kind: WorkpieceSiteKind::CarrierLocation,
+                capacity: 1,
+            },
+            WorkpieceSiteDef {
+                name: "outfeed",
+                kind: WorkpieceSiteKind::WorkpieceLocation,
+                capacity: 1,
+            },
+        ];
+        static PROGRAM: Program<'static> = Program {
+            tasks: &TASKS,
+            pid_loops: &[],
+            var_init: &[],
+            cam_configs: &[],
+            cam_tables: &[],
+            axis_fault_policies: &[],
+            semantic_resources: &[],
+            resource_claims: &[],
+            workpiece_types: &[],
+            workpiece_sites: &SITES,
+            workpiece_holders: &[],
+        };
+
+        let mut io = MemIo::new();
+        let mut rt = Runtime::new(&PROGRAM).expect("runtime init");
+        let err = rt
+            .tick(&mut io)
+            .expect_err("unmount type mismatch must fail");
+        assert_eq!(
+            err,
+            RuntimeError::WorkpieceTypeMismatch {
+                endpoint: "plate.slot[0]",
+                expected: "cell",
+                token_id: 0,
+            }
+        );
+    }

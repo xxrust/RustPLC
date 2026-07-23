@@ -493,6 +493,11 @@ proof_basis = "commissioning checklist"
 symbol = "part_handler"
 reason = "Starter scaffold assumes the transfer handler is empty before startup."
 proof_basis = "commissioning checklist"
+
+[[self_check_exempt_devices]]
+device = "run_lamp"
+reason = "Starter scaffold output lamp has no modeled feedback contact."
+proof_basis = "commissioning checklist verifies lamp wiring during panel test"
 "#
     .to_string()
 }
@@ -502,7 +507,7 @@ proof_basis = "commissioning checklist"
 // ---------------------------------------------------------------------------
 
 fn single_file_plc() -> String {
-    "[topology]\n\ndevice plc_main: plc {\n    purpose: \"Controller with minimal digital I/O mapping\",\n    model_ref: openplc_softplc\n}\n\ncontroller_io plc_main {\n    input start_cycle_cmd: X0 { purpose: \"Start request input\" }\n    output run_lamp_cmd: Y0 { purpose: \"Run lamp command\", safe_state: off }\n}\n\ndevice start_button: sensor { purpose: \"Start request\", subtype: \"push_button\", debounce: 20ms }\ndevice run_lamp: solenoid_valve { purpose: \"Demo run output\", response_time: 20ms }\n\nworkpiece part: workpiece_type {\n    normal_terminal_states: [finished]\n    abnormal_terminal_states: [rejected]\n    ingress_sites: [infeed]\n    normal_egress_sites: [outfeed]\n    abnormal_egress_sites: [reject_bin]\n}\n\nlocation infeed: workpiece_location { capacity: 1 }\nlocation outfeed: workpiece_location { capacity: 1 }\nlocation reject_bin: workpiece_location { capacity: 20 }\nholder part_handler: workpiece_holder { capacity: 1 }\n\nrelation { from: start_button.out, to: plc_main.start_cycle_cmd, via: reports_to }\nrelation { from: plc_main.run_lamp_cmd, to: run_lamp.coil, via: driven_by }\n\n[constraints]\n\n[tasks]\n\ntask startup_initializer:\n    step safe_outputs_off:\n        action: set run_lamp.coil off\n\n    on_complete: goto main.wait_start\n\ntask main:\n    step wait_start:\n        wait: start_button == true\n        timeout: 100ms -> goto fault.reject_unstarted\n\n    step pick:\n        effect: acquire holder part_handler from infeed\n\n    step run:\n        action: set run_lamp.coil on\n        delay: 20ms\n\n    step place:\n        effect: transfer from part_handler to outfeed\n\n    step stop:\n        effect: finish workpiece at outfeed as finished\n        action: set run_lamp.coil off\n\n    on_complete: goto done\n\ntask fault:\n    step reject_unstarted:\n        action: set run_lamp.coil off\n        effect: transfer from infeed to reject_bin\n        effect: finish workpiece at reject_bin as rejected\n    on_complete: goto done\n\ntask done:\n    step halt:\n".to_string()
+    "[topology]\n\ndevice plc_main: plc {\n    purpose: \"Controller with minimal digital I/O mapping\",\n    model_ref: openplc_softplc\n}\n\ncontroller_io plc_main {\n    input start_cycle_cmd: X0 { purpose: \"Start request input\" }\n    output run_lamp_cmd: Y0 { purpose: \"Run lamp command\", safe_state: off }\n}\n\ndevice start_button: sensor { purpose: \"Start request\", subtype: \"push_button\", debounce: 20ms }\ndevice run_lamp: solenoid_valve { purpose: \"Demo run output\", response_time: 20ms }\n\nworkpiece part: workpiece_type {\n    normal_terminal_states: [finished]\n    abnormal_terminal_states: [rejected]\n    ingress_sites: [infeed]\n    normal_egress_sites: [outfeed]\n    abnormal_egress_sites: [reject_bin]\n}\n\nlocation infeed: workpiece_location { capacity: 1 }\nlocation outfeed: workpiece_location { capacity: 1 }\nlocation reject_bin: workpiece_location { capacity: 20 }\nholder part_handler: workpiece_holder { capacity: 1 }\n\nrelation { from: start_button.out, to: plc_main.start_cycle_cmd, via: reports_to }\nrelation { from: plc_main.run_lamp_cmd, to: run_lamp.coil, via: driven_by }\n\n[constraints]\n\n[tasks]\n\ntask startup_initializer:\n    step safe_outputs_off:\n        action: set run_lamp off\n\n    on_complete: goto main.wait_start\n\ntask main:\n    step wait_start:\n        wait: start_button == true\n        timeout: 100ms -> goto fault.reject_unstarted\n\n    step pick:\n        effect: acquire holder part_handler from infeed\n\n    step run:\n        action: set run_lamp on\n        delay: 20ms\n\n    step place:\n        effect: transfer from part_handler to outfeed\n\n    step stop:\n        effect: finish workpiece at outfeed as finished\n        action: set run_lamp off\n\n    on_complete: goto done\n\ntask fault:\n    step reject_unstarted:\n        action: set run_lamp off\n        effect: transfer from infeed to reject_bin\n        effect: finish workpiece at reject_bin as rejected\n    on_complete: goto done\n\ntask done:\n    step halt:\n".to_string()
 }
 
 // ---------------------------------------------------------------------------
@@ -583,12 +588,12 @@ fn phased_scaffold_files(
         // -- 01_init: initialization defaults --
         (
             "01_init/defaults.plc".to_string(),
-            "task startup_initializer:\n    step safe_outputs_off:\n        action: set run_lamp.coil off\n\n    on_complete: goto supervisor.wait_start\n".to_string(),
+            "task startup_initializer:\n    step safe_outputs_off:\n        action: set run_lamp off\n\n    on_complete: goto supervisor.wait_start\n".to_string(),
         ),
         // -- 02_process: automatic production cycle --
         (
             "02_process/main_cycle.plc".to_string(),
-            "task supervisor:\n    step wait_start:\n        wait: start_button == true\n        timeout: 100ms -> goto fault.reject_unstarted\n\n    on_complete: goto auto_cycle.pick\n\ntask auto_cycle:\n    step pick:\n        effect: acquire holder part_handler from infeed\n\n    step run:\n        action: set run_lamp.coil on\n        delay: 20ms\n\n    step place:\n        effect: transfer from part_handler to outfeed\n\n    step stop:\n        effect: finish workpiece at outfeed as finished\n        action: set run_lamp.coil off\n\n    on_complete: goto done.halt\n".to_string(),
+            "task supervisor:\n    step wait_start:\n        wait: start_button == true\n        timeout: 100ms -> goto fault.reject_unstarted\n\n    on_complete: goto auto_cycle.pick\n\ntask auto_cycle:\n    step pick:\n        effect: acquire holder part_handler from infeed\n\n    step run:\n        action: set run_lamp on\n        delay: 20ms\n\n    step place:\n        effect: transfer from part_handler to outfeed\n\n    step stop:\n        effect: finish workpiece at outfeed as finished\n        action: set run_lamp off\n\n    on_complete: goto done.halt\n".to_string(),
         ),
         // -- 03_constraints: safety and timing rules --
         (
@@ -598,7 +603,7 @@ fn phased_scaffold_files(
         // -- 04_faults: fault handling --
         (
             "04_faults/fault_handlers.plc".to_string(),
-            "task fault:\n    step reject_unstarted:\n        action: set run_lamp.coil off\n        effect: transfer from infeed to reject_bin\n        effect: finish workpiece at reject_bin as rejected\n\n    on_complete: goto done.halt\n\ntask done:\n    step halt:\n".to_string(),
+            "task fault:\n    step reject_unstarted:\n        action: set run_lamp off\n        effect: transfer from infeed to reject_bin\n        effect: finish workpiece at reject_bin as rejected\n\n    on_complete: goto done.halt\n\ntask done:\n    step halt:\n".to_string(),
         ),
         // -- 05_supervision: mode management (placeholder) --
         (

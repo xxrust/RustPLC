@@ -2669,12 +2669,14 @@ task main:
     fn parses_station_handshake_and_transfer_point_into_topology() {
         let input = r#"
 [topology]
+device plc_a: plc { model_ref: openplc_softplc }
+device plc_b: plc { model_ref: openplc_softplc }
 device cyl_load: cylinder
 device cyl_press: cylinder
 site handoff: workpiece_location { capacity: 1 }
 
-station st01 { owns: [cyl_load], tasks: [load_cycle] }
-station st02 { owns: [cyl_press], tasks: [press_cycle] }
+station st01 { owns: [plc_a, cyl_load], tasks: [load_cycle] }
+station st02 { owns: [plc_b, cyl_press], tasks: [press_cycle] }
 handshake st01_to_st02 {
     from: st01,
     to: st02,
@@ -2688,6 +2690,11 @@ transfer_point load_to_press {
     to_station: st02,
     site: handoff,
     handshake: st01_to_st02
+}
+controller_sync plc_pair_sync {
+    controllers: [plc_a, plc_b],
+    max_skew: 5ms,
+    heartbeat: 100ms
 }
 
 [constraints]
@@ -2705,11 +2712,167 @@ task fault:
         assert_eq!(program.topology.stations.len(), 2);
         assert_eq!(program.topology.handshakes.len(), 1);
         assert_eq!(program.topology.transfer_points.len(), 1);
-        assert_eq!(program.topology.stations[0].owns, vec!["cyl_load"]);
+        assert_eq!(program.topology.controller_syncs.len(), 1);
+        assert_eq!(program.topology.stations[0].owns, vec!["plc_a", "cyl_load"]);
         assert_eq!(program.topology.handshakes[0].timeout.target.task, "fault");
         assert_eq!(
             program.topology.transfer_points[0].handshake,
             "st01_to_st02"
         );
+        assert_eq!(
+            program.topology.controller_syncs[0].controllers,
+            vec!["plc_a", "plc_b"]
+        );
+    }
+
+    #[test]
+    fn connected_to_text_inside_string_is_not_treated_as_deprecated_syntax() {
+        let input = r#"
+[topology]
+
+[constraints]
+
+[tasks]
+task main:
+    step idle:
+        action: log "migration note: connected_to: use relation instead"
+"#;
+
+        parse_plc(input).expect("string contents must not trigger connected_to syntax rejection");
+    }
+
+    #[test]
+    fn rejects_expression_that_exceeds_depth_budget() {
+        let nested = format!("{}1{}", "(".repeat(300), ")".repeat(300));
+        let input = format!(
+            "[topology]\nvariable result: float = 0\n\n[constraints]\n\n[tasks]\ntask main:\n    step idle:\n        action: compute result = {nested}\n"
+        );
+
+        let error = parse_plc(&input).expect_err("deep expressions must fail without overflowing");
+        assert!(
+            error.to_string().contains("expression")
+                || error.to_string().contains("budget")
+                || error.to_string().contains("depth"),
+            "unexpected diagnostic: {error}"
+        );
+    }
+
+    #[test]
+    fn rejects_unary_expression_that_exceeds_depth_budget() {
+        let nested = format!("{}1", "-".repeat(300));
+        let input = format!(
+            "[topology]\nvariable result: float = 0\n\n[constraints]\n\n[tasks]\ntask main:\n    step idle:\n        action: compute result = {nested}\n"
+        );
+
+        let error = parse_plc(&input).expect_err("deep unary expressions must fail safely");
+        assert!(error.to_string().contains("depth"), "unexpected diagnostic: {error}");
+    }
+
+    #[test]
+    fn rejects_non_finite_analog_threshold_literal() {
+        let huge = "9".repeat(400);
+        let input = format!(
+            "[topology]\ndevice pressure: analog_input {{ range: 0..10 }}\ndevice stop: sensor\n\n[constraints]\nsafety: pressure > {huge} conflicts_with stop.on\n\n[tasks]\ntask main:\n    step idle:\n"
+        );
+
+        let error = parse_plc(&input).expect_err("overflowing threshold must be rejected");
+        assert!(
+            error.to_string().contains("finite")
+                || error.to_string().contains("numeric")
+                || error.to_string().contains("数值"),
+            "unexpected diagnostic: {error}"
+        );
+    }
+
+    #[test]
+    fn parses_generic_task_template_and_instance() {
+        let input = r#"
+[topology]
+device clamp: cylinder
+
+[constraints]
+
+[tasks]
+task_template cycle<ACT>:
+    task run:
+        step start:
+            action: extend ACT
+            timeout: 100ms -> goto fault
+            goto done
+        step done:
+        step fault:
+    on_complete: unreachable
+task_instance clamp_cycle: cycle<clamp>
+"#;
+
+        let program = parse_plc(input).expect("generic task template should parse");
+        assert_eq!(program.tasks.task_templates.len(), 1);
+        assert_eq!(program.tasks.task_instances.len(), 1);
+        let template = &program.tasks.task_templates[0];
+        assert_eq!(template.name, "cycle");
+        assert_eq!(template.params, vec!["ACT".to_string()]);
+        assert_eq!(template.tasks[0].name, "run");
+        assert_eq!(program.tasks.task_instances[0].name, "clamp_cycle");
+        assert_eq!(program.tasks.task_instances[0].template, "cycle");
+        assert_eq!(program.tasks.task_instances[0].args, vec!["clamp".to_string()]);
+    }
+
+    #[test]
+    fn parses_generic_device_template_and_instance() {
+        let input = r#"
+[topology]
+device_template single<T> {
+    device main: T { purpose: "templated actuator" }
+}
+device_instance clamp: single<solenoid_valve>
+
+[constraints]
+
+[tasks]
+task main:
+    step idle:
+"#;
+
+        let program = parse_plc(input).expect("generic device template should parse");
+        assert_eq!(program.topology.device_templates.len(), 1);
+        assert_eq!(program.topology.device_instances.len(), 1);
+        assert_eq!(program.topology.device_templates[0].name, "single");
+        assert_eq!(program.topology.device_instances[0].name, "clamp");
+    }
+
+    #[test]
+    fn parses_match_statement_as_if_else_sugar() {
+        let input = r#"
+[topology]
+device mode_switch: sensor
+
+[constraints]
+
+[tasks]
+task route:
+    step decide:
+        match mode_switch:
+            case auto -> goto auto_task
+            default -> goto manual_task
+task auto_task:
+    step idle:
+task manual_task:
+    step idle:
+"#;
+
+        let program = parse_plc(input).expect("match statement should parse");
+        let statement = &program.tasks.tasks[0].steps[0].statements[0];
+        match statement {
+            StepStatement::IfElse {
+                condition,
+                then_goto,
+                else_goto,
+            } => {
+                assert_eq!(condition.left, "mode_switch");
+                assert_eq!(then_goto.task, "auto_task");
+                assert_eq!(else_goto.task, "manual_task");
+            }
+            other => panic!("match should lower to IfElse sugar, got {other:?}"),
+        }
     }
 }

@@ -1,4 +1,4 @@
-﻿#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize)]
 struct BuildMeta<'a> {
     plc_sha256: &'a str,
     generated_at: &'a str,
@@ -162,15 +162,16 @@ fn run_build_rp2040_subcommand(
     let ir_bundle = compile_pipeline(&loaded).map_err(|errors| errors.join("\n\n"))?;
 
     // For build artifacts we use 1ms ticks so ms-based DSL durations are always aligned.
-    let runtime_program = state_machine_to_runtime_program(
+    let compiled_runtime_program = state_machine_to_runtime_program(
         &ir_bundle.topology,
         &ir_bundle.constraints,
         &ir_bundle.state_machine,
         1,
     )
     .map_err(|err| format!("Failed to bridge to runtime Program: {err}"))?;
+    let runtime_program = compiled_runtime_program.program();
 
-    let usage = io_usage_for_program(&runtime_program);
+    let usage = io_usage_for_program(runtime_program);
     let io_map = match io_map_path.as_ref() {
         None => None,
         Some(path) => {
@@ -196,7 +197,7 @@ Start from the generated `io_map.template.toml` under `--out <dir>` and fill in 
         }
     };
 
-    let generated_src = codegen::generate_program_module(&runtime_program, "generated")
+    let generated_src = codegen::generate_program_module(runtime_program, "generated")
         .map_err(|err| format!("Codegen failed: {err:?}"))?;
 
     let mut generated_src = generated_src;
@@ -209,7 +210,7 @@ Start from the generated `io_map.template.toml` under `--out <dir>` and fill in 
         .map_err(|err| format!("Failed to write {generated_path:?}: {err}"))?;
 
     let iomap_path = out_dir.join("io_map.template.toml");
-    let iomap = io_map_template_for_program(&runtime_program);
+    let iomap = io_map_template_for_program(runtime_program);
     fs::write(&iomap_path, iomap)
         .map_err(|err| format!("Failed to write {iomap_path:?}: {err}"))?;
 
@@ -378,14 +379,15 @@ fn run_build_renode_stm32_subcommand(
     };
 
     let ir_bundle = compile_pipeline(&loaded).map_err(|errors| errors.join("\n\n"))?;
-    let runtime_program = state_machine_to_runtime_program(
+    let compiled_runtime_program = state_machine_to_runtime_program(
         &ir_bundle.topology,
         &ir_bundle.constraints,
         &ir_bundle.state_machine,
         scenario.tick_ms,
     )
     .map_err(|err| format!("Failed to bridge to runtime Program: {err}"))?;
-    let generated_src = codegen::generate_program_module(&runtime_program, "generated")
+    let runtime_program = compiled_runtime_program.program();
+    let generated_src = codegen::generate_program_module(runtime_program, "generated")
         .map_err(|err| format!("Codegen failed: {err:?}"))?;
     let generated_path = out_dir.join("generated_program.rs");
     fs::write(&generated_path, ensure_trailing_newline(generated_src))
@@ -1167,4 +1169,3 @@ fn io_usage_for_program(program: &Program<'_>) -> IoUsage {
         analog_outputs: aos,
     }
 }
-

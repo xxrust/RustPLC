@@ -202,12 +202,13 @@ pub(crate) fn run_scenario_validate_subcommand(
         .any(|f| f.severity == ScenarioValidateSeverity::Error);
 
     if !has_error {
-        let runtime_program = compile_loaded_plc_to_runtime_program(&loaded, scenario.tick_ms)
-            .map_err(|e| {
+        let compiled_runtime_program =
+            compile_loaded_plc_to_runtime_program(&loaded, scenario.tick_ms).map_err(|e| {
                 format!("scenario-validate: failed to compile PLC to runtime program: {e}")
             })?;
+        let runtime_program = compiled_runtime_program.program();
         let (num_di, num_do, num_ai, num_ao) =
-            io_sizes_for_program_and_scenario(&runtime_program, &scenario);
+            io_sizes_for_program_and_scenario(runtime_program, &scenario);
 
         // Validate force output ids against program IO sizes (out-of-range forces are almost
         // always authoring mistakes and should fail early).
@@ -243,7 +244,7 @@ pub(crate) fn run_scenario_validate_subcommand(
             }
         }
         let mut io = sim::SimIo::new(num_di, num_do, num_ai, num_ao);
-        sim::attach_inferred_plant_from_program(&mut io, &runtime_program);
+        sim::attach_inferred_plant_from_program(&mut io, runtime_program);
 
         // Re-apply the scenario onto the IO we will use for probing.
         if let Err(err) = scenario.apply_to_simio(&mut io) {
@@ -253,7 +254,7 @@ pub(crate) fn run_scenario_validate_subcommand(
                 Some("Fix the scenario YAML errors and retry.".to_string()),
             ));
         } else {
-            let mut rt = runtime_core::Runtime::new(&runtime_program)
+            let mut rt = runtime_core::Runtime::new(runtime_program)
                 .map_err(|err| format!("scenario-validate: runtime init failed: {err:?}"))?;
             let mut axis_driver = sim::DeterministicAxisDriver::new();
 
@@ -300,7 +301,7 @@ inputs:\n\
                     ));
                     break;
                 }
-                if is_halted(&rt, &runtime_program) {
+                if is_halted(&rt, runtime_program) {
                     break;
                 }
             }

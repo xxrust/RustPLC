@@ -1,4 +1,5 @@
-﻿fn condition_to_wait_instr(
+fn condition_to_wait_instr<'a>(
+    arena: &'a Bump,
     resolver: &TopologyResolver,
     state_name: &str,
     expression: &str,
@@ -7,13 +8,13 @@
     cam_indices: &HashMap<String, u16>,
     cond_next: StepId,
     timeout: Option<Timeout>,
-) -> Result<Instr<'static>, BridgeError> {
+) -> Result<Instr<'a>, BridgeError> {
     let expr = expression.trim();
     let analog_wait = parse_analog_region_guard(expr);
 
     if let Some((device, ranges)) = analog_wait {
         let id = resolver.resolve_analog_input_id(state_name, &device)?;
-        let analog_ranges = ranges_to_analog_ranges(sm, state_name, &device, &ranges)?;
+        let analog_ranges = ranges_to_analog_ranges(arena, sm, state_name, &device, &ranges)?;
         Ok(Instr::WaitAnalog {
             id,
             ranges: analog_ranges,
@@ -24,6 +25,7 @@
         Ok(cam_guard.into_instr(cond_next, timeout))
     } else if let Ok((lhs, equals)) = parse_single_bool_guard(state_name, expr) {
         bool_guard_to_instr(
+            arena,
             resolver,
             state_name,
             lhs,
@@ -50,7 +52,7 @@
     }
 }
 
-fn edge_guard_to_instr(
+fn edge_guard_to_instr<'a>(
     resolver: &TopologyResolver,
     state_name: &str,
     edge: IrEdgeKind,
@@ -58,7 +60,7 @@ fn edge_guard_to_instr(
     variable_indices: &HashMap<String, u16>,
     next: StepId,
     timeout: Option<Timeout>,
-) -> Result<Instr<'static>, BridgeError> {
+) -> Result<Instr<'a>, BridgeError> {
     let rt_edge = match edge {
         IrEdgeKind::Rising => RtEdgeKind::Rising,
         IrEdgeKind::Falling => RtEdgeKind::Falling,
@@ -206,7 +208,7 @@ enum CamWaitGuard {
 }
 
 impl CamWaitGuard {
-    fn into_instr(self, next: StepId, timeout: Option<Timeout>) -> Instr<'static> {
+    fn into_instr<'a>(self, next: StepId, timeout: Option<Timeout>) -> Instr<'a> {
         match self {
             CamWaitGuard::Digital {
                 cam_index,
@@ -382,7 +384,8 @@ fn parse_bool_guard_operand(raw: &str) -> Option<BoolGuardOperand> {
     }
 }
 
-fn bool_guard_to_instr(
+fn bool_guard_to_instr<'a>(
+    arena: &'a Bump,
     resolver: &TopologyResolver,
     state_name: &str,
     lhs: BoolGuardOperand,
@@ -390,7 +393,7 @@ fn bool_guard_to_instr(
     variable_indices: &HashMap<String, u16>,
     next: StepId,
     timeout: Option<Timeout>,
-) -> Result<Instr<'static>, BridgeError> {
+) -> Result<Instr<'a>, BridgeError> {
     match lhs {
         BoolGuardOperand::Identifier(name) => {
             if variable_indices.contains_key(&name) {
@@ -464,17 +467,18 @@ fn bool_guard_to_instr(
                     expression: format!("{}.{} == false", state_ref.device, state_ref.state),
                 });
             }
-            resolver.resolve_state_guard_instr(state_name, &state_ref, next, timeout)
+            resolver.resolve_state_guard_instr(arena, state_name, &state_ref, next, timeout)
         }
     }
 }
 
-fn ranges_to_analog_ranges(
+fn ranges_to_analog_ranges<'a>(
+    arena: &'a Bump,
     sm: &StateMachine,
     state_name: &str,
     device: &str,
     region_indices: &[usize],
-) -> Result<&'static [AnalogRange], BridgeError> {
+) -> Result<&'a [AnalogRange], BridgeError> {
     let regions =
         sm.analog_regions
             .get(device)
@@ -507,7 +511,7 @@ fn ranges_to_analog_ranges(
         out.push(AnalogRange { min, max });
     }
 
-    Ok(Box::leak(out.into_boxed_slice()))
+    Ok(arena.alloc_slice_copy(&out))
 }
 
 fn lookup_target_step(
@@ -571,13 +575,14 @@ fn lower_axis_fault_route_kind(kind: IrAxisFaultRouteKind) -> RtAxisFaultRouteKi
     }
 }
 
-fn leak_axis_fault_route_rules(
+fn leak_axis_fault_route_rules<'a>(
+    arena: &'a Bump,
     state_name: &str,
     branch_label: &str,
     routes: &[crate::ir::AxisFaultRouteBranch],
     state_to_step: &HashMap<(String, String), StepId>,
     task_entry_steps: &HashMap<String, StepId>,
-) -> Result<&'static [AxisFaultRouteRule], BridgeError> {
+) -> Result<&'a [AxisFaultRouteRule], BridgeError> {
     let mut out = Vec::with_capacity(routes.len());
     for route in routes {
         out.push(AxisFaultRouteRule {
@@ -593,7 +598,7 @@ fn leak_axis_fault_route_rules(
             )?,
         });
     }
-    Ok(Box::leak(out.into_boxed_slice()))
+    Ok(arena.alloc_slice_copy(&out))
 }
 
 fn parse_single_bool_guard(
@@ -665,4 +670,3 @@ fn compile_guard_expr_program(
         }
     })
 }
-

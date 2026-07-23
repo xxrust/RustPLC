@@ -13,18 +13,30 @@
 /// - Runtime tasks are generated from condensed root task contexts (task-SCC roots without
 ///   external cross-task incoming edges).
 /// - Per-task step graphs stay local (`StepId` is scoped per runtime task).
-/// - Generated program uses leaked allocations to produce a `'static` `Program`.
+/// - Generated program owns one arena that releases all dynamic allocations on drop.
 pub fn state_machine_to_runtime_program(
     topology: &TopologyGraph,
     constraints: &ConstraintSet,
     sm: &StateMachine,
     tick_ms: u64,
-) -> Result<Program<'static>, BridgeError> {
+) -> Result<CompiledRuntimeProgram, BridgeError> {
+    CompiledRuntimeProgram::try_new(Bump::new(), |arena| {
+        lower_runtime_program(arena, topology, constraints, sm, tick_ms)
+    })
+}
+
+fn lower_runtime_program<'a>(
+    arena: &'a Bump,
+    topology: &TopologyGraph,
+    constraints: &ConstraintSet,
+    sm: &StateMachine,
+    tick_ms: u64,
+) -> Result<Program<'a>, BridgeError> {
     if tick_ms == 0 {
         return Err(BridgeError::InvalidTickMs);
     }
     validate_extern_tick_budget(topology, sm, tick_ms)?;
-    let workpiece_ctx = WorkpieceBridgeContext::new(constraints, sm)?;
+    let workpiece_ctx = WorkpieceBridgeContext::new(arena, constraints, sm)?;
 
     let resolver = TopologyResolver::new(topology);
     let variable_indices = topology
@@ -89,7 +101,7 @@ pub fn state_machine_to_runtime_program(
             .push(idx);
     }
 
-    let mut runtime_tasks: Vec<Task<'static>> = Vec::new();
+    let mut runtime_tasks: Vec<Task<'a>> = Vec::new();
     for root_task in runtime_root_tasks {
         let reachable_state_keys = collect_runtime_task_state_keys(
             &root_task,
@@ -114,18 +126,17 @@ pub fn state_machine_to_runtime_program(
         }
 
         let mut local_state_to_step = HashMap::<(String, String), StepId>::new();
-        let mut step_names: Vec<&'static str> = Vec::with_capacity(local_states.len());
+        let mut step_names: Vec<&'a str> = Vec::with_capacity(local_states.len());
         for (idx, state) in local_states.iter().enumerate() {
             let name = format!("{}.{}", state.task_name, state.step_name);
-            let leaked_name: &'static str = Box::leak(name.into_boxed_str());
-            step_names.push(leaked_name);
+            step_names.push(arena.alloc_str(&name));
             local_state_to_step.insert(
                 (state.task_name.clone(), state.step_name.clone()),
-                StepId(idx as u16),
+                checked_step_id(&root_task, idx)?,
             );
         }
 
-        let mut steps: Vec<Step<'static>> = step_names
+        let mut steps: Vec<Step<'a>> = step_names
             .iter()
             .map(|&name| Step {
                 name,
@@ -156,6 +167,7 @@ pub fn state_machine_to_runtime_program(
                 .unwrap_or_default();
 
             let instr = convert_state_outgoing(
+                arena,
                 &resolver,
                 &state_name,
                 &outs,
@@ -186,8 +198,8 @@ pub fn state_machine_to_runtime_program(
                 state: format!("{}.{}", entry_state.task_name, entry_state.step_name),
             })?;
 
-        let leaked_steps: &'static [Step<'static>] = Box::leak(steps.into_boxed_slice());
-        let leaked_task_name: &'static str = Box::leak(root_task.into_boxed_str());
+        let leaked_steps: &'a [Step<'a>] = arena.alloc_slice_copy(&steps);
+        let leaked_task_name: &'a str = arena.alloc_str(&root_task);
         runtime_tasks.push(Task {
             name: leaked_task_name,
             steps: leaked_steps,
@@ -200,38 +212,28 @@ pub fn state_machine_to_runtime_program(
             state: format!("{}.{}", sm.initial.task_name, sm.initial.step_name),
         });
     }
-    let leaked_tasks: &'static [Task<'static>] = Box::leak(runtime_tasks.into_boxed_slice());
+    let leaked_tasks: &'a [Task<'a>] = arena.alloc_slice_copy(&runtime_tasks);
 
-    let leaked_pid_loops: &'static [PidConfig] =
-        Box::leak(build_pid_configs(&resolver, topology, tick_ms)?.into_boxed_slice());
-    let leaked_cam_tables: &'static [CamTableData] =
-        Box::leak(build_cam_tables(topology).into_boxed_slice());
-    let leaked_cam_configs: &'static [CamCouplingConfig] = Box::leak(
-        build_cam_configs(&resolver, topology, &cam_table_index_by_name)?.into_boxed_slice(),
-    );
-    let leaked_var_init: &'static [f32] = Box::leak(
-        topology
-            .variables
-            .iter()
-            .map(|var| var.initial_value)
-            .collect::<Vec<_>>()
-            .into_boxed_slice(),
-    );
-    let leaked_axis_fault_policies: &'static [AxisFaultPolicy<'static>] =
-        Box::leak(build_axis_fault_policies(topology).into_boxed_slice());
-    let leaked_semantic_resources: &'static [RtSemanticResource<'static>] =
-        Box::leak(build_semantic_resources(constraints).into_boxed_slice());
-    let leaked_resource_claims: &'static [RtResourceClaimRule<'static>] =
-        Box::leak(build_resource_claims(&resolver, constraints)?.into_boxed_slice());
+    let pid_loops = build_pid_configs(&resolver, topology, tick_ms)?;
+    let cam_tables = build_cam_tables(topology);
+    let cam_configs = build_cam_configs(&resolver, topology, &cam_table_index_by_name)?;
+    let var_init = topology
+        .variables
+        .iter()
+        .map(|var| var.initial_value)
+        .collect::<Vec<_>>();
+    let axis_fault_policies = build_axis_fault_policies(arena, topology);
+    let semantic_resources = build_semantic_resources(arena, constraints);
+    let resource_claims = build_resource_claims(arena, &resolver, constraints)?;
     Ok(Program {
         tasks: leaked_tasks,
-        pid_loops: leaked_pid_loops,
-        var_init: leaked_var_init,
-        cam_configs: leaked_cam_configs,
-        cam_tables: leaked_cam_tables,
-        axis_fault_policies: leaked_axis_fault_policies,
-        semantic_resources: leaked_semantic_resources,
-        resource_claims: leaked_resource_claims,
+        pid_loops: arena.alloc_slice_copy(&pid_loops),
+        var_init: arena.alloc_slice_copy(&var_init),
+        cam_configs: arena.alloc_slice_copy(&cam_configs),
+        cam_tables: arena.alloc_slice_copy(&cam_tables),
+        axis_fault_policies: arena.alloc_slice_copy(&axis_fault_policies),
+        semantic_resources: arena.alloc_slice_copy(&semantic_resources),
+        resource_claims: arena.alloc_slice_copy(&resource_claims),
         workpiece_types: workpiece_ctx.runtime_types,
         workpiece_sites: workpiece_ctx.runtime_sites,
         workpiece_holders: workpiece_ctx.runtime_holders,
@@ -513,12 +515,15 @@ fn push_axis_branch_target_state_key(
     }
 }
 
-fn build_axis_fault_policies(topology: &TopologyGraph) -> Vec<AxisFaultPolicy<'static>> {
+fn build_axis_fault_policies<'a>(
+    arena: &'a Bump,
+    topology: &TopologyGraph,
+) -> Vec<AxisFaultPolicy<'a>> {
     topology
         .axis_fault_contracts
         .iter()
         .map(|contract| AxisFaultPolicy {
-            axis: Box::leak(contract.axis.clone().into_boxed_str()),
+            axis: arena.alloc_str(&contract.axis),
             severity: lower_axis_fault_severity(contract.severity.clone()),
             stop_mode: lower_axis_stop_mode(contract.stop_mode.clone()),
             auto_reset_policy: lower_axis_auto_reset_policy(contract.auto_reset_policy.clone()),
@@ -526,26 +531,30 @@ fn build_axis_fault_policies(topology: &TopologyGraph) -> Vec<AxisFaultPolicy<'s
             propagation_scope: lower_axis_fault_propagation_scope(
                 contract.propagation_scope.clone(),
             ),
-            propagation_targets: leak_str_slice(&contract.propagation_targets),
+            propagation_targets: leak_str_slice(arena, &contract.propagation_targets),
         })
         .collect()
 }
 
-fn build_semantic_resources(constraints: &ConstraintSet) -> Vec<RtSemanticResource<'static>> {
+fn build_semantic_resources<'a>(
+    arena: &'a Bump,
+    constraints: &ConstraintSet,
+) -> Vec<RtSemanticResource<'a>> {
     constraints
         .semantic_resources
         .iter()
         .map(|resource| RtSemanticResource {
-            name: Box::leak(resource.name.clone().into_boxed_str()),
+            name: arena.alloc_str(&resource.name),
             mode: lower_semantic_resource_mode(resource.mode.clone()),
         })
         .collect()
 }
 
-fn build_resource_claims(
+fn build_resource_claims<'a>(
+    arena: &'a Bump,
     resolver: &TopologyResolver,
     constraints: &ConstraintSet,
-) -> Result<Vec<RtResourceClaimRule<'static>>, BridgeError> {
+) -> Result<Vec<RtResourceClaimRule<'a>>, BridgeError> {
     let resource_index_by_name = constraints
         .semantic_resources
         .iter()
@@ -563,7 +572,7 @@ fn build_resource_claims(
                 detail: format!("semantic resource `{}` is not declared", claim.resource),
             });
         };
-        let source = lower_runtime_claim_source(resolver, &claim_text, &claim.source)?;
+        let source = lower_runtime_claim_source(arena, resolver, &claim_text, &claim.source)?;
         out.push(RtResourceClaimRule {
             source,
             resource_index,
@@ -578,18 +587,22 @@ enum BridgeCarrierLayout {
     Grid { rows: u32, cols: u32 },
 }
 
-struct WorkpieceBridgeContext {
+struct WorkpieceBridgeContext<'a> {
     carrier_layouts: HashMap<String, BridgeCarrierLayout>,
-    merge_input_types: HashMap<(String, usize), &'static [&'static str]>,
-    phase1_workpiece_type: Option<&'static str>,
-    runtime_types: &'static [RtWorkpieceTypeDef<'static>],
-    runtime_sites: &'static [RtWorkpieceSiteDef<'static>],
-    runtime_holders: &'static [RtWorkpieceHolderDef<'static>],
+    merge_input_types: HashMap<(String, usize), &'a [&'a str]>,
+    phase1_workpiece_type: Option<&'a str>,
+    runtime_types: &'a [RtWorkpieceTypeDef<'a>],
+    runtime_sites: &'a [RtWorkpieceSiteDef<'a>],
+    runtime_holders: &'a [RtWorkpieceHolderDef<'a>],
 }
 
-impl WorkpieceBridgeContext {
-    fn new(constraints: &ConstraintSet, sm: &StateMachine) -> Result<Self, BridgeError> {
-        let carrier_layouts = collect_workpiece_carrier_layouts(&constraints.workpiece_carriers);
+impl<'a> WorkpieceBridgeContext<'a> {
+    fn new(
+        arena: &'a Bump,
+        constraints: &ConstraintSet,
+        sm: &StateMachine,
+    ) -> Result<Self, BridgeError> {
+        let carrier_layouts = collect_workpiece_carrier_layouts(&constraints.workpiece_carriers)?;
         let has_phase1_effects = sm
             .transitions
             .iter()
@@ -597,9 +610,7 @@ impl WorkpieceBridgeContext {
             .any(workpiece_effect_requires_phase1_type);
         let phase1_workpiece_type = if has_phase1_effects {
             match constraints.workpiece_types.as_slice() {
-                [workpiece] => {
-                    Some(Box::leak(workpiece.name.clone().into_boxed_str()) as &'static str)
-                }
+                [workpiece] => Some(arena.alloc_str(&workpiece.name) as &'a str),
                 _ => {
                     return Err(BridgeError::Phase1WorkpieceTypeArity {
                         count: constraints.workpiece_types.len(),
@@ -612,21 +623,30 @@ impl WorkpieceBridgeContext {
 
         Ok(Self {
             carrier_layouts: carrier_layouts.clone(),
-            merge_input_types: collect_workpiece_merge_input_types(&constraints.workpiece_types),
+            merge_input_types: collect_workpiece_merge_input_types(
+                arena,
+                &constraints.workpiece_types,
+            ),
             phase1_workpiece_type,
-            runtime_types: leak_workpiece_types(&constraints.workpiece_types, &carrier_layouts)?,
+            runtime_types: leak_workpiece_types(
+                arena,
+                &constraints.workpiece_types,
+                &carrier_layouts,
+            )?,
             runtime_sites: leak_workpiece_sites(
+                arena,
                 &constraints.workpiece_sites,
                 &constraints.workpiece_carriers,
-            ),
-            runtime_holders: leak_workpiece_holders(&constraints.workpiece_holders),
+            )?,
+            runtime_holders: leak_workpiece_holders(arena, &constraints.workpiece_holders),
         })
     }
 }
 
-fn collect_workpiece_merge_input_types(
+fn collect_workpiece_merge_input_types<'a>(
+    arena: &'a Bump,
     workpiece_types: &[crate::ir::WorkpieceTypeDef],
-) -> HashMap<(String, usize), &'static [&'static str]> {
+) -> HashMap<(String, usize), &'a [&'a str]> {
     let mut merge_input_types = HashMap::new();
     for workpiece in workpiece_types {
         for rule in &workpiece.derived_from {
@@ -635,103 +655,132 @@ fn collect_workpiece_merge_input_types(
             };
             merge_input_types.insert(
                 (workpiece.name.clone(), inputs.len()),
-                leak_str_slice(inputs),
+                leak_str_slice(arena, inputs),
             );
         }
     }
     merge_input_types
 }
 
-fn leak_workpiece_types(
+fn leak_workpiece_types<'a>(
+    arena: &'a Bump,
     workpiece_types: &[crate::ir::WorkpieceTypeDef],
     carrier_layouts: &HashMap<String, BridgeCarrierLayout>,
-) -> Result<&'static [RtWorkpieceTypeDef<'static>], BridgeError> {
+) -> Result<&'a [RtWorkpieceTypeDef<'a>], BridgeError> {
     let leaked_types = workpiece_types
         .iter()
         .map(|workpiece| {
             Ok(RtWorkpieceTypeDef {
-                name: Box::leak(workpiece.name.clone().into_boxed_str()),
-                normal_terminal_states: leak_str_slice(&workpiece.normal_terminal_states),
-                abnormal_terminal_states: leak_str_slice(&workpiece.abnormal_terminal_states),
+                name: arena.alloc_str(&workpiece.name),
+                normal_terminal_states: leak_str_slice(arena, &workpiece.normal_terminal_states),
+                abnormal_terminal_states: leak_str_slice(
+                    arena,
+                    &workpiece.abnormal_terminal_states,
+                ),
                 ingress_sites: leak_expanded_workpiece_endpoint_slice(
+                    arena,
                     &workpiece.ingress_sites,
                     carrier_layouts,
                 )?,
                 normal_egress_sites: leak_expanded_workpiece_endpoint_slice(
+                    arena,
                     &workpiece.normal_egress_sites,
                     carrier_layouts,
                 )?,
                 abnormal_egress_sites: leak_expanded_workpiece_endpoint_slice(
+                    arena,
                     &workpiece.abnormal_egress_sites,
                     carrier_layouts,
                 )?,
             })
         })
         .collect::<Result<Vec<_>, BridgeError>>()?;
-    Ok(Box::leak(leaked_types.into_boxed_slice()))
+    Ok(arena.alloc_slice_copy(&leaked_types))
 }
 
-fn leak_workpiece_sites(
+fn leak_workpiece_sites<'a>(
+    arena: &'a Bump,
     workpiece_sites: &[crate::ir::WorkpieceSiteDef],
     workpiece_carriers: &[crate::ir::WorkpieceCarrierDef],
-) -> &'static [RtWorkpieceSiteDef<'static>] {
+) -> Result<&'a [RtWorkpieceSiteDef<'a>], BridgeError> {
     let mut leaked_sites = workpiece_sites
         .iter()
         .map(|site| RtWorkpieceSiteDef {
-            name: Box::leak(site.name.clone().into_boxed_str()),
+            name: arena.alloc_str(&site.name),
             kind: lower_workpiece_site_kind(site.kind.clone()),
             capacity: site.capacity,
         })
         .collect::<Vec<_>>();
     for carrier in workpiece_carriers {
-        for endpoint in expand_all_carrier_slot_endpoints(&carrier.name, &carrier.layout) {
+        for endpoint in expand_all_carrier_slot_endpoints(&carrier.name, &carrier.layout)? {
             leaked_sites.push(RtWorkpieceSiteDef {
-                name: Box::leak(endpoint.into_boxed_str()),
+                name: arena.alloc_str(&endpoint),
                 kind: RtWorkpieceSiteKind::CarrierLocation,
                 capacity: 1,
             });
         }
     }
-    Box::leak(leaked_sites.into_boxed_slice())
+    Ok(arena.alloc_slice_copy(&leaked_sites))
 }
 
-fn leak_expanded_workpiece_endpoint_slice(
+fn leak_expanded_workpiece_endpoint_slice<'a>(
+    arena: &'a Bump,
     endpoints: &[String],
     carrier_layouts: &HashMap<String, BridgeCarrierLayout>,
-) -> Result<&'static [&'static str], BridgeError> {
+) -> Result<&'a [&'a str], BridgeError> {
     let expanded = endpoints
         .iter()
         .map(|endpoint| expand_runtime_endpoint_pattern(endpoint, carrier_layouts))
         .collect::<Result<Vec<_>, _>>()?
         .into_iter()
         .flatten()
-        .map(|endpoint| Box::leak(endpoint.into_boxed_str()) as &'static str)
+        .map(|endpoint| arena.alloc_str(&endpoint) as &'a str)
         .collect::<Vec<_>>();
-    Ok(Box::leak(expanded.into_boxed_slice()))
+    Ok(arena.alloc_slice_copy(&expanded))
 }
 
 fn collect_workpiece_carrier_layouts(
     workpiece_carriers: &[crate::ir::WorkpieceCarrierDef],
-) -> HashMap<String, BridgeCarrierLayout> {
-    workpiece_carriers
-        .iter()
-        .map(|carrier| {
-            (
-                carrier.name.clone(),
-                match &carrier.layout {
-                    crate::ir::WorkpieceCarrierLayoutDef::Slots { count } => {
-                        BridgeCarrierLayout::Slots { count: *count }
-                    }
-                    crate::ir::WorkpieceCarrierLayoutDef::Grid { rows, cols } => {
-                        BridgeCarrierLayout::Grid {
-                            rows: *rows,
-                            cols: *cols,
-                        }
-                    }
-                },
-            )
-        })
-        .collect()
+) -> Result<HashMap<String, BridgeCarrierLayout>, BridgeError> {
+    let mut layouts = HashMap::new();
+    let mut total_slots = 0u64;
+    for carrier in workpiece_carriers {
+        let (layout, slot_count) = match &carrier.layout {
+            crate::ir::WorkpieceCarrierLayoutDef::Slots { count } => (
+                BridgeCarrierLayout::Slots { count: *count },
+                u64::from(*count),
+            ),
+            crate::ir::WorkpieceCarrierLayoutDef::Grid { rows, cols } => {
+                let slot_count = u64::from(*rows).checked_mul(u64::from(*cols)).ok_or(
+                    BridgeError::WorkpieceCarrierSlotLimitExceeded {
+                        total_slots: u64::MAX,
+                        max_slots: MAX_RUNTIME_CARRIER_SLOTS,
+                    },
+                )?;
+                (
+                    BridgeCarrierLayout::Grid {
+                        rows: *rows,
+                        cols: *cols,
+                    },
+                    slot_count,
+                )
+            }
+        };
+        total_slots = total_slots.checked_add(slot_count).ok_or(
+            BridgeError::WorkpieceCarrierSlotLimitExceeded {
+                total_slots: u64::MAX,
+                max_slots: MAX_RUNTIME_CARRIER_SLOTS,
+            },
+        )?;
+        if total_slots > MAX_RUNTIME_CARRIER_SLOTS as u64 {
+            return Err(BridgeError::WorkpieceCarrierSlotLimitExceeded {
+                total_slots,
+                max_slots: MAX_RUNTIME_CARRIER_SLOTS,
+            });
+        }
+        layouts.insert(carrier.name.clone(), layout);
+    }
+    Ok(layouts)
 }
 
 fn workpiece_effect_requires_phase1_type(effect: &crate::ir::WorkpieceEffect) -> bool {
@@ -756,13 +805,14 @@ fn expand_runtime_endpoint_pattern(
     expand_slot_reference(&carrier, &selectors, layout)
 }
 
-fn validate_runtime_effect_endpoint(
+fn validate_runtime_effect_endpoint<'a>(
+    arena: &'a Bump,
     endpoint: &str,
     carrier_layouts: &HashMap<String, BridgeCarrierLayout>,
-) -> Result<&'static str, BridgeError> {
+) -> Result<&'a str, BridgeError> {
     let expanded = expand_runtime_endpoint_pattern(endpoint, carrier_layouts)?;
     match expanded.as_slice() {
-        [single] => Ok(Box::leak(single.clone().into_boxed_str())),
+        [single] => Ok(arena.alloc_str(single)),
         _ => Err(BridgeError::InvalidWorkpieceSlotReference {
             slot: endpoint.to_string(),
             details: "runtime effects must use a concrete slot index, not a wildcard".to_string(),
@@ -770,12 +820,13 @@ fn validate_runtime_effect_endpoint(
     }
 }
 
-fn validate_runtime_carrier_name(
+fn validate_runtime_carrier_name<'a>(
+    arena: &'a Bump,
     carrier: &str,
     carrier_layouts: &HashMap<String, BridgeCarrierLayout>,
-) -> Result<&'static str, BridgeError> {
+) -> Result<&'a str, BridgeError> {
     if carrier_layouts.contains_key(carrier) {
-        Ok(Box::leak(carrier.to_string().into_boxed_str()))
+        Ok(arena.alloc_str(carrier))
     } else {
         Err(BridgeError::UnknownWorkpieceCarrier {
             carrier: carrier.to_string(),
@@ -786,21 +837,37 @@ fn validate_runtime_carrier_name(
 fn expand_all_carrier_slot_endpoints(
     carrier: &str,
     layout: &crate::ir::WorkpieceCarrierLayoutDef,
-) -> Vec<String> {
+) -> Result<Vec<String>, BridgeError> {
     match layout {
-        crate::ir::WorkpieceCarrierLayoutDef::Slots { count } => (0..*count)
+        crate::ir::WorkpieceCarrierLayoutDef::Slots { count } => Ok((0..*count)
             .map(|slot| format!("{carrier}.slot[{slot}]"))
-            .collect(),
+            .collect()),
         crate::ir::WorkpieceCarrierLayoutDef::Grid { rows, cols } => {
-            let mut out = Vec::with_capacity((*rows as usize).saturating_mul(*cols as usize));
+            let slot_count =
+                usize::try_from(u64::from(*rows) * u64::from(*cols)).map_err(|_| {
+                    BridgeError::WorkpieceCarrierSlotLimitExceeded {
+                        total_slots: u64::MAX,
+                        max_slots: MAX_RUNTIME_CARRIER_SLOTS,
+                    }
+                })?;
+            let mut out = Vec::with_capacity(slot_count);
             for row in 0..*rows {
                 for col in 0..*cols {
                     out.push(format!("{carrier}.slot[{row},{col}]"));
                 }
             }
-            out
+            Ok(out)
         }
     }
+}
+
+fn checked_step_id(task: &str, index: usize) -> Result<StepId, BridgeError> {
+    let raw = u16::try_from(index).map_err(|_| BridgeError::TooManyRuntimeSteps {
+        task: task.to_string(),
+        step_count: index.saturating_add(1),
+        max_steps: usize::from(u16::MAX).saturating_add(1),
+    })?;
+    Ok(StepId(raw))
 }
 
 fn expand_slot_reference(
@@ -893,17 +960,18 @@ fn render_slot_reference(carrier: &str, selectors: &[String]) -> String {
     format!("{carrier}.slot[{}]", selectors.join(","))
 }
 
-fn leak_workpiece_holders(
+fn leak_workpiece_holders<'a>(
+    arena: &'a Bump,
     workpiece_holders: &[crate::ir::WorkpieceHolderDef],
-) -> &'static [RtWorkpieceHolderDef<'static>] {
+) -> &'a [RtWorkpieceHolderDef<'a>] {
     let leaked_holders = workpiece_holders
         .iter()
         .map(|holder| RtWorkpieceHolderDef {
-            name: Box::leak(holder.name.clone().into_boxed_str()),
+            name: arena.alloc_str(&holder.name),
             capacity: holder.capacity,
         })
         .collect::<Vec<_>>();
-    Box::leak(leaked_holders.into_boxed_slice())
+    arena.alloc_slice_copy(&leaked_holders)
 }
 
 fn lower_workpiece_site_kind(kind: crate::ir::WorkpieceSiteKind) -> RtWorkpieceSiteKind {
@@ -913,14 +981,15 @@ fn lower_workpiece_site_kind(kind: crate::ir::WorkpieceSiteKind) -> RtWorkpieceS
     }
 }
 
-fn lower_runtime_claim_source(
+fn lower_runtime_claim_source<'a>(
+    arena: &'a Bump,
     resolver: &TopologyResolver,
     claim_text: &str,
     source: &crate::ir::ResourceClaimSource,
-) -> Result<RtResourceClaimSource<'static>, BridgeError> {
+) -> Result<RtResourceClaimSource<'a>, BridgeError> {
     match source {
         crate::ir::ResourceClaimSource::ActionTag { tag } => Ok(RtResourceClaimSource::ActionTag {
-            tag: Box::leak(tag.clone().into_boxed_str()),
+            tag: arena.alloc_str(tag),
         }),
         crate::ir::ResourceClaimSource::State(state_expr) => {
             lower_runtime_state_claim_source(resolver, claim_text, state_expr)
@@ -928,11 +997,11 @@ fn lower_runtime_claim_source(
     }
 }
 
-fn lower_runtime_state_claim_source(
+fn lower_runtime_state_claim_source<'a>(
     resolver: &TopologyResolver,
     claim_text: &str,
     state_expr: &crate::ir::StateExpr,
-) -> Result<RtResourceClaimSource<'static>, BridgeError> {
+) -> Result<RtResourceClaimSource<'a>, BridgeError> {
     let Some(value) = binary_state_value(&state_expr.state) else {
         return Err(BridgeError::UnsupportedSemanticResourceClaim {
             claim: claim_text.to_string(),
@@ -997,12 +1066,12 @@ fn render_state_expr(state_expr: &crate::ir::StateExpr) -> String {
     }
 }
 
-fn leak_str_slice(values: &[String]) -> &'static [&'static str] {
+fn leak_str_slice<'a>(arena: &'a Bump, values: &[String]) -> &'a [&'a str] {
     let leaked_values = values
         .iter()
-        .map(|value| Box::leak(value.clone().into_boxed_str()) as &'static str)
+        .map(|value| arena.alloc_str(value) as &'a str)
         .collect::<Vec<_>>();
-    Box::leak(leaked_values.into_boxed_slice())
+    arena.alloc_slice_copy(&leaked_values)
 }
 
 fn lower_axis_fault_severity(severity: IrAxisFaultSeverity) -> RtAxisFaultSeverity {
@@ -1071,18 +1140,43 @@ fn validate_extern_tick_budget(
             .push(transition);
     }
 
+    let task_entry_states = sm
+        .task_contexts
+        .iter()
+        .map(|ctx| (ctx.task_name.clone(), ctx.entry_state.clone()))
+        .collect::<HashMap<_, _>>();
+    let roots = select_runtime_root_tasks(sm, &task_entry_states);
     let mut memo = HashMap::<((String, String), usize), u64>::new();
     let mut worst_case_us = 0u64;
-    for state in &sm.states {
-        let state_key = (state.task_name.clone(), state.step_name.clone());
-        let state_cost = worst_case_extern_cost_from_state(
-            &state_key,
-            MAX_TRANSITIONS_PER_TASK_PER_TICK,
-            &outgoing,
-            &extern_bound_us,
-            &mut memo,
-        );
-        worst_case_us = worst_case_us.max(state_cost);
+    for root in roots {
+        let mut reachable = HashSet::new();
+        let mut queue = VecDeque::new();
+        if let Some(entry) = task_entry_states.get(&root) {
+            queue.push_back((entry.task_name.clone(), entry.step_name.clone()));
+        }
+        while let Some(state_key) = queue.pop_front() {
+            if !reachable.insert(state_key.clone()) {
+                continue;
+            }
+            if let Some(transitions) = outgoing.get(&state_key) {
+                for transition in transitions {
+                    queue.push_back((
+                        transition.to.task_name.clone(),
+                        transition.to.step_name.clone(),
+                    ));
+                }
+            }
+        }
+        let root_cost = reachable.into_iter().fold(0u64, |best, state_key| {
+            best.max(worst_case_extern_cost_from_state(
+                &state_key,
+                MAX_TRANSITIONS_PER_TASK_PER_TICK,
+                &outgoing,
+                &extern_bound_us,
+                &mut memo,
+            ))
+        });
+        worst_case_us = worst_case_us.saturating_add(root_cost);
     }
 
     if worst_case_us > tick_budget_us {

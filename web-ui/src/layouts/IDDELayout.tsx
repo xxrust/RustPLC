@@ -1,5 +1,5 @@
-import React, { useState, useCallback, useEffect, useRef } from 'react';
-import type { Node } from '@xyflow/react';
+import React, { Suspense, lazy, useState, useCallback, useEffect, useRef } from 'react';
+import type { Edge, Node } from '@xyflow/react';
 import { useTranslation } from 'react-i18next';
 import TopBar from '../components/TopBar';
 import StatusBar from '../components/StatusBar';
@@ -23,19 +23,36 @@ import { getDefaultPortsForNodeType, getEdgeSignalLabel } from '../utils/portCon
 interface Tab {
   id: string;
   label: string;
-  view: 'topology' | 'flowchart' | 'replay' | 'scenario' | 'run' | 'diagnosis' | 'audit';
+  view: 'plc' | 'topology' | 'flowchart' | 'replay' | 'scenario' | 'run' | 'diagnosis' | 'audit';
   dirty?: boolean;
 }
+
+interface RawTopologyComponent {
+  id?: unknown;
+  component_id?: unknown;
+  type?: unknown;
+  position?: unknown;
+  params?: unknown;
+}
+
+interface CanvasEdgeData extends Record<string, unknown> {
+  relation?: string;
+}
+
+type CanvasEdge = Edge<CanvasEdgeData>;
 
 let tabCounter = 1;
 
 const SIDEBAR_WIDTH = 280;
 const PANEL_WIDTH = 320;
+const SHARED_WORKSPACE_STACK_WIDTH = 900;
 const SHARED_TOPOLOGY_VIEWS: Tab['view'][] = ['scenario', 'run', 'diagnosis', 'replay', 'audit'];
+const PlcEditorPage = lazy(() => import('../pages/PlcEditorPage'));
 
 const IDDELayout: React.FC = () => {
   const { t } = useTranslation();
   const [tabs, setTabs] = useState<Tab[]>([
+    { id: 'plc-1', label: t('tabs.plc'), view: 'plc' },
     { id: 'topology-1', label: t('tabs.topology'), view: 'topology' },
     { id: 'flowchart-1', label: t('tabs.flowchart'), view: 'flowchart' },
     { id: 'scenario-1', label: t('tabs.scenario'), view: 'scenario' },
@@ -44,14 +61,24 @@ const IDDELayout: React.FC = () => {
     { id: 'replay-1', label: t('tabs.replay'), view: 'replay' },
     { id: 'audit-1', label: t('tabs.audit'), view: 'audit' },
   ]);
-  const [activeTabId, setActiveTabId] = useState('topology-1');
+  const [activeTabId, setActiveTabId] = useState('plc-1');
   const [leftCollapsed, setLeftCollapsed] = useState(false);
   const [rightCollapsed, setRightCollapsed] = useState(false);
+  const [stackSharedWorkspace, setStackSharedWorkspace] = useState(false);
 
   const { setNodes, setEdges, hasUnsavedChanges } = useTopologyStore();
   const { currentProject, currentProjectContent } = useAppStore();
 
   const dragTypeRef = useRef<{ type: string; label: string } | null>(null);
+
+  useEffect(() => {
+    const syncLayoutMode = () => {
+      setStackSharedWorkspace(window.innerWidth < SHARED_WORKSPACE_STACK_WIDTH);
+    };
+    syncLayoutMode();
+    window.addEventListener('resize', syncLayoutMode);
+    return () => window.removeEventListener('resize', syncLayoutMode);
+  }, []);
 
   // Warn on navigation with unsaved changes
   useEffect(() => {
@@ -71,7 +98,7 @@ const IDDELayout: React.FC = () => {
     const projectId = currentProject;
     let cancelled = false;
 
-    const applyTopology = (data: any) => {
+    const applyTopology = (data: unknown) => {
       const { nodes, edges } = toCanvasTopology(data);
       if (!cancelled) {
         setNodes(nodes);
@@ -118,15 +145,16 @@ const IDDELayout: React.FC = () => {
         }
 
         const res = await topologyApi.getTopology(projectId);
-        const data = res.data as any;
+        const data = res.data as unknown;
+        const dataRecord = asRecord(data);
 
-        if (data.components && Array.isArray(data.components)) {
+        if (Array.isArray(dataRecord.components)) {
           applyTopology(data);
           return;
         }
 
-        if (typeof data.content === 'string') {
-          const parsed = await topologyApi.parsePlc(data.content);
+        if (typeof dataRecord.content === 'string') {
+          const parsed = await topologyApi.parsePlc(dataRecord.content);
           applyTopology(parsed.data);
           return;
         }
@@ -285,7 +313,10 @@ const IDDELayout: React.FC = () => {
               style={{
                 flex: 1,
                 display: 'grid',
-                gridTemplateColumns: 'minmax(520px, 1.25fr) minmax(420px, 0.95fr)',
+                gridTemplateColumns: stackSharedWorkspace
+                  ? 'minmax(0, 1fr)'
+                  : 'minmax(520px, 1.25fr) minmax(420px, 0.95fr)',
+                gridTemplateRows: stackSharedWorkspace ? 'minmax(320px, 44vh) minmax(0, 1fr)' : undefined,
                 overflow: 'hidden',
               }}
             >
@@ -294,7 +325,9 @@ const IDDELayout: React.FC = () => {
                   display: 'flex',
                   flexDirection: 'column',
                   minWidth: 0,
-                  borderRight: '1px solid #2d2d2d',
+                  minHeight: 0,
+                  borderRight: stackSharedWorkspace ? 'none' : '1px solid #2d2d2d',
+                  borderBottom: stackSharedWorkspace ? '1px solid #2d2d2d' : 'none',
                   background: '#161616',
                 }}
               >
@@ -319,7 +352,7 @@ const IDDELayout: React.FC = () => {
                 </div>
               </div>
 
-              <div style={{ flex: 1, overflowY: 'auto', background: '#1e1e1e' }}>
+              <div style={{ minWidth: 0, overflowY: 'auto', background: '#1e1e1e' }}>
                 <ViewContent view={activeTab.view} embedded />
               </div>
             </div>
@@ -404,6 +437,18 @@ const ViewContent: React.FC<{ view: Tab['view']; embedded?: boolean }> = ({
   switch (view) {
     case 'topology':
       return <TopologyCanvas />;
+    case 'plc':
+      return (
+        <Suspense
+          fallback={
+            <div style={{ padding: 24, color: '#e5e7eb', background: '#1e1e1e', minHeight: '100%' }}>
+              Loading PLC editor...
+            </div>
+          }
+        >
+          <PlcEditorPage />
+        </Suspense>
+      );
     case 'flowchart':
       return <FlowchartReviewPage embedded={embedded} />;
     case 'scenario':
@@ -425,20 +470,25 @@ export default IDDELayout;
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-function toCanvasTopology(data: any): { nodes: Node<NodeData>[]; edges: Array<{ id: string; source: string; target: string }> } {
-  const edges = (data.connections || []).map((conn: any, i: number) => {
-    const fromEndpoint = parseEndpoint(conn.from);
-    const toEndpoint = parseEndpoint(conn.to);
+function toCanvasTopology(data: unknown): { nodes: Node<NodeData>[]; edges: CanvasEdge[] } {
+  const topology = asRecord(data);
+  const connections = Array.isArray(topology.connections) ? topology.connections : [];
+  const components = Array.isArray(topology.components)
+    ? (topology.components as RawTopologyComponent[])
+    : [];
+
+  const edges: CanvasEdge[] = connections.map((rawConn, i) => {
+    const conn = asRecord(rawConn);
+    const relation = stringValue(conn.relation);
+    const fromEndpoint = parseEndpoint(stringOrEmpty(conn.from));
+    const toEndpoint = parseEndpoint(stringOrEmpty(conn.to));
     const sourceHandle = normalizeHandleId(conn.from_port ?? fromEndpoint.portId);
     const targetHandle = normalizeHandleId(conn.to_port ?? toEndpoint.portId);
-    const edge: any = {
+    const edge: CanvasEdge = {
       id: `e-${i}`,
       source: fromEndpoint.nodeId,
       target: toEndpoint.nodeId,
-      data:
-        typeof conn.relation === 'string' && conn.relation
-          ? { relation: conn.relation }
-          : undefined,
+      data: relation ? { relation } : undefined,
     };
     if (sourceHandle) {
       edge.sourceHandle = sourceHandle;
@@ -446,36 +496,73 @@ function toCanvasTopology(data: any): { nodes: Node<NodeData>[]; edges: Array<{ 
     if (targetHandle) {
       edge.targetHandle = targetHandle;
     }
-    edge.label = getEdgeSignalLabel(sourceHandle, targetHandle, conn.signal);
+    edge.label = getEdgeSignalLabel(sourceHandle, targetHandle, stringValue(conn.signal));
     return edge;
   });
 
-  const inferredPortsByNode = buildInferredPortsByNode(data.components || [], edges);
+  const inferredPortsByNode = buildInferredPortsByNode(components, edges);
 
-  const nodes: Node<NodeData>[] = (data.components || []).map((comp: any, i: number) => {
+  const nodes: Node<NodeData>[] = components.map((comp, i) => {
+    const params = asRecord(comp.params);
+    const componentId = stringValue(comp.component_id);
+    const componentType = stringValue(comp.type);
+    const nodeId = stringValue(comp.id) ?? `node-${i}`;
     const nodeType = mapComponentType(
-      comp.component_id || comp.type || 'generic',
-      comp.params?.device_type,
-      comp.params?.endpoint_kind
+      componentId || componentType || 'generic',
+      stringValue(params.device_type),
+      stringValue(params.endpoint_kind)
     );
-    const explicitPorts = Array.isArray(comp.params?.ports) ? comp.params.ports : [];
-    const inferredPorts = inferredPortsByNode.get(comp.id) || [];
+    const explicitPorts = Array.isArray(params.ports)
+      ? params.ports.filter(isDevicePortMetadata)
+      : [];
+    const inferredPorts = inferredPortsByNode.get(nodeId) || [];
 
     return {
-      id: comp.id,
+      id: nodeId,
       type: nodeType,
-      position: comp.position || { x: 150 + (i % 3) * 240, y: 100 + Math.floor(i / 3) * 180 },
+      position: normalizePosition(comp.position) || {
+        x: 150 + (i % 3) * 240,
+        y: 100 + Math.floor(i / 3) * 180,
+      },
       data: {
-        label: comp.id,
+        label: nodeId,
         type: nodeType,
         status: 'idle',
-        ...comp.params,
+        ...params,
         ports: mergePorts(explicitPorts, inferredPorts),
-        tags: normalizeDeviceTags(comp.params?.tags),
+        tags: normalizeDeviceTags(params.tags),
       },
     };
   });
   return { nodes, edges };
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' ? (value as Record<string, unknown>) : {};
+}
+
+function stringValue(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim().length > 0 ? value : undefined;
+}
+
+function stringOrEmpty(value: unknown): string {
+  return stringValue(value) ?? '';
+}
+
+function normalizePosition(value: unknown): { x: number; y: number } | undefined {
+  const record = asRecord(value);
+  return typeof record.x === 'number' && typeof record.y === 'number'
+    ? { x: record.x, y: record.y }
+    : undefined;
+}
+
+function isDevicePortMetadata(value: unknown): value is DevicePortMetadata {
+  const record = asRecord(value);
+  return (
+    typeof record.id === 'string' &&
+    typeof record.type === 'string' &&
+    typeof record.role === 'string'
+  );
 }
 
 function parseEndpoint(raw: string): { nodeId: string; portId?: string } {
@@ -528,18 +615,27 @@ function mapComponentType(raw: string, deviceType?: string, endpointKind?: strin
 }
 
 function buildInferredPortsByNode(
-  components: any[],
-  edges: Array<{ source: string; target: string; sourceHandle?: string; targetHandle?: string }>
+  components: RawTopologyComponent[],
+  edges: Array<{
+    source: string;
+    target: string;
+    sourceHandle?: string | null;
+    targetHandle?: string | null;
+  }>
 ): Map<string, DevicePortMetadata[]> {
   const componentById = new Map(
-    components.map((comp) => [
-      comp.id,
-      mapComponentType(
-        comp.component_id || comp.type || 'generic',
-        comp.params?.device_type,
-        comp.params?.endpoint_kind
-      ),
-    ])
+    components.map((comp, index) => {
+      const params = asRecord(comp.params);
+      const nodeId = stringValue(comp.id) ?? `node-${index}`;
+      return [
+        nodeId,
+        mapComponentType(
+          stringValue(comp.component_id) || stringValue(comp.type) || 'generic',
+          stringValue(params.device_type),
+          stringValue(params.endpoint_kind)
+        ),
+      ] as const;
+    })
   );
   const portMap = new Map<string, Map<string, DevicePortMetadata>>();
 

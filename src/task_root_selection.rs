@@ -6,12 +6,9 @@ use std::collections::{HashMap, HashSet};
 
 /// Select root task contexts from the condensed task graph.
 ///
-/// Raw cross-task edges are first collapsed by SCC so fault/recovery return
-/// paths inside the same task domain do not incorrectly disqualify the primary
-/// task from startup activation. Because current IR does not yet carry an
-/// explicit task-role model, we also treat incoming edges from recovery-like
-/// task domains as non-activating returns and always retain the initial task
-/// domain.
+/// Raw cross-task edges are first collapsed by SCC. Every condensed component
+/// without an incoming edge is active at startup. If the condensed graph has no
+/// root, the IR initial task is the only explicit fallback.
 pub(crate) fn select_root_task_contexts<F>(
     state_machine: &StateMachine,
     mut extra_target_tasks: F,
@@ -68,7 +65,6 @@ where
     }
 
     let mut component_has_external_incoming = vec![false; components.len()];
-    let mut incoming_components = vec![HashSet::<usize>::new(); components.len()];
     for edge in graph.edge_references() {
         let source_task = &graph[edge.source()];
         let target_task = &graph[edge.target()];
@@ -80,21 +76,8 @@ where
         };
         if source_component != target_component {
             component_has_external_incoming[target_component] = true;
-            incoming_components[target_component].insert(source_component);
         }
     }
-
-    let recovery_like_component = components
-        .iter()
-        .map(|component| {
-            component
-                .iter()
-                .all(|node| is_recovery_like_task_name(&graph[*node]))
-        })
-        .collect::<Vec<_>>();
-    let initial_component = component_by_task
-        .get(&state_machine.initial.task_name)
-        .copied();
 
     let mut roots = Vec::new();
     let mut emitted_components = HashSet::<usize>::new();
@@ -102,13 +85,7 @@ where
         let Some(&component_idx) = component_by_task.get(task_name) else {
             continue;
         };
-        let incoming_only_from_recovery_like = incoming_components[component_idx]
-            .iter()
-            .all(|incoming_idx| recovery_like_component[*incoming_idx]);
-        let is_selected_root = Some(component_idx) == initial_component
-            || (!recovery_like_component[component_idx]
-                && (!component_has_external_incoming[component_idx]
-                    || incoming_only_from_recovery_like));
+        let is_selected_root = !component_has_external_incoming[component_idx];
         if !is_selected_root || !emitted_components.insert(component_idx) {
             continue;
         }
@@ -120,14 +97,6 @@ where
     }
 
     roots
-}
-
-fn is_recovery_like_task_name(task_name: &str) -> bool {
-    let lowered = task_name.to_ascii_lowercase();
-    lowered.contains("fault")
-        || lowered.contains("warning")
-        || lowered.contains("alarm")
-        || lowered.contains("recover")
 }
 
 fn push_task_edge(
@@ -283,7 +252,7 @@ mod tests {
     }
 
     #[test]
-    fn recovery_like_incoming_keeps_supervisor_style_domain_active() {
+    fn root_selection_uses_graph_edges_without_task_name_heuristics() {
         let state_machine = StateMachine {
             states: vec![
                 state("supervisor", "wait_start"),
@@ -304,7 +273,7 @@ mod tests {
         };
 
         let roots = select_root_task_contexts(&state_machine, |_| Vec::new());
-        assert_eq!(roots, vec!["supervisor"]);
+        assert_eq!(roots, vec!["feed_fault", "feed_warning"]);
     }
 
     fn state(task_name: &str, step_name: &str) -> State {

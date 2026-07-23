@@ -1,4 +1,4 @@
-﻿fn build_cam_configs(
+fn build_cam_configs(
     resolver: &TopologyResolver,
     topology: &TopologyGraph,
     table_indices: &HashMap<String, u16>,
@@ -33,24 +33,26 @@
     Ok(out)
 }
 
-fn convert_state_outgoing(
+fn convert_state_outgoing<'a>(
+    arena: &'a Bump,
     resolver: &TopologyResolver,
     state_name: &str,
     outs: &[&Transition],
-    workpiece_ctx: &WorkpieceBridgeContext,
+    workpiece_ctx: &WorkpieceBridgeContext<'a>,
     state_to_step: &HashMap<(String, String), StepId>,
     task_entry_steps: &HashMap<String, StepId>,
-    steps: &mut Vec<Step<'static>>,
+    steps: &mut Vec<Step<'a>>,
     sm: &StateMachine,
     tick_ms: u64,
     variable_indices: &HashMap<String, u16>,
     cam_indices: &HashMap<String, u16>,
     cam_table_indices: &HashMap<String, u16>,
     extern_signatures: &HashMap<String, (usize, usize)>,
-) -> Result<Instr<'static>, BridgeError> {
+) -> Result<Instr<'a>, BridgeError> {
     match outs.len() {
         0 => Ok(Instr::Halt),
         1 => convert_single_transition(
+            arena,
             resolver,
             state_name,
             outs[0],
@@ -66,6 +68,7 @@ fn convert_state_outgoing(
             extern_signatures,
         ),
         2 => convert_two_transitions(
+            arena,
             resolver,
             state_name,
             outs,
@@ -87,21 +90,22 @@ fn convert_state_outgoing(
     }
 }
 
-fn convert_single_transition(
+fn convert_single_transition<'a>(
+    arena: &'a Bump,
     resolver: &TopologyResolver,
     state_name: &str,
     t: &Transition,
-    workpiece_ctx: &WorkpieceBridgeContext,
+    workpiece_ctx: &WorkpieceBridgeContext<'a>,
     state_to_step: &HashMap<(String, String), StepId>,
     task_entry_steps: &HashMap<String, StepId>,
-    steps: &mut Vec<Step<'static>>,
+    steps: &mut Vec<Step<'a>>,
     sm: &StateMachine,
     tick_ms: u64,
     variable_indices: &HashMap<String, u16>,
     cam_indices: &HashMap<String, u16>,
     cam_table_indices: &HashMap<String, u16>,
     extern_signatures: &HashMap<String, (usize, usize)>,
-) -> Result<Instr<'static>, BridgeError> {
+) -> Result<Instr<'a>, BridgeError> {
     match &t.guard {
         TransitionGuard::Always => {
             let target = lookup_target_step(state_name, &t.to, state_to_step)?;
@@ -109,6 +113,7 @@ fn convert_single_transition(
                 Ok(Instr::Goto { target })
             } else {
                 let actions = leak_actions(
+                    arena,
                     resolver,
                     state_name,
                     &t.actions,
@@ -140,6 +145,7 @@ fn convert_single_transition(
                 })
             } else {
                 let action_step = push_action_step(
+                    arena,
                     steps,
                     &format!("{state_name}__delay_actions"),
                     resolver,
@@ -170,6 +176,7 @@ fn convert_single_transition(
                 target
             } else {
                 push_action_step(
+                    arena,
                     steps,
                     &format!("{state_name}__cond_actions"),
                     resolver,
@@ -190,7 +197,8 @@ fn convert_single_transition(
             };
             if let Some((device, ranges)) = parse_analog_region_guard(expr) {
                 let id = resolver.resolve_analog_input_id(state_name, &device)?;
-                let analog_ranges = ranges_to_analog_ranges(sm, state_name, &device, &ranges)?;
+                let analog_ranges =
+                    ranges_to_analog_ranges(arena, sm, state_name, &device, &ranges)?;
 
                 Ok(Instr::WaitAnalog {
                     id,
@@ -202,6 +210,7 @@ fn convert_single_transition(
                 Ok(cam_guard.into_instr(next, None))
             } else if let Ok((lhs, equals)) = parse_single_bool_guard(state_name, expr) {
                 bool_guard_to_instr(
+                    arena,
                     resolver,
                     state_name,
                     lhs,
@@ -233,6 +242,7 @@ fn convert_single_transition(
                 target
             } else {
                 push_action_step(
+                    arena,
                     steps,
                     &format!("{state_name}__edge_actions"),
                     resolver,
@@ -251,7 +261,15 @@ fn convert_single_transition(
                     None,
                 )?
             };
-            edge_guard_to_instr(resolver, state_name, *edge, operand, variable_indices, next, None)
+            edge_guard_to_instr(
+                resolver,
+                state_name,
+                *edge,
+                operand,
+                variable_indices,
+                next,
+                None,
+            )
         }
         TransitionGuard::Timeout { .. } => Err(BridgeError::UnsupportedTransitionShape {
             state: state_name.to_string(),
@@ -260,21 +278,22 @@ fn convert_single_transition(
     }
 }
 
-fn convert_two_transitions(
+fn convert_two_transitions<'a>(
+    arena: &'a Bump,
     resolver: &TopologyResolver,
     state_name: &str,
     outs: &[&Transition],
-    workpiece_ctx: &WorkpieceBridgeContext,
+    workpiece_ctx: &WorkpieceBridgeContext<'a>,
     state_to_step: &HashMap<(String, String), StepId>,
     task_entry_steps: &HashMap<String, StepId>,
-    steps: &mut Vec<Step<'static>>,
+    steps: &mut Vec<Step<'a>>,
     sm: &StateMachine,
     tick_ms: u64,
     variable_indices: &HashMap<String, u16>,
     cam_indices: &HashMap<String, u16>,
     cam_table_indices: &HashMap<String, u16>,
     extern_signatures: &HashMap<String, (usize, usize)>,
-) -> Result<Instr<'static>, BridgeError> {
+) -> Result<Instr<'a>, BridgeError> {
     let pair = (outs[0], outs[1]);
 
     if let Some((always, timeout)) = match pair {
@@ -298,6 +317,7 @@ fn convert_two_transitions(
         let next = lookup_target_step(state_name, &always.to, state_to_step)?;
         let timeout_target = lookup_target_step(state_name, &timeout.to, state_to_step)?;
         let actions = leak_actions(
+            arena,
             resolver,
             state_name,
             &always.actions,
@@ -323,8 +343,7 @@ fn convert_two_transitions(
             if matches!(
                 a.guard,
                 TransitionGuard::Condition { .. } | TransitionGuard::Edge { .. }
-            )
-                && matches!(b.guard, TransitionGuard::Timeout { .. }) =>
+            ) && matches!(b.guard, TransitionGuard::Timeout { .. }) =>
         {
             Some((a, b))
         }
@@ -332,8 +351,7 @@ fn convert_two_transitions(
             if matches!(
                 b.guard,
                 TransitionGuard::Condition { .. } | TransitionGuard::Edge { .. }
-            )
-                && matches!(a.guard, TransitionGuard::Timeout { .. }) =>
+            ) && matches!(a.guard, TransitionGuard::Timeout { .. }) =>
         {
             Some((b, a))
         }
@@ -352,8 +370,7 @@ fn convert_two_transitions(
             if matches!(
                 a.guard,
                 TransitionGuard::Condition { .. } | TransitionGuard::Edge { .. }
-            )
-                && matches!(b.guard, TransitionGuard::Always) =>
+            ) && matches!(b.guard, TransitionGuard::Always) =>
         {
             Some((a, b))
         }
@@ -361,8 +378,7 @@ fn convert_two_transitions(
             if matches!(
                 b.guard,
                 TransitionGuard::Condition { .. } | TransitionGuard::Edge { .. }
-            )
-                && matches!(a.guard, TransitionGuard::Always) =>
+            ) && matches!(a.guard, TransitionGuard::Always) =>
         {
             Some((b, a))
         }
@@ -383,6 +399,7 @@ fn convert_two_transitions(
         cond_target
     } else {
         push_action_step(
+            arena,
             steps,
             &format!("{state_name}__cond_actions"),
             resolver,
@@ -408,6 +425,7 @@ fn convert_two_transitions(
             fallback_target
         } else {
             push_action_step(
+                arena,
                 steps,
                 &format!("{state_name}__fallback_actions"),
                 resolver,
@@ -433,6 +451,7 @@ fn convert_two_transitions(
     });
     match &cond.guard {
         TransitionGuard::Condition { expression } => condition_to_wait_instr(
+            arena,
             resolver,
             state_name,
             expression,
@@ -458,10 +477,7 @@ fn convert_two_transitions(
 fn complementary_condition_pair<'a>(
     pair: (&'a Transition, &'a Transition),
 ) -> Option<(&'a Transition, &'a Transition)> {
-    let TransitionGuard::Condition {
-        expression: first,
-    } = &pair.0.guard
-    else {
+    let TransitionGuard::Condition { expression: first } = &pair.0.guard else {
         return None;
     };
     let TransitionGuard::Condition { expression: second } = &pair.1.guard else {
@@ -486,15 +502,15 @@ fn is_not_of(candidate: &str, expression: &str) -> bool {
         .is_some_and(|inner| inner.trim() == expression)
 }
 
-
-fn push_action_step(
-    steps: &mut Vec<Step<'static>>,
+fn push_action_step<'a>(
+    arena: &'a Bump,
+    steps: &mut Vec<Step<'a>>,
     name: &str,
     resolver: &TopologyResolver,
     state_name: &str,
     actions: &[TransitionAction],
     effects: &[crate::ir::WorkpieceEffect],
-    workpiece_ctx: &WorkpieceBridgeContext,
+    workpiece_ctx: &WorkpieceBridgeContext<'a>,
     next: StepId,
     state_to_step: &HashMap<(String, String), StepId>,
     task_entry_steps: &HashMap<String, StepId>,
@@ -505,8 +521,9 @@ fn push_action_step(
     extern_signatures: &HashMap<String, (usize, usize)>,
     action_timeout: Option<Timeout>,
 ) -> Result<StepId, BridgeError> {
-    let leaked_name: &'static str = Box::leak(name.to_string().into_boxed_str());
+    let leaked_name: &'a str = arena.alloc_str(name);
     let leaked_actions = leak_actions(
+        arena,
         resolver,
         state_name,
         actions,
@@ -521,7 +538,7 @@ fn push_action_step(
         extern_signatures,
         action_timeout,
     )?;
-    let id = StepId(steps.len() as u16);
+    let id = checked_step_id(state_name, steps.len())?;
     steps.push(Step {
         name: leaked_name,
         instr: Instr::Action {
@@ -532,12 +549,13 @@ fn push_action_step(
     Ok(id)
 }
 
-fn leak_actions(
+fn leak_actions<'a>(
+    arena: &'a Bump,
     resolver: &TopologyResolver,
     state_name: &str,
     actions: &[TransitionAction],
     effects: &[crate::ir::WorkpieceEffect],
-    workpiece_ctx: &WorkpieceBridgeContext,
+    workpiece_ctx: &WorkpieceBridgeContext<'a>,
     state_to_step: &HashMap<(String, String), StepId>,
     task_entry_steps: &HashMap<String, StepId>,
     tick_ms: u64,
@@ -546,10 +564,11 @@ fn leak_actions(
     cam_table_indices: &HashMap<String, u16>,
     extern_signatures: &HashMap<String, (usize, usize)>,
     action_timeout: Option<Timeout>,
-) -> Result<&'static [Action], BridgeError> {
-    let mut out: Vec<Action> = Vec::with_capacity(actions.len() + effects.len());
+) -> Result<&'a [Action<'a>], BridgeError> {
+    let mut out: Vec<Action<'a>> = Vec::with_capacity(actions.len() + effects.len());
     for a in actions {
         out.push(convert_action(
+            arena,
             resolver,
             state_name,
             workpiece_ctx,
@@ -566,6 +585,7 @@ fn leak_actions(
     }
     for effect in effects {
         out.push(convert_action(
+            arena,
             resolver,
             state_name,
             workpiece_ctx,
@@ -580,7 +600,7 @@ fn leak_actions(
             action_timeout,
         )?);
     }
-    Ok(Box::leak(out.into_boxed_slice()))
+    Ok(arena.alloc_slice_copy(&out))
 }
 
 enum RuntimeActionRef<'a> {
@@ -588,10 +608,11 @@ enum RuntimeActionRef<'a> {
     Workpiece(&'a crate::ir::WorkpieceEffect),
 }
 
-fn convert_action(
+fn convert_action<'a>(
+    arena: &'a Bump,
     resolver: &TopologyResolver,
     state_name: &str,
-    workpiece_ctx: &WorkpieceBridgeContext,
+    workpiece_ctx: &WorkpieceBridgeContext<'a>,
     runtime_action: RuntimeActionRef<'_>,
     state_to_step: &HashMap<(String, String), StepId>,
     task_entry_steps: &HashMap<String, StepId>,
@@ -601,7 +622,7 @@ fn convert_action(
     cam_table_indices: &HashMap<String, u16>,
     extern_signatures: &HashMap<String, (usize, usize)>,
     action_timeout: Option<Timeout>,
-) -> Result<Action, BridgeError> {
+) -> Result<Action<'a>, BridgeError> {
     match runtime_action {
         RuntimeActionRef::Transition(a) => match a {
             TransitionAction::Extend {
@@ -612,7 +633,7 @@ fn convert_action(
                 on_safety_fault,
             } => {
                 if let Some(motion) =
-                    resolver.resolve_cylinder_motion(state_name, target, port, true)?
+                    resolver.resolve_cylinder_motion(arena, state_name, target, port, true)?
                 {
                     let resolved_timeout = match (action_timeout, motion_timeout.as_ref()) {
                         (Some(_), Some(_)) => {
@@ -705,7 +726,7 @@ fn convert_action(
                 on_safety_fault,
             } => {
                 if let Some(motion) =
-                    resolver.resolve_cylinder_motion(state_name, target, port, false)?
+                    resolver.resolve_cylinder_motion(arena, state_name, target, port, false)?
                 {
                     let resolved_timeout = match (action_timeout, motion_timeout.as_ref()) {
                         (Some(_), Some(_)) => {
@@ -903,11 +924,9 @@ fn convert_action(
                     binding_vars.push(index);
                 }
 
-                let leaked_function: &'static str = Box::leak(function.clone().into_boxed_str());
-                let leaked_arg_exprs: &'static [ExprProgram] =
-                    Box::leak(arg_exprs.into_boxed_slice());
-                let leaked_binding_vars: &'static [u16] =
-                    Box::leak(binding_vars.into_boxed_slice());
+                let leaked_function: &'a str = arena.alloc_str(function);
+                let leaked_arg_exprs: &'a [ExprProgram] = arena.alloc_slice_copy(&arg_exprs);
+                let leaked_binding_vars: &'a [u16] = arena.alloc_slice_copy(&binding_vars);
                 Ok(Action::CallExtern {
                     function: leaked_function,
                     arg_exprs: leaked_arg_exprs,
@@ -976,12 +995,13 @@ fn convert_action(
                 result_buckets,
             } => Ok(Action::ProcessDeviceAction {
                 command: ProcessDeviceActionCommand {
-                    family: Box::leak(family.clone().into_boxed_str()),
-                    action: Box::leak(action_name.clone().into_boxed_str()),
-                    target: Box::leak(target.clone().into_boxed_str()),
-                    port: Box::leak(port.clone().into_boxed_str()),
-                    args: leak_str_slice(args_raw),
-                    result_buckets: leak_str_slice(result_buckets),
+                    family: arena.alloc_str(family),
+                    action: arena.alloc_str(action_name),
+                    target: arena.alloc_str(target),
+                    port: arena.alloc_str(port),
+                    args: leak_str_slice(arena, args_raw),
+                    result_buckets: leak_str_slice(arena, result_buckets),
+                    timeout: action_timeout,
                 },
             }),
             TransitionAction::AxisMoveRelative {
@@ -1048,8 +1068,8 @@ fn convert_action(
                     speed,
                     profile.max_acceleration,
                 )?;
-                let leaked_target: &'static str = Box::leak(target.clone().into_boxed_str());
-                let leaked_port: &'static str = Box::leak(port.clone().into_boxed_str());
+                let leaked_target: &'a str = arena.alloc_str(target);
+                let leaked_port: &'a str = arena.alloc_str(port);
                 let timeout_target = lookup_branch_target(
                     state_name,
                     &timeout_branch.target_task,
@@ -1084,6 +1104,7 @@ fn convert_action(
                     "axis on_safety_fault",
                 )?;
                 let leaked_on_reject_routes = leak_axis_fault_route_rules(
+                    arena,
                     state_name,
                     "axis on_reject route",
                     on_reject_routes,
@@ -1091,6 +1112,7 @@ fn convert_action(
                     task_entry_steps,
                 )?;
                 let leaked_on_motion_fault_routes = leak_axis_fault_route_rules(
+                    arena,
                     state_name,
                     "axis on_motion_fault route",
                     on_motion_fault_routes,
@@ -1098,6 +1120,7 @@ fn convert_action(
                     task_entry_steps,
                 )?;
                 let leaked_on_safety_fault_routes = leak_axis_fault_route_rules(
+                    arena,
                     state_name,
                     "axis on_safety_fault route",
                     on_safety_fault_routes,
@@ -1113,9 +1136,7 @@ fn convert_action(
                         speed,
                         acceleration,
                         deceleration,
-                        semantic_tag: semantic_tag
-                            .as_ref()
-                            .map(|tag| Box::leak(tag.clone().into_boxed_str()) as &'static str),
+                        semantic_tag: semantic_tag.as_ref().map(|tag| arena.alloc_str(tag) as &'a str),
                         require_homed: false,
                         timeout: Some(Timeout {
                             after_ticks: timeout_ticks,
@@ -1197,8 +1218,8 @@ fn convert_action(
                     speed,
                     profile.max_acceleration,
                 )?;
-                let leaked_target: &'static str = Box::leak(target.clone().into_boxed_str());
-                let leaked_port: &'static str = Box::leak(port.clone().into_boxed_str());
+                let leaked_target: &'a str = arena.alloc_str(target);
+                let leaked_port: &'a str = arena.alloc_str(port);
                 let timeout_target = lookup_branch_target(
                     state_name,
                     &timeout_branch.target_task,
@@ -1233,6 +1254,7 @@ fn convert_action(
                     "axis on_safety_fault",
                 )?;
                 let leaked_on_reject_routes = leak_axis_fault_route_rules(
+                    arena,
                     state_name,
                     "axis on_reject route",
                     on_reject_routes,
@@ -1240,6 +1262,7 @@ fn convert_action(
                     task_entry_steps,
                 )?;
                 let leaked_on_motion_fault_routes = leak_axis_fault_route_rules(
+                    arena,
                     state_name,
                     "axis on_motion_fault route",
                     on_motion_fault_routes,
@@ -1247,6 +1270,7 @@ fn convert_action(
                     task_entry_steps,
                 )?;
                 let leaked_on_safety_fault_routes = leak_axis_fault_route_rules(
+                    arena,
                     state_name,
                     "axis on_safety_fault route",
                     on_safety_fault_routes,
@@ -1262,9 +1286,7 @@ fn convert_action(
                         speed,
                         acceleration,
                         deceleration,
-                        semantic_tag: semantic_tag
-                            .as_ref()
-                            .map(|tag| Box::leak(tag.clone().into_boxed_str()) as &'static str),
+                        semantic_tag: semantic_tag.as_ref().map(|tag| arena.alloc_str(tag) as &'a str),
                         require_homed: *require_homed,
                         timeout: Some(Timeout {
                             after_ticks: timeout_ticks,
@@ -1282,7 +1304,7 @@ fn convert_action(
                 })
             }
             TransitionAction::Log { message } => {
-                let leaked_message: &'static str = Box::leak(message.clone().into_boxed_str());
+                let leaked_message: &'a str = arena.alloc_str(message);
                 Ok(Action::Log {
                     message_id: stable_log_message_id(message),
                     message: leaked_message,
@@ -1290,16 +1312,17 @@ fn convert_action(
             }
         },
         RuntimeActionRef::Workpiece(effect) => {
-            convert_workpiece_effect(state_name, workpiece_ctx, effect)
+            convert_workpiece_effect(arena, state_name, workpiece_ctx, effect)
         }
     }
 }
 
-fn convert_workpiece_effect(
+fn convert_workpiece_effect<'a>(
+    arena: &'a Bump,
     state_name: &str,
-    workpiece_ctx: &WorkpieceBridgeContext,
+    workpiece_ctx: &WorkpieceBridgeContext<'a>,
     effect: &crate::ir::WorkpieceEffect,
-) -> Result<Action, BridgeError> {
+) -> Result<Action<'a>, BridgeError> {
     match effect {
         crate::ir::WorkpieceEffect::Acquire { holder, from } => {
             let workpiece_type = workpiece_ctx
@@ -1307,38 +1330,46 @@ fn convert_workpiece_effect(
                 .ok_or(BridgeError::Phase1WorkpieceTypeArity { count: 0 })?;
             Ok(Action::WorkpieceAcquire {
                 workpiece_type,
-                holder: Box::leak(holder.clone().into_boxed_str()),
-                from: validate_runtime_effect_endpoint(from, &workpiece_ctx.carrier_layouts)?,
+                holder: arena.alloc_str(holder),
+                from: validate_runtime_effect_endpoint(
+                    arena,
+                    from,
+                    &workpiece_ctx.carrier_layouts,
+                )?,
             })
         }
         crate::ir::WorkpieceEffect::Transfer { from, to } => Ok(Action::WorkpieceTransfer {
-            from: validate_runtime_effect_endpoint(from, &workpiece_ctx.carrier_layouts)?,
-            to: validate_runtime_effect_endpoint(to, &workpiece_ctx.carrier_layouts)?,
+            from: validate_runtime_effect_endpoint(arena, from, &workpiece_ctx.carrier_layouts)?,
+            to: validate_runtime_effect_endpoint(arena, to, &workpiece_ctx.carrier_layouts)?,
         }),
         crate::ir::WorkpieceEffect::Finish { at, terminal_state } => Ok(Action::WorkpieceFinish {
-            at: validate_runtime_effect_endpoint(at, &workpiece_ctx.carrier_layouts)?,
-            terminal_state: Box::leak(terminal_state.clone().into_boxed_str()),
+            at: validate_runtime_effect_endpoint(arena, at, &workpiece_ctx.carrier_layouts)?,
+            terminal_state: arena.alloc_str(terminal_state),
         }),
         crate::ir::WorkpieceEffect::Mount {
             workpiece_type,
             slot,
         } => Ok(Action::WorkpieceMount {
-            workpiece_type: Box::leak(workpiece_type.clone().into_boxed_str()),
-            slot: validate_runtime_effect_endpoint(slot, &workpiece_ctx.carrier_layouts)?,
+            workpiece_type: arena.alloc_str(workpiece_type),
+            slot: validate_runtime_effect_endpoint(arena, slot, &workpiece_ctx.carrier_layouts)?,
         }),
         crate::ir::WorkpieceEffect::Unmount {
             workpiece_type,
             slot,
             to,
         } => Ok(Action::WorkpieceUnmount {
-            workpiece_type: Box::leak(workpiece_type.clone().into_boxed_str()),
-            slot: validate_runtime_effect_endpoint(slot, &workpiece_ctx.carrier_layouts)?,
-            to: validate_runtime_effect_endpoint(to, &workpiece_ctx.carrier_layouts)?,
+            workpiece_type: arena.alloc_str(workpiece_type),
+            slot: validate_runtime_effect_endpoint(arena, slot, &workpiece_ctx.carrier_layouts)?,
+            to: validate_runtime_effect_endpoint(arena, to, &workpiece_ctx.carrier_layouts)?,
         }),
         crate::ir::WorkpieceEffect::TransformCarrier { carrier, frame } => {
             Ok(Action::WorkpieceTransformCarrier {
-                carrier: validate_runtime_carrier_name(carrier, &workpiece_ctx.carrier_layouts)?,
-                frame: Box::leak(frame.clone().into_boxed_str()),
+                carrier: validate_runtime_carrier_name(
+                    arena,
+                    carrier,
+                    &workpiece_ctx.carrier_layouts,
+                )?,
+                frame: arena.alloc_str(frame),
             })
         }
         crate::ir::WorkpieceEffect::Split {
@@ -1347,8 +1378,8 @@ fn convert_workpiece_effect(
             count,
             consumed,
         } => Ok(Action::WorkpieceSplit {
-            source_type: Box::leak(source_type.clone().into_boxed_str()),
-            target_type: Box::leak(target_type.clone().into_boxed_str()),
+            source_type: arena.alloc_str(source_type),
+            target_type: arena.alloc_str(target_type),
             count: *count,
             consumed: *consumed,
         }),
@@ -1367,9 +1398,9 @@ fn convert_workpiece_effect(
                 });
             };
             Ok(Action::WorkpieceMerge {
-                input_refs: leak_str_slice(inputs),
+                input_refs: leak_str_slice(arena, inputs),
                 input_types,
-                target_type: Box::leak(target_type.clone().into_boxed_str()),
+                target_type: arena.alloc_str(target_type),
                 consumed_inputs: *consumed_inputs,
             })
         }

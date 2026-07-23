@@ -1,4 +1,4 @@
-﻿#[cfg(test)]
+#[cfg(test)]
 mod tests {
     use crate::device_semantics::cylinder::{
         complementary_end_state_port as cylinder_complementary_state_port,
@@ -59,7 +59,10 @@ mod tests {
 
     #[test]
     fn runtime_branch_lowering_recognizes_if_else_complement_guards() {
-        assert!(super::is_not_of("NOT(loaded_count >= 2)", "loaded_count >= 2"));
+        assert!(super::is_not_of(
+            "NOT(loaded_count >= 2)",
+            "loaded_count >= 2"
+        ));
         assert!(super::is_not_of(
             "NOT( pickup_buffer_ready == true )",
             "pickup_buffer_ready == true"
@@ -67,6 +70,22 @@ mod tests {
         assert!(!super::is_not_of(
             "NOT(loaded_count < 1)",
             "loaded_count >= 1"
+        ));
+    }
+
+    #[test]
+    fn step_id_conversion_rejects_indices_beyond_u16_capacity() {
+        assert_eq!(
+            super::checked_step_id("main", usize::from(u16::MAX)).expect("maximum StepId is valid"),
+            runtime_core::StepId(u16::MAX)
+        );
+        assert!(matches!(
+            super::checked_step_id("main", usize::from(u16::MAX) + 1),
+            Err(super::BridgeError::TooManyRuntimeSteps {
+                step_count: 65_537,
+                max_steps: 65_536,
+                ..
+            })
         ));
     }
 }

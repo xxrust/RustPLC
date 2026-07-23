@@ -20,9 +20,10 @@ export interface NodeData {
   tags?: DeviceTags;
   ports?: DevicePortMetadata[];
   portContractFallback?: boolean;
+  device_type?: string;
   status?: string;
   value?: number | boolean;
-  [key: string]: any;
+  [key: string]: unknown;
 }
 
 export interface TagFilterState {

@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { sensorSchema, type SensorData } from '../../schemas/nodeSchemas';
+import type { NodeData } from '../../stores/topologyStore';
 
 interface SensorPropertiesEditorProps {
   nodeId: string;
-  data: any;
-  onUpdate: (nodeId: string, data: Partial<any>) => void;
+  data: NodeData;
+  onUpdate: (nodeId: string, data: Partial<NodeData>) => void;
 }
 
 const SensorPropertiesEditor: React.FC<SensorPropertiesEditorProps> = ({
@@ -14,16 +15,11 @@ const SensorPropertiesEditor: React.FC<SensorPropertiesEditorProps> = ({
   onUpdate,
 }) => {
   const { t } = useTranslation();
-  const [formData, setFormData] = useState<SensorData>({
-    label: data.label || '',
-    status: data.status || 'off',
-    value: data.value || false,
-    detects: data.detects || '',
-  });
+  const [formData, setFormData] = useState<SensorData>(() => toSensorData(data));
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [isDirty, setIsDirty] = useState(false);
 
-  const handleChange = (field: keyof SensorData, value: any) => {
+  const handleChange = <K extends keyof SensorData>(field: K, value: SensorData[K]) => {
     setFormData({ ...formData, [field]: value });
     setIsDirty(true);
     if (errors[field]) {
@@ -50,12 +46,7 @@ const SensorPropertiesEditor: React.FC<SensorPropertiesEditorProps> = ({
   };
 
   const handleRevert = () => {
-    setFormData({
-      label: data.label || '',
-      status: data.status || 'off',
-      value: data.value || false,
-      detects: data.detects || '',
-    });
+    setFormData(toSensorData(data));
     setIsDirty(false);
     setErrors({});
   };
@@ -95,7 +86,7 @@ const SensorPropertiesEditor: React.FC<SensorPropertiesEditorProps> = ({
         </label>
         <select
           value={formData.status}
-          onChange={(e) => handleChange('status', e.target.value)}
+          onChange={(e) => handleChange('status', e.target.value as SensorData['status'])}
           style={{
             width: '100%',
             padding: '6px 8px',
@@ -185,3 +176,13 @@ const SensorPropertiesEditor: React.FC<SensorPropertiesEditorProps> = ({
 };
 
 export default SensorPropertiesEditor;
+
+function toSensorData(data: NodeData): SensorData {
+  const status = data.status;
+  return {
+    label: data.label || '',
+    status: status === 'on' || status === 'off' || status === 'fault' ? status : 'off',
+    value: typeof data.value === 'boolean' ? data.value : false,
+    detects: typeof data.detects === 'string' ? data.detects : '',
+  };
+}

@@ -721,7 +721,7 @@ fn run_intent_doctor_subcommand(
         1,
     )
     .map_err(|err| format!("intent-doctor failed to lower runtime layout: {err}"))?;
-    let runtime_layouts = runtime_layouts_from_program(&runtime_program)?;
+    let runtime_layouts = runtime_layouts_from_program(runtime_program.program())?;
     let trace_text = fs::read_to_string(&trace_path)
         .map_err(|err| format!("Failed to read trace JSONL {}: {err}", trace_path.display()))?;
     let trace_events = rust_plc::trace_diff::parse_trace_jsonl(&trace_text).map_err(|err| {

@@ -7,7 +7,7 @@ pub(crate) struct CliCommandHelp {
     usage_template: &'static str,
 }
 
-const COMPILE_USAGE_TEMPLATE: &str = "Usage: {program} <source.plc|source.bundle.toml> [--report <verification_report.json>] [--deny-warnings] [--no-print-ir] [--ir-out <ir_bundle.json>] [--budget-... <value>]";
+const COMPILE_USAGE_TEMPLATE: &str = "Usage: {program} <source.plc|source.bundle.toml> [--report <verification_report.json>] [--deny-warnings] [--no-print-ir] [--ir-out <ir_bundle.json>] [--cache-dir <dir>] [--budget-... <value>]";
 
 const CLI_COMMANDS: &[CliCommandHelp] = &[
     CliCommandHelp {
@@ -21,6 +21,12 @@ const CLI_COMMANDS: &[CliCommandHelp] = &[
         name: "new",
         summary: "Create a RustPLC project scaffold with starter PLC, scenarios, and VS Code tasks.",
         usage_template: "Usage: {program} new <project_dir> [--layout <single-file|structured-fragments>] [--delivery-layer <module|station|line>] [--force]",
+    },
+    CliCommandHelp {
+        section: "Core",
+        name: "lsp",
+        summary: "Run the RustPLC Language Server Protocol server over stdio.",
+        usage_template: "Usage: {program} lsp",
     },
     CliCommandHelp {
         section: "Simulation",
@@ -117,6 +123,12 @@ const CLI_COMMANDS: &[CliCommandHelp] = &[
         name: "flowchart",
         summary: "Render a PLC source or bundle into a human-reviewable static HTML flowchart report.",
         usage_template: "Usage: {program} flowchart <source.plc|source.bundle.toml> [--out-dir <dir>] [--title <title>] [--output <human|json>]",
+    },
+    CliCommandHelp {
+        section: "Codegen",
+        name: "gen-keyence",
+        summary: "Generate a KEYENCE review package with MNM draft, variable manifest, FB manifest, and validation notes.",
+        usage_template: "Usage: {program} gen-keyence <source.plc|source.bundle.toml> [--out-dir <dir>] [--program-name <Main>] [--cpu <KV-X550>] [--output <human|json>]",
     },
     CliCommandHelp {
         section: "Diagnostics",
@@ -228,6 +240,36 @@ const CLI_COMMANDS: &[CliCommandHelp] = &[
     },
     CliCommandHelp {
         section: "Utilities",
+        name: "doc-index",
+        summary: "Build a machine-readable index of Markdown documentation files and headings.",
+        usage_template: "Usage: {program} doc-index [--root <docs_dir>] [--out <doc_index.json|md>] [--output <human|json>]",
+    },
+    CliCommandHelp {
+        section: "Utilities",
+        name: "doc-lint",
+        summary: "Check local Markdown documentation links and heading anchors.",
+        usage_template: "Usage: {program} doc-lint [--root <docs_dir>] [--out <doc_lint.json>] [--output <human|json>]",
+    },
+    CliCommandHelp {
+        section: "Utilities",
+        name: "doc-xref",
+        summary: "Generate a local Markdown cross-reference graph for documentation review.",
+        usage_template: "Usage: {program} doc-xref [--root <docs_dir>] [--out <doc_xref.json>] [--output <human|json>]",
+    },
+    CliCommandHelp {
+        section: "Utilities",
+        name: "examples-index",
+        summary: "Validate the categorized examples catalog and emit an example index.",
+        usage_template: "Usage: {program} examples-index [--catalog <examples/catalog.toml>] [--root <repo_root>] [--out <examples_index.json|md>] [--mirror-dir <dir>] [--output <human|json>]",
+    },
+    CliCommandHelp {
+        section: "Utilities",
+        name: "dsl-capabilities",
+        summary: "Emit the grammar-backed DSL capability and unsupported-feature contract.",
+        usage_template: "Usage: {program} dsl-capabilities [--out <dsl_capabilities.json>] [--output <human|json>]",
+    },
+    CliCommandHelp {
+        section: "Utilities",
         name: "gen-st",
         summary: "Generate IEC 61131-3 ST output from a PLC file.",
         usage_template: "Usage: {program} gen-st <source.plc|source.bundle.toml> [--out <output.st>] [--program-name <Main>] [--task-interval-ms <ms>] [--no-verification-summary]",
@@ -255,6 +297,10 @@ fn command_help_options(command: &str) -> &'static [&'static str] {
             "--layout <single-file|structured-fragments> Choose the scaffold source layout.",
             "--delivery-layer <module|station|line> Choose the default delivery asset layer for scaffold docs and entries.",
             "--force                    Overwrite known scaffold files in a non-empty directory.",
+        ],
+        "lsp" => &[
+            "Starts a stdio LSP server for editor clients.",
+            "Current capabilities: diagnostics, completion, hover, current-file definition/references/rename, and basic formatting.",
         ],
         "sim" => &[
             "--out <trace.jsonl>          Write runtime trace JSONL.",
@@ -354,6 +400,12 @@ fn command_help_options(command: &str) -> &'static [&'static str] {
             "--title <title>              Override the HTML report title.",
             "--output <human|json>        Select CLI output format.",
         ],
+        "gen-keyence" => &[
+            "--out-dir <dir>              Output directory; defaults to out/codegen/keyence.",
+            "--program-name <Main>        KEYENCE program name used for generated artifact filenames.",
+            "--cpu <KV-X550>              Target CPU label recorded in the review package.",
+            "--output <human|json>        Select CLI output format.",
+        ],
         "operation-model" => &[
             "--out <process_operation_model.toml|json> Required scheduling-intent model output.",
             "--output <human|json>        Select CLI output format.",
@@ -446,6 +498,32 @@ fn command_help_options(command: &str) -> &'static [&'static str] {
             "--critical-wait-level <warn|error> Severity for critical wait findings.",
             "--critical-wait-exempt <task.step|task.*> Exempt a task or step pattern.",
         ],
+        "doc-index" => &[
+            "--root <docs_dir>            Documentation root to scan; defaults to docs/.",
+            "--out <doc_index.json|md>    Optional index artifact path.",
+            "--output <human|json>        Select CLI output format.",
+        ],
+        "doc-lint" => &[
+            "--root <docs_dir>            Documentation root to scan; defaults to docs/.",
+            "--out <doc_lint.json>        Optional JSON report path.",
+            "--output <human|json>        Select CLI output format.",
+        ],
+        "doc-xref" => &[
+            "--root <docs_dir>            Documentation root to scan; defaults to docs/.",
+            "--out <doc_xref.json>        Optional JSON report path.",
+            "--output <human|json>        Select CLI output format.",
+        ],
+        "examples-index" => &[
+            "--catalog <catalog.toml>      Examples catalog to load; defaults to examples/catalog.toml.",
+            "--root <repo_root>           Root used to resolve catalog paths; defaults to current directory.",
+            "--out <examples_index.json|md> Optional index artifact path.",
+            "--mirror-dir <dir>           Write categorized README-only navigation directories.",
+            "--output <human|json>        Select CLI output format.",
+        ],
+        "dsl-capabilities" => &[
+            "--out <dsl_capabilities.json> Optional JSON artifact path.",
+            "--output <human|json>        Select CLI output format.",
+        ],
         "gen-st" => &[
             "--out <output.st>            Write ST output to a file instead of stdout.",
             "--program-name <Main>        Override the emitted ST program name.",
@@ -499,6 +577,11 @@ fn command_help_notes(command: &str) -> &'static [&'static str] {
             "Each task tab includes an offline IEC 61131-3 SFC-style SVG: step boxes, transition bars, side action blocks, and source line references for human-to-agent review.",
             "The command lowers the source through parser and semantic/state-machine stages, but it is a review renderer rather than a release gate.",
         ],
+        "gen-keyence" => &[
+            "This command generates reviewable KEYENCE-facing text artifacts only; it does not claim KV STUDIO compile success.",
+            "The MNM file is a draft carrier plus ST reference comments. Variables remain in `variables/variables.csv` and must be reconstructed through KV STUDIO Variable Editor.",
+            "Final acceptance still requires MNM import, official FB import if needed, Ctrl+F2/Ctrl+F9 conversion, and copied KV STUDIO evidence.",
+        ],
         "operation-model" => &[
             "This command is for migration, audit, and comparison against an existing task/step flow; new projects should author process_model/process_operation_model.toml from the system contract first.",
             "Workpiece source availability, destination capacity, operator/program guards, and semantic-resource claims are normalized into admission rules.",
@@ -530,6 +613,23 @@ fn command_help_notes(command: &str) -> &'static [&'static str] {
         ],
         "scenario-gen" => &[
             "Generated scenario cases are selected from the config according to the chosen coverage mode.",
+        ],
+        "doc-index" => &[
+            "The index is generated from Markdown files only and captures headings as stable review anchors.",
+        ],
+        "doc-lint" => &[
+            "External URLs are skipped; this command is for repository-local Markdown links and heading anchors.",
+        ],
+        "doc-xref" => &[
+            "This command emits resolved, unresolved, and non-Markdown local edges without failing the build.",
+        ],
+        "examples-index" => &[
+            "The catalog is the stable classification source for examples while historical paths remain compatible.",
+            "A missing example or scenario path is reported as a failing catalog issue.",
+        ],
+        "dsl-capabilities" => &[
+            "This report distinguishes grammar-backed DSL semantics from external asset templates.",
+            "Unsupported generic/template/pattern features stay explicit so generators do not emit phantom syntax.",
         ],
         "gen-st" => &[
             "`gen-st` compiles the PLC first, so semantic or verification failures still stop the command.",
@@ -591,6 +691,9 @@ fn command_help_examples(command: &str) -> &'static [&'static str] {
             "rust_plc flowchart rustplc.bundle.toml --out-dir out/flowchart/review --output human",
             "rust_plc flowchart examples/workpiece_phase1_transfer.plc --output json",
         ],
+        "gen-keyence" => &[
+            "rust_plc gen-keyence rustplc.bundle.toml --out-dir out/codegen/keyence --cpu KV-X550 --output human",
+        ],
         "operation-model" => &[
             "rust_plc operation-model examples/workpiece_phase1_transfer.plc --out process_model/process_operation_model.toml",
         ],
@@ -645,6 +748,20 @@ fn command_help_examples(command: &str) -> &'static [&'static str] {
         "sequence-lint" => &[
             "rust_plc sequence-lint examples/recovery_templates/power_loss_recovery.plc --critical-wait-level error",
         ],
+        "doc-index" => &[
+            "rust_plc doc-index --root docs --out out/docs/doc_index.json --output json",
+            "rust_plc doc-index --root docs --out docs/INDEX.generated.md",
+        ],
+        "doc-lint" => &["rust_plc doc-lint --root docs --out out/docs/doc_lint.json --output json"],
+        "doc-xref" => &["rust_plc doc-xref --root docs --out out/docs/doc_xref.json --output json"],
+        "examples-index" => &[
+            "rust_plc examples-index --catalog examples/catalog.toml --out out/examples/index.json --output json",
+            "rust_plc examples-index --out examples/INDEX.generated.md",
+            "rust_plc examples-index --mirror-dir examples/by_category",
+        ],
+        "dsl-capabilities" => {
+            &["rust_plc dsl-capabilities --out out/dsl_capabilities.json --output json"]
+        }
         "gen-st" => &[
             "rust_plc gen-st examples/dual_axis_platform.plc --out out/codegen/dual_axis_platform.st",
         ],
@@ -697,6 +814,11 @@ fn render_compile_help(program: &str) -> String {
     writeln!(
         &mut msg,
         "  --ir-out <ir_bundle.json>            Write the IR bundle JSON to a file."
+    )
+    .expect("write compile help");
+    writeln!(
+        &mut msg,
+        "  --cache-dir <dir>                    Reuse hash-validated IR cache entries for hot compiles."
     )
     .expect("write compile help");
     writeln!(&mut msg).expect("write compile help");

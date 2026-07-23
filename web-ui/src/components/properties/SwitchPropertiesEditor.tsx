@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { switchSchema, type SwitchData } from '../../schemas/nodeSchemas';
+import type { NodeData } from '../../stores/topologyStore';
 
 interface SwitchPropertiesEditorProps {
   nodeId: string;
-  data: any;
-  onUpdate: (nodeId: string, data: Partial<any>) => void;
+  data: NodeData;
+  onUpdate: (nodeId: string, data: Partial<NodeData>) => void;
 }
 
 const SwitchPropertiesEditor: React.FC<SwitchPropertiesEditorProps> = ({
@@ -14,15 +15,11 @@ const SwitchPropertiesEditor: React.FC<SwitchPropertiesEditorProps> = ({
   onUpdate,
 }) => {
   const { t } = useTranslation();
-  const [formData, setFormData] = useState<SwitchData>({
-    label: data.label || '',
-    status: data.status || 'open',
-    value: data.value || false,
-  });
+  const [formData, setFormData] = useState<SwitchData>(() => toSwitchData(data));
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [isDirty, setIsDirty] = useState(false);
 
-  const handleChange = (field: keyof SwitchData, value: any) => {
+  const handleChange = <K extends keyof SwitchData>(field: K, value: SwitchData[K]) => {
     setFormData({ ...formData, [field]: value });
     setIsDirty(true);
     if (errors[field]) {
@@ -49,11 +46,7 @@ const SwitchPropertiesEditor: React.FC<SwitchPropertiesEditorProps> = ({
   };
 
   const handleRevert = () => {
-    setFormData({
-      label: data.label || '',
-      status: data.status || 'open',
-      value: data.value || false,
-    });
+    setFormData(toSwitchData(data));
     setIsDirty(false);
     setErrors({});
   };
@@ -93,7 +86,7 @@ const SwitchPropertiesEditor: React.FC<SwitchPropertiesEditorProps> = ({
         </label>
         <select
           value={formData.status}
-          onChange={(e) => handleChange('status', e.target.value)}
+          onChange={(e) => handleChange('status', e.target.value as SwitchData['status'])}
           style={{
             width: '100%',
             padding: '6px 8px',
@@ -162,3 +155,12 @@ const SwitchPropertiesEditor: React.FC<SwitchPropertiesEditorProps> = ({
 };
 
 export default SwitchPropertiesEditor;
+
+function toSwitchData(data: NodeData): SwitchData {
+  const status = data.status;
+  return {
+    label: data.label || '',
+    status: status === 'open' || status === 'closed' || status === 'fault' ? status : 'open',
+    value: typeof data.value === 'boolean' ? data.value : false,
+  };
+}

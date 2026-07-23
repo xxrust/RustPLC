@@ -122,10 +122,11 @@ fn parse_safety_operand(pair: Pair<Rule>) -> Result<SafetyOperand, PlcError> {
                     }
                     Rule::comparison_operator => operator = Some(parse_comparison_operator(part)?),
                     Rule::number => {
-                        value =
-                            Some(part.as_str().parse::<f64>().map_err(|_| {
-                                PlcError::parse(line, "analog_condition 数值解析失败")
-                            })?);
+                        value = Some(parse_finite_f64(
+                            part.as_str(),
+                            line,
+                            "analog_condition",
+                        )?);
                     }
                     Rule::measured_value => {
                         let measured = parse_measured_value(part)?;

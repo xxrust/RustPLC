@@ -1,12 +1,18 @@
 use crate::cli::shared::compile_pipeline::{
-    RuntimeBudget, compile_pipeline, write_verification_report,
+    IrBundle, RuntimeBudget, compile_pipeline, compile_pipeline_with_reusable_verification,
+    reusable_verification_from_ir_bundle, write_verification_report,
 };
 use crate::cli_support::help::{print_command_help_and_exit, print_usage};
 use rust_plc::source_bundle::{is_supported_plc_source_path, load_plc_source, plc_source_stem};
 use rust_plc::verification::{VerificationSummary, WarningEntry, WarningLevel};
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::SystemTime;
+
+const IR_CACHE_SCHEMA_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct RuntimeBudgetThresholds {
@@ -95,6 +101,7 @@ pub(super) fn run_compile_command(program: String, first: String, remaining: Vec
     let mut report_path: Option<PathBuf> = None;
     let mut no_print_ir = false;
     let mut ir_out_path: Option<PathBuf> = None;
+    let mut cache_dir: Option<PathBuf> = None;
     let mut deny_warnings = false;
     let mut budget_thresholds = RuntimeBudgetThresholds::from_env();
 
@@ -116,6 +123,13 @@ pub(super) fn run_compile_command(program: String, first: String, remaining: Vec
                     std::process::exit(1);
                 });
                 ir_out_path = Some(PathBuf::from(value));
+            }
+            "--cache-dir" => {
+                let value = args.next().unwrap_or_else(|| {
+                    eprintln!("Missing value for --cache-dir <dir>");
+                    std::process::exit(1);
+                });
+                cache_dir = Some(PathBuf::from(value));
             }
             "--deny-warnings" => {
                 deny_warnings = true;
@@ -242,7 +256,7 @@ pub(super) fn run_compile_command(program: String, first: String, remaining: Vec
         }
     };
 
-    let mut ir_bundle = match compile_pipeline(&loaded) {
+    let mut ir_bundle = match compile_pipeline_maybe_cached(&loaded, cache_dir.as_deref()) {
         Ok(ir_bundle) => ir_bundle,
         Err(errors) => {
             for (index, error) in errors.iter().enumerate() {
@@ -319,6 +333,239 @@ pub(super) fn run_compile_command(program: String, first: String, remaining: Vec
             }
         }
     }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct CachedIrBundle {
+    schema_version: u32,
+    tool_version: String,
+    cache_key: String,
+    source_path: String,
+    ir_bundle: IrBundle,
+}
+
+fn compile_pipeline_maybe_cached(
+    loaded: &rust_plc::source_bundle::LoadedPlcSource,
+    cache_dir: Option<&Path>,
+) -> Result<IrBundle, Vec<String>> {
+    let Some(cache_dir) = cache_dir else {
+        return compile_pipeline(loaded);
+    };
+
+    let cache_key = compute_ir_cache_key(loaded)?;
+    let cache_path = cache_dir.join(format!("{cache_key}.json"));
+    if cache_path.is_file() {
+        match read_cached_ir_bundle(&cache_path, &cache_key) {
+            Ok(ir_bundle) => {
+                eprintln!("ir_cache: hit {}", cache_path.display());
+                return Ok(ir_bundle);
+            }
+            Err(err) => {
+                eprintln!("ir_cache: ignored {} ({err})", cache_path.display());
+            }
+        }
+    } else {
+        eprintln!("ir_cache: miss {}", cache_path.display());
+    }
+
+    let reusable_verification = find_reusable_verification_cache(cache_dir, &cache_path);
+    if let Some((path, _)) = &reusable_verification {
+        eprintln!("verification_cache: candidate {}", path.display());
+    }
+
+    let (ir_bundle, reuse_report) = compile_pipeline_with_reusable_verification(
+        loaded,
+        reusable_verification.as_ref().map(|(_, reusable)| reusable),
+    )?;
+    if !reuse_report.reused_checkers.is_empty() {
+        eprintln!(
+            "verification_cache: reused [{}], checked [{}]",
+            reuse_report.reused_checkers.join(","),
+            reuse_report.checked_checkers.join(",")
+        );
+    }
+    write_cached_ir_bundle(cache_dir, &cache_path, &cache_key, loaded, &ir_bundle)?;
+    Ok(ir_bundle)
+}
+
+fn read_cached_ir_bundle(cache_path: &Path, expected_key: &str) -> Result<IrBundle, String> {
+    let cached = read_cache_entry(cache_path)?;
+    if cached.cache_key != expected_key {
+        return Err("cache key mismatch".to_string());
+    }
+    Ok(cached.ir_bundle)
+}
+
+fn read_cache_entry(cache_path: &Path) -> Result<CachedIrBundle, String> {
+    let text = fs::read_to_string(cache_path)
+        .map_err(|err| format!("failed to read cache entry: {err}"))?;
+    let cached: CachedIrBundle =
+        serde_json::from_str(&text).map_err(|err| format!("failed to parse cache entry: {err}"))?;
+    if cached.schema_version != IR_CACHE_SCHEMA_VERSION {
+        return Err(format!(
+            "schema_version {} != {}",
+            cached.schema_version, IR_CACHE_SCHEMA_VERSION
+        ));
+    }
+    if cached.tool_version != env!("CARGO_PKG_VERSION") {
+        return Err(format!(
+            "tool_version {} != {}",
+            cached.tool_version,
+            env!("CARGO_PKG_VERSION")
+        ));
+    }
+    Ok(cached)
+}
+
+fn find_reusable_verification_cache(
+    cache_dir: &Path,
+    current_cache_path: &Path,
+) -> Option<(PathBuf, rust_plc::verification::ReusableVerificationSummary)> {
+    let entries = fs::read_dir(cache_dir).ok()?;
+    let mut candidates = Vec::new();
+    for entry in entries.filter_map(Result::ok) {
+        let path = entry.path();
+        if path == current_cache_path {
+            continue;
+        }
+        if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
+            continue;
+        }
+        let modified = entry
+            .metadata()
+            .and_then(|metadata| metadata.modified())
+            .unwrap_or(SystemTime::UNIX_EPOCH);
+        candidates.push((modified, path));
+    }
+    candidates.sort_by(|left, right| right.0.cmp(&left.0));
+
+    for (_, path) in candidates {
+        let Ok(cached) = read_cache_entry(&path) else {
+            continue;
+        };
+        let Ok(reusable) = reusable_verification_from_ir_bundle(&cached.ir_bundle) else {
+            continue;
+        };
+        return Some((path, reusable));
+    }
+
+    None
+}
+
+fn write_cached_ir_bundle(
+    cache_dir: &Path,
+    cache_path: &Path,
+    cache_key: &str,
+    loaded: &rust_plc::source_bundle::LoadedPlcSource,
+    ir_bundle: &IrBundle,
+) -> Result<(), Vec<String>> {
+    fs::create_dir_all(cache_dir).map_err(|err| {
+        vec![format!(
+            "Failed to create IR cache directory {}: {err}",
+            cache_dir.display()
+        )]
+    })?;
+    let cached = CachedIrBundle {
+        schema_version: IR_CACHE_SCHEMA_VERSION,
+        tool_version: env!("CARGO_PKG_VERSION").to_string(),
+        cache_key: cache_key.to_string(),
+        source_path: loaded.requested_path.display().to_string(),
+        ir_bundle: ir_bundle_ref_clone(ir_bundle)?,
+    };
+    let mut text = serde_json::to_string_pretty(&cached)
+        .map_err(|err| vec![format!("Failed to serialize IR cache entry: {err}")])?;
+    text.push('\n');
+    fs::write(cache_path, text).map_err(|err| {
+        vec![format!(
+            "Failed to write IR cache entry {}: {err}",
+            cache_path.display()
+        )]
+    })?;
+    eprintln!("ir_cache: stored {}", cache_path.display());
+    Ok(())
+}
+
+fn ir_bundle_ref_clone(ir_bundle: &IrBundle) -> Result<IrBundle, Vec<String>> {
+    let value = serde_json::to_value(ir_bundle)
+        .map_err(|err| vec![format!("Failed to serialize IR bundle for cache: {err}")])?;
+    serde_json::from_value(value)
+        .map_err(|err| vec![format!("Failed to deserialize IR bundle for cache: {err}")])
+}
+
+fn compute_ir_cache_key(
+    loaded: &rust_plc::source_bundle::LoadedPlcSource,
+) -> Result<String, Vec<String>> {
+    let mut hasher = Sha256::new();
+    hasher.update(b"rust_plc.ir_cache.v2\n");
+    hasher.update(env!("CARGO_PKG_VERSION").as_bytes());
+    hasher.update(b"\nsource_path\n");
+    hasher.update(loaded.requested_path.to_string_lossy().as_bytes());
+    hasher.update(b"\nsource\n");
+    hasher.update(loaded.source.as_bytes());
+    hasher.update(b"\ndependencies\n");
+    for dependency in &loaded.dependencies {
+        hasher.update(dependency.role.as_bytes());
+        hasher.update(b"\0");
+        hasher.update(dependency.path.to_string_lossy().as_bytes());
+        hasher.update(b"\0");
+        hasher.update(dependency.sha256.as_bytes());
+        hasher.update(b"\0");
+    }
+    hasher.update(b"\ndevices\n");
+    update_hash_for_path_tree(&mut hasher, Path::new("devices"))?;
+    Ok(hex::encode(hasher.finalize()))
+}
+
+fn update_hash_for_path_tree(hasher: &mut Sha256, root: &Path) -> Result<(), Vec<String>> {
+    if !root.exists() {
+        hasher.update(b"<missing>");
+        return Ok(());
+    }
+    let mut files = Vec::new();
+    collect_toml_files(root, &mut files)?;
+    files.sort();
+    for path in files {
+        let relative = path.strip_prefix(root).unwrap_or(&path);
+        hasher.update(relative.to_string_lossy().as_bytes());
+        hasher.update(b"\0");
+        let bytes = fs::read(&path).map_err(|err| {
+            vec![format!(
+                "Failed to read cache input {}: {err}",
+                path.display()
+            )]
+        })?;
+        hasher.update(bytes);
+        hasher.update(b"\0");
+    }
+    Ok(())
+}
+
+fn collect_toml_files(dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), Vec<String>> {
+    let entries = fs::read_dir(dir).map_err(|err| {
+        vec![format!(
+            "Failed to read cache input dir {}: {err}",
+            dir.display()
+        )]
+    })?;
+    for entry in entries {
+        let entry = entry.map_err(|err| {
+            vec![format!(
+                "Failed to read cache input entry in {}: {err}",
+                dir.display()
+            )]
+        })?;
+        let path = entry.path();
+        if path.is_dir() {
+            collect_toml_files(&path, out)?;
+        } else if path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("toml"))
+        {
+            out.push(path);
+        }
+    }
+    Ok(())
 }
 
 fn print_success_summary(summary: &VerificationSummary) {

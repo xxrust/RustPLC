@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Card, List, Space, Spin, Tag, Typography } from 'antd';
 import { useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
@@ -42,7 +42,7 @@ function pickDefaultRun(runs: RunStatus[], currentProject: string | null): strin
 const AuditPage: React.FC = () => {
   const { t } = useTranslation();
   const { currentProject } = useAppStore();
-  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
+  const [requestedRunId, setRequestedRunId] = useState<string | null>(null);
 
   const { data: runsData, isLoading: isRunsLoading } = useQuery({
     queryKey: ['audit-runs'],
@@ -50,13 +50,14 @@ const AuditPage: React.FC = () => {
     refetchInterval: 5000,
   });
 
-  const runs = runsData?.data ?? [];
-
-  useEffect(() => {
-    if (!selectedRunId && runs.length > 0) {
-      setSelectedRunId(pickDefaultRun(runs, currentProject));
-    }
-  }, [currentProject, runs, selectedRunId]);
+  const runs = useMemo(() => runsData?.data ?? [], [runsData?.data]);
+  const selectedRunId = useMemo(
+    () =>
+      (requestedRunId && runs.some((run) => run.run_id === requestedRunId)
+        ? requestedRunId
+        : pickDefaultRun(runs, currentProject)),
+    [currentProject, requestedRunId, runs]
+  );
 
   const selectedRun = useMemo(
     () => runs.find((run) => run.run_id === selectedRunId),
@@ -120,7 +121,7 @@ const AuditPage: React.FC = () => {
                     background: active ? 'rgba(14,116,144,0.16)' : 'transparent',
                     borderLeft: active ? '3px solid #22d3ee' : '3px solid transparent',
                   }}
-                  onClick={() => setSelectedRunId(run.run_id)}
+                  onClick={() => setRequestedRunId(run.run_id)}
                 >
                   <div style={{ width: '100%' }}>
                     <div

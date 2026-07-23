@@ -21,10 +21,11 @@
 <p align="center">
   <a href="#30-秒理解-rustplc">30 秒理解</a> •
   <a href="#为什么需要-rustplc">为什么需要</a> •
+  <a href="#系统架构">系统架构</a> •
   <a href="#标准项目分层">项目分层</a> •
   <a href="#快速开始">快速开始</a> •
   <a href="#核心能力">核心能力</a> •
-  <a href="#ai-for-ai-方向">AI for AI</a> •
+  <a href="#安全与架构审计">审计报告</a> •
   <a href="#文档">文档</a>
 </p>
 
@@ -53,6 +54,54 @@ flowchart LR
 RustPLC：工程师描述工艺 → AI 生成声明式 DSL → 编译器数学证明安全性 → 所有问题在编译期捕获
 
 **一句话：RustPLC 是工控领域的 "Rust 编译器" — 如果它编译通过，它就是安全的。**
+
+---
+
+## 安全与架构审计
+
+2026-07-23 完成的代码库审计覆盖 Web 控制面、semantic 前门、runtime 所有权、并发 verification/runtime 一致性及 Rust/npm 供应链。当前验证状态：
+
+- `cargo check --workspace --all-targets` 通过
+- `cargo test --workspace --all-targets` 通过
+- RustSec 未发现已知漏洞、unsound 或 yanked 依赖；升级 defmt 链后嵌入式工具链保留 4 个停止维护警告，均来自上游 HAL/PIO 链
+- npm 官方审计结果为 0 个已知漏洞，前端生产构建通过
+- Web server 与 CLI utilities 已完成第一轮职责拆分，前端 `npm run lint` 为 0 errors / 0 warnings，Monaco 编辑器 chunk 从约 4.46 MB 降到约 2.66 MB
+
+详细结论、机制链、源码证据和残余架构风险：
+
+- **[HTML 审计报告](docs/audits/rustplc_security_architecture_audit_2026-07-23.html)**
+- **[Markdown 审计总结](docs/audits/rustplc_security_architecture_audit_2026-07-23.md)**
+
+---
+
+## 系统架构
+
+完整的系统架构图和技术细节请查看 **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**。
+
+### 编译流水线
+
+```
+.plc DSL → Parser → AST → Semantic Analysis → IR
+                                                 ↓
+                    ┌────────────────────────────┼────────────────────────────┐
+                    ↓                            ↓                            ↓
+            Verification (4 Engines)     Runtime Bridge              ST Codegen
+            - Safety (BMC + k-induction) - IR → runtime-core        - IEC 61131-3
+            - Liveness (SCC + reachability) - Port mapping          - RP2040 firmware
+            - Timing (Critical path)     - State validation         - Renode scripts
+            - Causality (Topology BFS)   - Action sequencing
+```
+
+### 核心模块
+
+| 模块 | 代码量 | 职责 |
+|------|--------|------|
+| Parser | 153K lines | PEG 语法 → AST |
+| Semantic | 367K lines | 预处理 + 名称解析 + IR 降级 |
+| IR | 18K lines | 规范中间表示 |
+| Verification | 195K lines | 四引擎并行验证 |
+| Codegen | 49K lines | ST 代码生成 |
+| Runtime Bridge | 8K lines | IR → runtime-core 翻译 |
 
 ---
 
@@ -470,11 +519,21 @@ graph TB
 
 ## 文档
 
+完整文档分为三个层次：
+
+### 架构与开发指南
+
+| 文档 | 用途 |
+|------|------|
+| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | 📐 系统架构全景图（推荐首读） |
+| [AGENTS.md](AGENTS.md) | 🛠️ 开发者快速上手指南 |
+| [CODEX.md](CODEX.md) | 📚 编译器核心设计文档 |
+| [快速开始](QUICKSTART.md) | ⚡ 5 分钟上手指南 |
+
 ### 仓库内文档
 
 | 文档 | 内容 |
 |------|------|
-| [`AGENTS.md`](AGENTS.md) | 项目总纲、分层原则、源码导航 |
 | [`docs/architecture/signal-direction.md`](docs/architecture/signal-direction.md) | 并发 task / blocking step 语义（冻结） |
 | [`docs/architecture/process-operation-layer.md`](docs/architecture/process-operation-layer.md) | 拓扑与 task/step 之间的工艺操作调度层 |
 | [`docs/architecture/device-semantics-library.md`](docs/architecture/device-semantics-library.md) | 设备族语义抽象 |

@@ -114,6 +114,133 @@ relation { from: sensor_B_ret.out, to: X3.in, via: reports_to }
     }
 
     #[test]
+    fn topology_graph_retains_station_protocol_ir() {
+        let input = r#"
+[topology]
+device plc_a: plc { model_ref: openplc_softplc }
+device plc_b: plc { model_ref: openplc_softplc }
+device cyl_load: cylinder
+device cyl_press: cylinder
+workpiece part: workpiece_type {
+    ingress_sites: [handoff]
+}
+site handoff: workpiece_location { capacity: 1 }
+
+station st01 { owns: [plc_a, cyl_load], tasks: [load_cycle] }
+station st02 { owns: [plc_b, cyl_press], tasks: [press_cycle] }
+handshake st01_to_st02 {
+    from: st01,
+    to: st02,
+    request: st01_request,
+    allow: st02_allow,
+    complete: st01_complete,
+    timeout: 5s -> goto fault.timeout
+}
+transfer_point load_to_press {
+    from_station: st01,
+    to_station: st02,
+    site: handoff,
+    handshake: st01_to_st02
+}
+controller_sync plc_pair_sync {
+    controllers: [plc_a, plc_b],
+    max_skew: 5ms,
+    heartbeat: 100ms
+}
+
+[constraints]
+
+[tasks]
+task load_cycle:
+    step idle:
+task press_cycle:
+    step idle:
+task fault:
+    step timeout:
+"#;
+
+        let program = parse_plc(input).expect("station protocol should parse");
+        build_state_machine(&program).expect("station protocol should pass semantic gates");
+        let expanded = preprocess_program(&program).expect("preprocess should keep station metadata");
+        let topology = build_topology_graph(&expanded).expect("topology should build");
+
+        assert_eq!(
+            topology.station_protocol.controllers,
+            vec!["plc_a".to_string(), "plc_b".to_string()]
+        );
+        assert_eq!(topology.station_protocol.stations.len(), 2);
+        assert_eq!(topology.station_protocol.stations[0].name, "st01");
+        assert_eq!(
+            topology.station_protocol.stations[0].owns,
+            vec!["plc_a".to_string(), "cyl_load".to_string()]
+        );
+        assert_eq!(topology.station_protocol.handshakes.len(), 1);
+        let handshake = &topology.station_protocol.handshakes[0];
+        assert_eq!(handshake.name, "st01_to_st02");
+        assert_eq!(handshake.from_station, "st01");
+        assert_eq!(handshake.to_station, "st02");
+        assert_eq!(handshake.timeout_ms, 5000);
+        assert_eq!(handshake.timeout_target_task, "fault");
+        assert_eq!(handshake.timeout_target_step.as_deref(), Some("timeout"));
+        assert_eq!(topology.station_protocol.transfer_points.len(), 1);
+        assert_eq!(
+            topology.station_protocol.transfer_points[0].handshake,
+            "st01_to_st02"
+        );
+        assert_eq!(topology.station_protocol.controller_syncs.len(), 1);
+        let sync = &topology.station_protocol.controller_syncs[0];
+        assert_eq!(sync.name, "plc_pair_sync");
+        assert_eq!(
+            sync.controllers,
+            vec!["plc_a".to_string(), "plc_b".to_string()]
+        );
+        assert_eq!(sync.max_skew_ms, 5);
+        assert_eq!(sync.heartbeat_ms, 100);
+
+        let topology_json =
+            serde_json::to_string(&topology).expect("topology should serialize");
+        assert!(topology_json.contains("station_protocol"));
+        assert!(topology_json.contains("st01_to_st02"));
+        assert!(topology_json.contains("plc_pair_sync"));
+    }
+
+    #[test]
+    fn controller_sync_contracts_are_semantically_validated() {
+        let input = r#"
+[topology]
+device plc_a: plc { model_ref: openplc_softplc }
+controller_sync bad_sync {
+    controllers: [plc_a, plc_missing],
+    max_skew: 20ms,
+    heartbeat: 10ms
+}
+
+[constraints]
+
+[tasks]
+task main:
+    step idle:
+"#;
+
+        let program = parse_plc(input).expect("controller_sync syntax should parse");
+        let errors = build_state_machine(&program)
+            .expect_err("invalid controller_sync contract should fail semantic validation");
+        let rendered = errors
+            .iter()
+            .map(|error| format!("{error}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            rendered.contains("[SEM-233]") && rendered.contains("plc_missing"),
+            "expected undefined controller diagnostic, got: {rendered}"
+        );
+        assert!(
+            rendered.contains("[SEM-236]"),
+            "expected heartbeat/skew diagnostic, got: {rendered}"
+        );
+    }
+
+    #[test]
     fn topology_extracts_pid_loop_with_conditional_integration_strategy() {
         let input = r#"
 [topology]
@@ -328,5 +455,64 @@ relation { from: sensor_bad.out, to: valve_A.coil, via: reports_to }
             "错误提示应说明 reports_to 的方向约束，实际: {}",
             errors[0]
         );
+    }
+
+    #[test]
+    fn rejects_duplicate_source_device_names_before_topology_lowering() {
+        let input = r#"
+[topology]
+device duplicate_sensor: sensor
+device duplicate_sensor: sensor
+
+[constraints]
+
+[tasks]
+task main:
+    step idle:
+"#;
+
+        let program = parse_plc(input).expect("duplicate names are syntactically valid");
+        let errors = build_topology_graph(&program).expect_err("duplicate devices must fail");
+        let rendered = errors
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(rendered.contains("duplicate_sensor"), "{rendered}");
+        assert!(rendered.contains("duplicate"), "{rendered}");
+    }
+
+    #[test]
+    fn topology_builder_matches_explicit_preprocessing() {
+        let input = r#"
+[topology]
+device_template single<T> {
+    device main: T { purpose: "templated sensor" }
+}
+device_instance station: single<sensor>
+
+[constraints]
+
+[tasks]
+task main:
+    step idle:
+"#;
+
+        let program = parse_plc(input).expect("template source should parse");
+        let direct = build_topology_graph(&program).expect("public builder should preprocess");
+        let expanded = preprocess_program(&program).expect("explicit preprocess should succeed");
+        let explicit = build_topology_graph(&expanded).expect("expanded program should build");
+        let direct_names = direct
+            .graph
+            .node_weights()
+            .map(|device| device.name.clone())
+            .collect::<Vec<_>>();
+        let explicit_names = explicit
+            .graph
+            .node_weights()
+            .map(|device| device.name.clone())
+            .collect::<Vec<_>>();
+        assert_eq!(direct_names, explicit_names);
+        assert_eq!(direct_names, vec!["station_main"]);
     }
 

@@ -1,4 +1,4 @@
-﻿#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 struct GateSummary {
     schema_version: u32,
     trace_match: bool,
@@ -113,15 +113,16 @@ fn run_release_bundle_subcommand(
     let ir_bundle = compile_pipeline(&loaded).map_err(|errors| errors.join("\n\n"))?;
 
     // Board-oriented program generation uses 1ms ticks to align with firmware build artifacts.
-    let board_program = state_machine_to_runtime_program(
+    let compiled_board_program = state_machine_to_runtime_program(
         &ir_bundle.topology,
         &ir_bundle.constraints,
         &ir_bundle.state_machine,
         1,
     )
     .map_err(|err| format!("Failed to bridge to runtime Program: {err}"))?;
+    let board_program = compiled_board_program.program();
 
-    let usage = io_usage_for_program(&board_program);
+    let usage = io_usage_for_program(board_program);
     let io_map = match io_map_path.as_ref() {
         None => None,
         Some(path) => {
@@ -157,7 +158,7 @@ Start from the generated `io_map.template.toml` under `--out-dir <dir>` and fill
         .map_err(|err| format!("Failed to write {bundled_scenario_path:?}: {err}"))?;
 
     let io_map_template_path = out_dir.join("io_map.template.toml");
-    let io_map_template = io_map_template_for_program(&board_program);
+    let io_map_template = io_map_template_for_program(board_program);
     fs::write(&io_map_template_path, &io_map_template)
         .map_err(|err| format!("Failed to write {io_map_template_path:?}: {err}"))?;
 
@@ -173,7 +174,7 @@ Start from the generated `io_map.template.toml` under `--out-dir <dir>` and fill
     }
 
     let generated_program_path = out_dir.join("generated_program.rs");
-    let mut generated_src = codegen::generate_program_module(&board_program, "generated")
+    let mut generated_src = codegen::generate_program_module(board_program, "generated")
         .map_err(|err| format!("Codegen failed: {err:?}"))?;
     if !generated_src.ends_with('\n') {
         generated_src.push('\n');
@@ -191,19 +192,20 @@ Start from the generated `io_map.template.toml` under `--out-dir <dir>` and fill
     )?;
 
     // SIL artifacts for trace/report packaging.
-    let sil_program = state_machine_to_runtime_program(
+    let compiled_sil_program = state_machine_to_runtime_program(
         &ir_bundle.topology,
         &ir_bundle.constraints,
         &ir_bundle.state_machine,
         scenario.tick_ms,
     )
     .map_err(|err| format!("Failed to bridge to SIL runtime Program: {err}"))?;
+    let sil_program = compiled_sil_program.program();
     let sil_trace_path = out_dir.join("sil_trace.jsonl");
     let sim_report_path = out_dir.join("sim_report.json");
     let (num_di, num_do, num_ai, num_ao) =
-        io_sizes_for_program_and_scenario(&sil_program, &scenario);
+        io_sizes_for_program_and_scenario(sil_program, &scenario);
     let mut io = sim::SimIo::new(num_di, num_do, num_ai, num_ao);
-    let run = sim::run_program_for_scenario(&sil_program, &scenario, &mut io)
+    let run = sim::run_program_for_scenario(sil_program, &scenario, &mut io)
         .map_err(|err| format!("SIL simulation failed: {err}"))?;
     fs::write(&sil_trace_path, run.trace.into_string())
         .map_err(|err| format!("Failed to write trace file {sil_trace_path:?}: {err}"))?;
@@ -217,7 +219,7 @@ Start from the generated `io_map.template.toml` under `--out-dir <dir>` and fill
         write_virtual_board_artifacts(
             Path::new(&plc_path),
             &scenario_path,
-            &sil_program,
+            sil_program,
             &scenario,
             &out_dir,
         )?;

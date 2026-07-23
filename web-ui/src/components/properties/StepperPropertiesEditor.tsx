@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { stepperSchema, type StepperData } from '../../schemas/nodeSchemas';
+import type { NodeData } from '../../stores/topologyStore';
 
 interface StepperPropertiesEditorProps {
   nodeId: string;
-  data: any;
-  onUpdate: (nodeId: string, data: Partial<any>) => void;
+  data: NodeData;
+  onUpdate: (nodeId: string, data: Partial<NodeData>) => void;
 }
 
 const StepperPropertiesEditor: React.FC<StepperPropertiesEditorProps> = ({
@@ -14,17 +15,11 @@ const StepperPropertiesEditor: React.FC<StepperPropertiesEditorProps> = ({
   onUpdate,
 }) => {
   const { t } = useTranslation();
-  const [formData, setFormData] = useState<StepperData>({
-    label: data.label || '',
-    direction: data.direction || 'stopped',
-    enable: data.enable || false,
-    position: data.position || 0,
-    steps_per_rev: data.steps_per_rev || 200,
-  });
+  const [formData, setFormData] = useState<StepperData>(() => toStepperData(data));
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [isDirty, setIsDirty] = useState(false);
 
-  const handleChange = (field: keyof StepperData, value: any) => {
+  const handleChange = <K extends keyof StepperData>(field: K, value: StepperData[K]) => {
     setFormData({ ...formData, [field]: value });
     setIsDirty(true);
     if (errors[field]) {
@@ -51,13 +46,7 @@ const StepperPropertiesEditor: React.FC<StepperPropertiesEditorProps> = ({
   };
 
   const handleRevert = () => {
-    setFormData({
-      label: data.label || '',
-      direction: data.direction || 'stopped',
-      enable: data.enable || false,
-      position: data.position || 0,
-      steps_per_rev: data.steps_per_rev || 200,
-    });
+    setFormData(toStepperData(data));
     setIsDirty(false);
     setErrors({});
   };
@@ -97,7 +86,7 @@ const StepperPropertiesEditor: React.FC<StepperPropertiesEditorProps> = ({
         </label>
         <select
           value={formData.direction}
-          onChange={(e) => handleChange('direction', e.target.value)}
+          onChange={(e) => handleChange('direction', e.target.value as StepperData['direction'])}
           style={{
             width: '100%',
             padding: '6px 8px',
@@ -212,3 +201,17 @@ const StepperPropertiesEditor: React.FC<StepperPropertiesEditorProps> = ({
 };
 
 export default StepperPropertiesEditor;
+
+function toStepperData(data: NodeData): StepperData {
+  const direction = data.direction;
+  return {
+    label: data.label || '',
+    direction:
+      direction === 'forward' || direction === 'reverse' || direction === 'stopped'
+        ? direction
+        : 'stopped',
+    enable: typeof data.enable === 'boolean' ? data.enable : false,
+    position: typeof data.position === 'number' ? data.position : 0,
+    steps_per_rev: typeof data.steps_per_rev === 'number' ? data.steps_per_rev : 200,
+  };
+}

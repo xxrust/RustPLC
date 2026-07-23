@@ -112,8 +112,8 @@ struct PendingAxisMotion {
 
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct DeterministicAxisDriver {
-    positions: BTreeMap<&'static str, f32>,
-    pending: BTreeMap<&'static str, PendingAxisMotion>,
+    positions: BTreeMap<String, f32>,
+    pending: BTreeMap<String, PendingAxisMotion>,
 }
 
 impl DeterministicAxisDriver {
@@ -125,7 +125,8 @@ impl DeterministicAxisDriver {
         if let Some(pending) = self.pending.get_mut(command.target) {
             if same_axis_motion(*pending, command) {
                 if pending.remaining_polls <= 1 {
-                    self.positions.insert(command.target, pending.destination);
+                    self.positions
+                        .insert(command.target.to_string(), pending.destination);
                     self.pending.remove(command.target);
                     return AxisMotionResult::Done;
                 }
@@ -141,12 +142,13 @@ impl DeterministicAxisDriver {
         };
         let polls = estimate_axis_polls(current, destination, command);
         if polls <= 1 {
-            self.positions.insert(command.target, destination);
+            self.positions
+                .insert(command.target.to_string(), destination);
             return AxisMotionResult::Done;
         }
 
         self.pending.insert(
-            command.target,
+            command.target.to_string(),
             PendingAxisMotion {
                 kind: command.kind,
                 value: command.value,

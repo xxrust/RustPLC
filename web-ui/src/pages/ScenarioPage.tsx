@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import { Card, Button, Empty, Form, Input, Space, Tabs, Typography, message } from 'antd';
 import { SaveOutlined, CheckOutlined, FolderOpenOutlined } from '@ant-design/icons';
 import { useMutation, useQuery } from '@tanstack/react-query';
@@ -14,11 +14,7 @@ const ScenarioPage: React.FC = () => {
   const { t } = useTranslation();
   const [form] = Form.useForm();
   const { currentProject, setCurrentProject } = useAppStore();
-  const [selectedId, setSelectedId] = useState<string>(currentProject || '');
-
-  useEffect(() => {
-    setSelectedId(currentProject || '');
-  }, [currentProject]);
+  const selectedId = currentProject || '';
 
   const { data: scenarioData } = useQuery({
     queryKey: ['scenario', selectedId],
@@ -67,7 +63,6 @@ const ScenarioPage: React.FC = () => {
 
   const handleLoadExample = () => {
     const exampleId = DEFAULT_PROJECT_ID;
-    setSelectedId(exampleId);
     setCurrentProject(exampleId, null, null);
     message.success(t('scenarioPage.exampleLoaded'));
   };

@@ -112,14 +112,15 @@
         ));
     }
 
-    let program = compile_loaded_plc_to_runtime_program(&loaded, sil_scenario.tick_ms)?;
+    let compiled_program = compile_loaded_plc_to_runtime_program(&loaded, sil_scenario.tick_ms)?;
+    let program = compiled_program.program();
 
     let sil_trace_path = out_dir.join("sil_trace.jsonl");
     let (num_di, num_do, num_ai, num_ao) =
-        io_sizes_for_program_and_scenario(&program, &sil_scenario);
+        io_sizes_for_program_and_scenario(program, &sil_scenario);
     let mut sil_io = sim::SimIo::new(num_di, num_do, num_ai, num_ao);
     let sil_run =
-        sim::run_program_for_scenario(&program, &sil_scenario, &mut sil_io).map_err(|e| {
+        sim::run_program_for_scenario(program, &sil_scenario, &mut sil_io).map_err(|e| {
             let mut msg = format!("SIL simulation failed: {e}");
             if let Some(hint) = scenario_mismatch_hint_for_example(
                 &plc_path,
@@ -139,7 +140,7 @@
     let (_, board_trace_path, _, tick_timing_path) = write_virtual_board_artifacts(
         Path::new(&plc_path),
         &board_scenario_path,
-        &program,
+        program,
         &board_scenario,
         &out_dir,
     )?;

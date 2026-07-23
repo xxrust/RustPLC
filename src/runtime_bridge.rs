@@ -11,6 +11,7 @@ use crate::ir::{
     State, StateMachine, TopologyGraph, Transition, TransitionAction, TransitionGuard,
 };
 use crate::plc_port::{PlcPortKind, parse_physical_plc_port_ref};
+use bumpalo::Bump;
 use io_traits::{AnalogInputId, AnalogOutputId, DigitalInputId, DigitalOutputId};
 use petgraph::Direction;
 use petgraph::graph::NodeIndex;
@@ -30,7 +31,39 @@ use runtime_core::{
     WorkpieceSiteDef as RtWorkpieceSiteDef, WorkpieceSiteKind as RtWorkpieceSiteKind,
     WorkpieceTypeDef as RtWorkpieceTypeDef,
 };
+use self_cell::self_cell;
 use std::collections::{HashMap, HashSet, VecDeque};
+
+self_cell!(
+    /// Owns every allocation referenced by a dynamically lowered runtime program.
+    pub struct CompiledRuntimeProgram {
+        owner: Bump,
+
+        #[covariant]
+        dependent: Program,
+    }
+);
+
+impl CompiledRuntimeProgram {
+    pub fn program(&self) -> &Program<'_> {
+        self.borrow_dependent()
+    }
+}
+
+impl std::fmt::Debug for CompiledRuntimeProgram {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let program = self.program();
+        formatter
+            .debug_struct("CompiledRuntimeProgram")
+            .field("tasks", &program.tasks.len())
+            .field("pid_loops", &program.pid_loops.len())
+            .field("workpiece_types", &program.workpiece_types.len())
+            .field("workpiece_sites", &program.workpiece_sites.len())
+            .finish_non_exhaustive()
+    }
+}
+
+pub(crate) const MAX_RUNTIME_CARRIER_SLOTS: usize = 4_096;
 
 #[derive(Debug, thiserror::Error)]
 pub enum BridgeError {
@@ -163,6 +196,20 @@ pub enum BridgeError {
 
     #[error("invalid workpiece slot reference {slot}: {details}")]
     InvalidWorkpieceSlotReference { slot: String, details: String },
+
+    #[error(
+        "workpiece carrier slot budget exceeded: {total_slots} slots > runtime limit {max_slots}"
+    )]
+    WorkpieceCarrierSlotLimitExceeded { total_slots: u64, max_slots: usize },
+
+    #[error(
+        "runtime task {task} requires {step_count} steps, exceeding StepId capacity {max_steps}"
+    )]
+    TooManyRuntimeSteps {
+        task: String,
+        step_count: usize,
+        max_steps: usize,
+    },
 
     #[error("unsupported workpiece effect in {state}: {effect}")]
     UnsupportedWorkpieceEffect { state: String, effect: String },

@@ -10,9 +10,13 @@ use rust_plc::extern_functions::{
     EXTERN_ERROR_CODE_INPUT_OUT_OF_RANGE, EXTERN_ERROR_CODE_RUNTIME_ERROR, ExternFunctionInfo,
     ExternFunctionRegistry, ExternRuntimeError, ValueRange, extern_runtime_error_code,
 };
-use rust_plc::ir::{ExternFunctionContract, TopologyGraph, VariableType};
+use rust_plc::ir::{
+    BinaryValue, ExternFunctionContract, TopologyGraph, TransitionAction, VariableType,
+};
 use rust_plc::parser::parse_plc;
-use rust_plc::runtime_bridge::{BridgeError, state_machine_to_runtime_program};
+use rust_plc::runtime_bridge::{
+    BridgeError, CompiledRuntimeProgram, state_machine_to_runtime_program,
+};
 use rust_plc::semantic::{
     build_constraint_set, build_state_machine, build_topology_graph, preprocess_program,
 };
@@ -21,7 +25,7 @@ use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-fn compile_to_runtime(plc_source: &str, tick_ms: u64) -> runtime_core::Program<'static> {
+fn compile_to_runtime(plc_source: &str, tick_ms: u64) -> CompiledRuntimeProgram {
     let program = parse_plc(plc_source).expect("parse plc");
     // Keep preprocessing in the pipeline so repeat expansion (etc.) stays consistent.
     let expanded = preprocess_program(&program).expect("preprocess");
@@ -34,7 +38,7 @@ fn compile_to_runtime(plc_source: &str, tick_ms: u64) -> runtime_core::Program<'
 fn compile_to_runtime_result(
     plc_source: &str,
     tick_ms: u64,
-) -> Result<runtime_core::Program<'static>, BridgeError> {
+) -> Result<CompiledRuntimeProgram, BridgeError> {
     let program = parse_plc(plc_source).expect("parse plc");
     let expanded = preprocess_program(&program).expect("preprocess");
     let topology = build_topology_graph(&expanded).expect("topology");
@@ -46,7 +50,7 @@ fn compile_to_runtime_result(
 fn compile_runtime_and_topology(
     plc_source: &str,
     tick_ms: u64,
-) -> (runtime_core::Program<'static>, TopologyGraph) {
+) -> (CompiledRuntimeProgram, TopologyGraph) {
     let program = parse_plc(plc_source).expect("parse plc");
     let expanded = preprocess_program(&program).expect("preprocess");
     let topology = build_topology_graph(&expanded).expect("topology");
@@ -57,7 +61,7 @@ fn compile_runtime_and_topology(
     (runtime_program, topology)
 }
 
-fn compile_example_to_runtime(file_name: &str, tick_ms: u64) -> runtime_core::Program<'static> {
+fn compile_example_to_runtime(file_name: &str, tick_ms: u64) -> CompiledRuntimeProgram {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("examples")
         .join(file_name);
@@ -83,7 +87,8 @@ task ready:
     step done:
 "#;
 
-    let program = compile_to_runtime(source, 10);
+    let compiled_program = compile_to_runtime(source, 10);
+    let program = compiled_program.program();
     match program.tasks[0].steps[0].instr {
         Instr::WaitDigitalEdge { id, edge, next, .. } => {
             assert_eq!(id, DigitalInputId(0));
@@ -287,7 +292,8 @@ task maintenance_service:
 
 #[test]
 fn bridge_preserves_task_boundaries_for_independent_roots() {
-    let program = compile_to_runtime(PLC_MULTI_ROOT_TASK_FIXTURE, 1);
+    let compiled_program = compile_to_runtime(PLC_MULTI_ROOT_TASK_FIXTURE, 1);
+    let program = compiled_program.program();
     assert_eq!(program.tasks.len(), 2, "bridge should keep both root tasks");
     assert_eq!(program.tasks[0].name, "load");
     assert_eq!(program.tasks[1].name, "unload");
@@ -319,7 +325,8 @@ fn bridge_preserves_task_boundaries_for_independent_roots() {
 
 #[test]
 fn bridge_keeps_primary_task_active_when_recovery_task_forms_scc() {
-    let program = compile_to_runtime(PLC_RECOVERY_SCC_ROOT_FIXTURE, 1);
+    let compiled_program = compile_to_runtime(PLC_RECOVERY_SCC_ROOT_FIXTURE, 1);
+    let program = compiled_program.program();
     assert_eq!(
         program.tasks.len(),
         2,
@@ -345,7 +352,8 @@ fn bridge_keeps_primary_task_active_when_recovery_task_forms_scc() {
 
 #[test]
 fn wafer_loader_bundle_keeps_startup_and_production_domains_as_runtime_roots() {
-    let program = compile_to_runtime(PLC_STARTUP_PRODUCTION_ROOT_FIXTURE, 10);
+    let compiled_program = compile_to_runtime(PLC_STARTUP_PRODUCTION_ROOT_FIXTURE, 10);
+    let program = compiled_program.program();
     let task_names = program
         .tasks
         .iter()
@@ -370,8 +378,9 @@ fn wafer_loader_bundle_keeps_startup_and_production_domains_as_runtime_roots() {
 
 #[test]
 fn wafer_loader_nominal_start_pulse_progress_snapshot() {
-    let program = compile_to_runtime(PLC_STARTUP_PRODUCTION_ROOT_FIXTURE, 10);
-    let mut rt = Runtime::new(&program).expect("runtime init");
+    let compiled_program = compile_to_runtime(PLC_STARTUP_PRODUCTION_ROOT_FIXTURE, 10);
+    let program = compiled_program.program();
+    let mut rt = Runtime::new(program).expect("runtime init");
     let mut io = sim::SimIo::new(2, 10, 0, 0);
 
     io.schedule_digital_input(Tick(5), DigitalInputId(0), true);
@@ -417,8 +426,9 @@ fn bridge_compiles_plc_and_produces_deterministic_trace_and_edges() {
     let tick_ms = 10;
 
     let run = || {
-        let program = compile_to_runtime(PLC_FIXTURE, tick_ms);
-        let mut rt = Runtime::new(&program).expect("runtime init");
+        let compiled_program = compile_to_runtime(PLC_FIXTURE, tick_ms);
+        let program = compiled_program.program();
+        let mut rt = Runtime::new(program).expect("runtime init");
 
         let mut io = sim::SimIo::new(1, 1, 0, 0);
         // Make start_button/X0 go true at tick 1.
@@ -459,8 +469,9 @@ fn bridge_compiles_plc_and_produces_deterministic_trace_and_edges() {
 #[test]
 fn bridge_supports_timeout_to_goto_branch() {
     let tick_ms = 10;
-    let program = compile_to_runtime(PLC_FIXTURE, tick_ms);
-    let mut rt = Runtime::new(&program).expect("runtime init");
+    let compiled_program = compile_to_runtime(PLC_FIXTURE, tick_ms);
+    let program = compiled_program.program();
+    let mut rt = Runtime::new(program).expect("runtime init");
 
     let mut io = sim::SimIo::new(1, 1, 0, 0);
     let mut trace = sim::JsonlTraceRecorder::new();
@@ -515,8 +526,9 @@ task done:
 
 #[test]
 fn bridge_supports_set_analog_action_for_ao_channels() {
-    let program = compile_to_runtime(PLC_ANALOG_FIXTURE, 1);
-    let mut rt = Runtime::new(&program).expect("runtime init");
+    let compiled_program = compile_to_runtime(PLC_ANALOG_FIXTURE, 1);
+    let program = compiled_program.program();
+    let mut rt = Runtime::new(program).expect("runtime init");
     let mut io = sim::SimIo::new(1, 1, 0, 1);
 
     rt.tick(&mut io).expect("tick");
@@ -962,8 +974,9 @@ task done:
 
 #[test]
 fn bridge_supports_analog_wait_guard_mapped_to_regions() {
-    let program = compile_to_runtime(PLC_ANALOG_WAIT_FIXTURE, 1);
-    let mut rt = Runtime::new(&program).expect("runtime init");
+    let compiled_program = compile_to_runtime(PLC_ANALOG_WAIT_FIXTURE, 1);
+    let program = compiled_program.program();
+    let mut rt = Runtime::new(program).expect("runtime init");
     let mut io = sim::SimIo::new(1, 1, 1, 0);
     io.schedule_analog_input(Tick(0), io_traits::AnalogInputId(0), 90.0);
 
@@ -993,7 +1006,8 @@ fn bridge_rejects_cylinder_state_true_guard_now_that_feedback_is_action_owned() 
 
 #[test]
 fn bridge_lowers_closed_loop_cylinder_action_timeout_into_pending_motion() {
-    let program = compile_to_runtime(PLC_CYLINDER_ACTION_TIMEOUT_FIXTURE, 10);
+    let compiled_program = compile_to_runtime(PLC_CYLINDER_ACTION_TIMEOUT_FIXTURE, 10);
+    let program = compiled_program.program();
     let extend_step = program.tasks[0]
         .steps
         .iter()
@@ -1026,7 +1040,8 @@ fn bridge_lowers_closed_loop_cylinder_action_timeout_into_pending_motion() {
 
 #[test]
 fn bridge_lowers_dual_feedback_cylinder_action_without_routes_into_pending_motion() {
-    let program = compile_to_runtime(PLC_CYLINDER_FULL_FEEDBACK_RAW_FIXTURE, 10);
+    let compiled_program = compile_to_runtime(PLC_CYLINDER_FULL_FEEDBACK_RAW_FIXTURE, 10);
+    let program = compiled_program.program();
     let extend_step = program.tasks[0]
         .steps
         .iter()
@@ -1115,8 +1130,9 @@ fn bridge_rejects_raw_input_alias_wait_for_cylinder_end_feedback() {
 
 #[test]
 fn runtime_completes_closed_loop_cylinder_action_via_feedback_without_explicit_wait() {
-    let program = compile_to_runtime(PLC_CYLINDER_ACTION_TIMEOUT_FIXTURE, 10);
-    let mut rt = Runtime::new(&program).expect("runtime init");
+    let compiled_program = compile_to_runtime(PLC_CYLINDER_ACTION_TIMEOUT_FIXTURE, 10);
+    let program = compiled_program.program();
+    let mut rt = Runtime::new(program).expect("runtime init");
     let mut io = sim::SimIo::new(2, 1, 0, 0);
 
     io.schedule_digital_input(Tick(1), DigitalInputId(0), true);
@@ -1138,8 +1154,9 @@ fn runtime_completes_closed_loop_cylinder_action_via_feedback_without_explicit_w
 
 #[test]
 fn runtime_rejects_contradictory_cylinder_feedback_for_closed_loop_action() {
-    let program = compile_to_runtime(PLC_CYLINDER_ACTION_TIMEOUT_FIXTURE, 10);
-    let mut rt = Runtime::new(&program).expect("runtime init");
+    let compiled_program = compile_to_runtime(PLC_CYLINDER_ACTION_TIMEOUT_FIXTURE, 10);
+    let program = compiled_program.program();
+    let mut rt = Runtime::new(program).expect("runtime init");
     let mut io = sim::SimIo::new(2, 1, 0, 0);
     io.schedule_digital_input(Tick(1), DigitalInputId(0), true);
     io.schedule_digital_input(Tick(1), DigitalInputId(1), true);
@@ -1159,8 +1176,9 @@ fn runtime_rejects_contradictory_cylinder_feedback_for_closed_loop_action() {
 
 #[test]
 fn runtime_rejects_reasserted_opposing_feedback_for_closed_loop_action() {
-    let program = compile_to_runtime(PLC_CYLINDER_ACTION_TIMEOUT_FIXTURE, 10);
-    let mut rt = Runtime::new(&program).expect("runtime init");
+    let compiled_program = compile_to_runtime(PLC_CYLINDER_ACTION_TIMEOUT_FIXTURE, 10);
+    let program = compiled_program.program();
+    let mut rt = Runtime::new(program).expect("runtime init");
     let mut io = sim::SimIo::new(2, 1, 0, 0);
     io.schedule_digital_input(Tick(0), DigitalInputId(1), true);
     io.schedule_digital_input(Tick(1), DigitalInputId(1), false);
@@ -1184,8 +1202,9 @@ fn runtime_rejects_reasserted_opposing_feedback_for_closed_loop_action() {
 
 #[test]
 fn runtime_times_out_closed_loop_cylinder_action_without_feedback() {
-    let program = compile_to_runtime(PLC_CYLINDER_ACTION_TIMEOUT_FIXTURE, 10);
-    let mut rt = Runtime::new(&program).expect("runtime init");
+    let compiled_program = compile_to_runtime(PLC_CYLINDER_ACTION_TIMEOUT_FIXTURE, 10);
+    let program = compiled_program.program();
+    let mut rt = Runtime::new(program).expect("runtime init");
     let mut io = sim::SimIo::new(2, 1, 0, 0);
     let mut trace = sim::JsonlTraceRecorder::new();
 
@@ -1214,7 +1233,8 @@ fn bridge_rejects_partially_wired_closed_loop_cylinder_motion() {
 
 #[test]
 fn bridge_lowers_closed_loop_cylinder_fault_routing_when_declared() {
-    let program = compile_to_runtime(PLC_CYLINDER_ROUTED_FIXTURE, 10);
+    let compiled_program = compile_to_runtime(PLC_CYLINDER_ROUTED_FIXTURE, 10);
+    let program = compiled_program.program();
     let extend_step = program.tasks[0]
         .steps
         .iter()
@@ -1278,7 +1298,8 @@ fn bridge_rejects_partially_declared_closed_loop_cylinder_routing() {
 
 #[test]
 fn bridge_lowers_closed_loop_cylinder_fault_routing_without_timeout() {
-    let program = compile_to_runtime(PLC_CYLINDER_ROUTED_NO_TIMEOUT_FIXTURE, 10);
+    let compiled_program = compile_to_runtime(PLC_CYLINDER_ROUTED_NO_TIMEOUT_FIXTURE, 10);
+    let program = compiled_program.program();
     let extend_step = program.tasks[0]
         .steps
         .iter()
@@ -1317,8 +1338,9 @@ fn bridge_lowers_closed_loop_cylinder_fault_routing_without_timeout() {
 
 #[test]
 fn runtime_routes_opposite_feedback_to_declared_cylinder_motion_fault_branch() {
-    let program = compile_to_runtime(PLC_CYLINDER_ROUTED_FIXTURE, 10);
-    let mut rt = Runtime::new(&program).expect("runtime init");
+    let compiled_program = compile_to_runtime(PLC_CYLINDER_ROUTED_FIXTURE, 10);
+    let program = compiled_program.program();
+    let mut rt = Runtime::new(program).expect("runtime init");
     let mut io = sim::SimIo::new(2, 1, 0, 0);
     io.schedule_digital_input(Tick(0), DigitalInputId(1), true);
     io.schedule_digital_input(Tick(1), DigitalInputId(1), false);
@@ -1340,8 +1362,9 @@ fn runtime_routes_opposite_feedback_to_declared_cylinder_motion_fault_branch() {
 
 #[test]
 fn runtime_routes_entry_tick_contradictory_feedback_to_declared_cylinder_safety_fault_branch() {
-    let program = compile_to_runtime(PLC_CYLINDER_ROUTED_FIXTURE, 10);
-    let mut rt = Runtime::new(&program).expect("runtime init");
+    let compiled_program = compile_to_runtime(PLC_CYLINDER_ROUTED_FIXTURE, 10);
+    let program = compiled_program.program();
+    let mut rt = Runtime::new(program).expect("runtime init");
     let mut io = sim::SimIo::new(2, 1, 0, 0);
     io.schedule_digital_input(Tick(0), DigitalInputId(0), true);
     io.schedule_digital_input(Tick(0), DigitalInputId(1), true);
@@ -1359,8 +1382,9 @@ fn runtime_routes_entry_tick_contradictory_feedback_to_declared_cylinder_safety_
 
 #[test]
 fn runtime_routes_contradictory_feedback_to_declared_cylinder_safety_fault_branch() {
-    let program = compile_to_runtime(PLC_CYLINDER_ROUTED_FIXTURE, 10);
-    let mut rt = Runtime::new(&program).expect("runtime init");
+    let compiled_program = compile_to_runtime(PLC_CYLINDER_ROUTED_FIXTURE, 10);
+    let program = compiled_program.program();
+    let mut rt = Runtime::new(program).expect("runtime init");
     let mut io = sim::SimIo::new(2, 1, 0, 0);
     io.schedule_digital_input(Tick(1), DigitalInputId(0), true);
     io.schedule_digital_input(Tick(1), DigitalInputId(1), true);
@@ -1378,8 +1402,9 @@ fn runtime_routes_contradictory_feedback_to_declared_cylinder_safety_fault_branc
 
 #[test]
 fn runtime_routes_timeout_to_declared_cylinder_timeout_branch() {
-    let program = compile_to_runtime(PLC_CYLINDER_ROUTED_FIXTURE, 10);
-    let mut rt = Runtime::new(&program).expect("runtime init");
+    let compiled_program = compile_to_runtime(PLC_CYLINDER_ROUTED_FIXTURE, 10);
+    let program = compiled_program.program();
+    let mut rt = Runtime::new(program).expect("runtime init");
     let mut io = sim::SimIo::new(2, 1, 0, 0);
 
     for _ in 0..7 {
@@ -1399,7 +1424,7 @@ const PLC_STEPPER_PORT_FIXTURE: &str = r#"
 device plc_main: plc { model_ref: openplc_softplc }
 device axis_x: stepper_motor { model_ref: stepper_generic, config_ref: stepper_default }
 
-relation { from: plc_main.Y0, to: axis_x.enable, via: driven_by }
+relation { from: plc_main.Y0, to: axis_x.pulse, via: driven_by }
 relation { from: plc_main.Y1, to: axis_x.direction, via: driven_by }
 
 [constraints]
@@ -1407,18 +1432,43 @@ relation { from: plc_main.Y1, to: axis_x.direction, via: driven_by }
 [tasks]
 
 task main:
-    step enable_axis:
-        action: set axis_x.enable on
+    step pulse_on:
+        action: log "bridge fixture pulse"
     step dir_forward:
-        action: set axis_x.direction forward
+        action: log "bridge fixture direction"
     step done:
         action: log "done"
 "#;
 
 #[test]
 fn bridge_routes_stepper_ports_to_distinct_digital_outputs() {
-    let program = compile_to_runtime(PLC_STEPPER_PORT_FIXTURE, 1);
-    let mut rt = Runtime::new(&program).expect("runtime init");
+    let source = parse_plc(PLC_STEPPER_PORT_FIXTURE).expect("parse legal stepper fixture");
+    let expanded = preprocess_program(&source).expect("preprocess legal stepper fixture");
+    let topology = build_topology_graph(&expanded).expect("topology");
+    let constraints = build_constraint_set(&expanded).expect("constraints");
+    let mut state_machine = build_state_machine(&expanded).expect("state machine");
+
+    for (step_name, port) in [("pulse_on", "pulse"), ("dir_forward", "direction")] {
+        let transition = state_machine
+            .transitions
+            .iter_mut()
+            .find(|transition| {
+                transition.from.task_name == "main" && transition.from.step_name == step_name
+            })
+            .unwrap_or_else(|| panic!("missing transition from main.{step_name}"));
+        transition.actions.clear();
+        transition.actions.push(TransitionAction::Set {
+            target: "axis_x".to_string(),
+            port: port.to_string(),
+            value: BinaryValue::On,
+        });
+    }
+
+    let compiled_program =
+        state_machine_to_runtime_program(&topology, &constraints, &state_machine, 1)
+            .expect("bridge should lower injected low-level IR actions");
+    let program = compiled_program.program();
+    let mut rt = Runtime::new(program).expect("runtime init");
     let mut io = sim::SimIo::new(2, 1, 0, 0);
 
     rt.tick(&mut io).expect("tick");
@@ -1437,7 +1487,7 @@ fn bridge_routes_stepper_ports_to_distinct_digital_outputs() {
                 value: true,
             },
         ],
-        "enable/direction should be routed by port, not collapsed onto one output"
+        "pulse/direction should be routed by port, not collapsed onto one output"
     );
 }
 
@@ -1468,7 +1518,8 @@ task main:
 #[test]
 fn bridge_maps_pid_declaration_into_runtime_program_and_clamps_output() {
     let tick_ms = 100;
-    let program = compile_to_runtime(PLC_PID_FIXTURE, tick_ms);
+    let compiled_program = compile_to_runtime(PLC_PID_FIXTURE, tick_ms);
+    let program = compiled_program.program();
     assert_eq!(program.pid_loops.len(), 1, "PID config should be bridged");
     let cfg = program.pid_loops[0];
     assert_eq!(cfg.pv.0, 0);
@@ -1479,7 +1530,7 @@ fn bridge_maps_pid_declaration_into_runtime_program_and_clamps_output() {
         runtime_core::AntiWindup::ConditionalIntegration
     ));
 
-    let mut rt = Runtime::new(&program).expect("runtime init");
+    let mut rt = Runtime::new(program).expect("runtime init");
     let mut io = sim::SimIo::new(1, 1, 1, 1);
 
     // Simple deterministic plant loop.
@@ -1741,7 +1792,8 @@ task done:
 
 #[test]
 fn bridge_maps_cam_tables_configs_and_actions() {
-    let program = compile_to_runtime(PLC_CAM_FIXTURE, 1);
+    let compiled_program = compile_to_runtime(PLC_CAM_FIXTURE, 1);
+    let program = compiled_program.program();
     assert_eq!(program.cam_tables.len(), 2, "cam tables should be bridged");
     assert_eq!(program.cam_configs.len(), 1, "cam config should be bridged");
     assert_eq!(
@@ -1773,7 +1825,8 @@ fn bridge_maps_cam_tables_configs_and_actions() {
 
 #[test]
 fn bridge_maps_axis_move_actions_without_unsupported_action() {
-    let program = compile_to_runtime(PLC_AXIS_BRIDGE_FIXTURE, 10);
+    let compiled_program = compile_to_runtime(PLC_AXIS_BRIDGE_FIXTURE, 10);
+    let program = compiled_program.program();
     let mut saw_axis = false;
     for task in program.tasks {
         for step in task.steps {
@@ -1797,7 +1850,8 @@ fn bridge_maps_axis_move_actions_without_unsupported_action() {
 
 #[test]
 fn bridge_requires_homing_guard_for_unproven_axis_move_absolute() {
-    let program = compile_to_runtime(PLC_AXIS_ABSOLUTE_ONLY_FIXTURE, 10);
+    let compiled_program = compile_to_runtime(PLC_AXIS_ABSOLUTE_ONLY_FIXTURE, 10);
+    let program = compiled_program.program();
     let mut saw_absolute = false;
     for task in program.tasks {
         for step in task.steps {
@@ -1821,7 +1875,8 @@ fn bridge_requires_homing_guard_for_unproven_axis_move_absolute() {
 
 #[test]
 fn bridge_elides_homing_guard_after_proven_relative_move() {
-    let program = compile_to_runtime(PLC_AXIS_RELATIVE_THEN_ABSOLUTE_FIXTURE, 10);
+    let compiled_program = compile_to_runtime(PLC_AXIS_RELATIVE_THEN_ABSOLUTE_FIXTURE, 10);
+    let program = compiled_program.program();
     let mut saw_absolute = false;
     for task in program.tasks {
         for step in task.steps {
@@ -1881,8 +1936,9 @@ fn bridge_rejects_axis_move_speed_exceeding_profile_limit() {
 
 #[test]
 fn runtime_tick_with_axis_handler_done_for_bridged_axis_action() {
-    let program = compile_to_runtime(PLC_AXIS_BRIDGE_FIXTURE, 10);
-    let mut rt = Runtime::new(&program).expect("runtime init");
+    let compiled_program = compile_to_runtime(PLC_AXIS_BRIDGE_FIXTURE, 10);
+    let program = compiled_program.program();
+    let mut rt = Runtime::new(program).expect("runtime init");
     let mut io = sim::SimIo::new(1, 1, 0, 0);
 
     rt.tick_with_axis(&mut io, |command| {
@@ -1894,8 +1950,9 @@ fn runtime_tick_with_axis_handler_done_for_bridged_axis_action() {
 
 #[test]
 fn axis_move_blocks_current_step_without_explicit_wait_until_done() {
-    let program = compile_to_runtime(PLC_AXIS_BRIDGE_FIXTURE, 10);
-    let mut rt = Runtime::new(&program).expect("runtime init");
+    let compiled_program = compile_to_runtime(PLC_AXIS_BRIDGE_FIXTURE, 10);
+    let program = compiled_program.program();
+    let mut rt = Runtime::new(program).expect("runtime init");
     let mut io = sim::SimIo::new(1, 1, 0, 0);
     let mut calls = 0usize;
 
@@ -1920,8 +1977,9 @@ fn axis_move_blocks_current_step_without_explicit_wait_until_done() {
 
 #[test]
 fn axis_move_blocking_baseline_example_blocks_without_explicit_wait_until_done() {
-    let program = compile_example_to_runtime("axis_move_blocking_baseline.plc", 10);
-    let mut rt = Runtime::new(&program).expect("runtime init");
+    let compiled_program = compile_example_to_runtime("axis_move_blocking_baseline.plc", 10);
+    let program = compiled_program.program();
+    let mut rt = Runtime::new(program).expect("runtime init");
     let mut io = sim::SimIo::new(1, 1, 0, 0);
     let mut calls = 0usize;
 
@@ -1944,8 +2002,9 @@ fn axis_move_blocking_baseline_example_blocks_without_explicit_wait_until_done()
 
 #[test]
 fn load_unload_concurrent_example_keeps_load_blocked_while_unload_advances() {
-    let program = compile_example_to_runtime("load_unload_concurrent_tasks.plc", 100);
-    let mut rt = Runtime::new(&program).expect("runtime init");
+    let compiled_program = compile_example_to_runtime("load_unload_concurrent_tasks.plc", 100);
+    let program = compiled_program.program();
+    let mut rt = Runtime::new(program).expect("runtime init");
     let mut io = sim::SimIo::new(2, 2, 0, 0);
 
     assert_eq!(
@@ -1998,8 +2057,9 @@ fn axis_move_pending_fault_routes_to_declared_branch_targets() {
     ];
 
     for (fault_result, expected_step) in cases {
-        let program = compile_to_runtime(PLC_AXIS_ROUTE_TERMINAL_FIXTURE, 10);
-        let mut rt = Runtime::new(&program).expect("runtime init");
+        let compiled_program = compile_to_runtime(PLC_AXIS_ROUTE_TERMINAL_FIXTURE, 10);
+        let program = compiled_program.program();
+        let mut rt = Runtime::new(program).expect("runtime init");
         let mut io = sim::SimIo::new(1, 1, 0, 0);
         let mut calls = 0usize;
 
@@ -2023,8 +2083,9 @@ fn axis_move_pending_fault_routes_to_declared_branch_targets() {
 
 #[test]
 fn axis_move_pending_timeout_routes_to_declared_timeout_target() {
-    let program = compile_to_runtime(PLC_AXIS_ROUTE_TERMINAL_FIXTURE, 10);
-    let mut rt = Runtime::new(&program).expect("runtime init");
+    let compiled_program = compile_to_runtime(PLC_AXIS_ROUTE_TERMINAL_FIXTURE, 10);
+    let program = compiled_program.program();
+    let mut rt = Runtime::new(program).expect("runtime init");
     let mut io = sim::SimIo::new(1, 1, 0, 0);
 
     rt.tick_with_axis(&mut io, |_| AxisMotionResult::Pending)
@@ -2069,8 +2130,9 @@ fn runtime_tick_with_axis_handler_propagates_classified_faults_for_bridged_axis_
     ];
 
     for (result, expected) in cases {
-        let program = compile_to_runtime(PLC_AXIS_BRIDGE_FIXTURE, 10);
-        let mut rt = Runtime::new(&program).expect("runtime init");
+        let compiled_program = compile_to_runtime(PLC_AXIS_BRIDGE_FIXTURE, 10);
+        let program = compiled_program.program();
+        let mut rt = Runtime::new(program).expect("runtime init");
         let mut io = sim::SimIo::new(1, 1, 0, 0);
         let err = rt
             .tick_with_axis(&mut io, |_| result)
@@ -2150,7 +2212,8 @@ fn runtime_bridge_applies_axis_fault_policy_matrix_and_emits_policy_logs() {
             "self",
             None,
         );
-        let program = compile_to_runtime(&source, 10);
+        let compiled_program = compile_to_runtime(&source, 10);
+        let program = compiled_program.program();
 
         assert_eq!(program.axis_fault_policies.len(), 1);
         let policy = &program.axis_fault_policies[0];
@@ -2165,7 +2228,7 @@ fn runtime_bridge_applies_axis_fault_policy_matrix_and_emits_policy_logs() {
         );
         assert_eq!(policy.propagation_targets, ["axis_x"]);
 
-        let mut rt = Runtime::new(&program).expect("runtime init");
+        let mut rt = Runtime::new(program).expect("runtime init");
         let mut io = sim::SimIo::new(1, 1, 0, 0);
         let mut logs = Vec::new();
 
@@ -2239,7 +2302,8 @@ fn runtime_bridge_lowers_axis_fault_propagation_scope_matrix() {
             scope_src,
             targets_src,
         );
-        let program = compile_to_runtime(&source, 10);
+        let compiled_program = compile_to_runtime(&source, 10);
+        let program = compiled_program.program();
         assert_eq!(program.axis_fault_policies.len(), 1);
         let policy = &program.axis_fault_policies[0];
         assert_eq!(policy.propagation_scope, expected_scope);
@@ -2327,8 +2391,9 @@ task fault:
 
 #[test]
 fn bridge_executes_axis_stepper_example_done_path_end_to_end() {
-    let program = compile_example_to_runtime("axis_stepper_fault_routing.plc", 10);
-    let mut rt = Runtime::new(&program).expect("runtime init");
+    let compiled_program = compile_example_to_runtime("axis_stepper_fault_routing.plc", 10);
+    let program = compiled_program.program();
+    let mut rt = Runtime::new(program).expect("runtime init");
     let mut io = sim::SimIo::new(1, 1, 0, 0);
     let mut saw_axis = false;
 
@@ -2349,8 +2414,9 @@ fn bridge_executes_axis_stepper_example_done_path_end_to_end() {
 
 #[test]
 fn bridge_executes_axis_servo_example_fault_path_end_to_end() {
-    let program = compile_example_to_runtime("axis_servo_fault_routing.plc", 10);
-    let mut rt = Runtime::new(&program).expect("runtime init");
+    let compiled_program = compile_example_to_runtime("axis_servo_fault_routing.plc", 10);
+    let program = compiled_program.program();
+    let mut rt = Runtime::new(program).expect("runtime init");
     let mut io = sim::SimIo::new(1, 1, 0, 0);
     let mut invoked = false;
 
@@ -2376,8 +2442,9 @@ fn bridge_executes_axis_servo_example_fault_path_end_to_end() {
 
 #[test]
 fn bridge_waits_on_cam_runtime_state_and_drives_output() {
-    let program = compile_to_runtime(PLC_CAM_FIXTURE, 1);
-    let mut rt = Runtime::new(&program).expect("runtime init");
+    let compiled_program = compile_to_runtime(PLC_CAM_FIXTURE, 1);
+    let program = compiled_program.program();
+    let mut rt = Runtime::new(program).expect("runtime init");
     let mut io = sim::SimIo::new(1, 1, 1, 1);
 
     io.schedule_analog_input(Tick(1), AnalogInputId(0), 20.0);
@@ -2417,9 +2484,10 @@ task done:
 
 #[test]
 fn bridge_executes_compute_boolean_expression_into_bool_slot() {
-    let (program, topology) = compile_runtime_and_topology(PLC_BOOL_EXPR_FIXTURE, 1);
+    let (compiled_program, topology) = compile_runtime_and_topology(PLC_BOOL_EXPR_FIXTURE, 1);
+    let program = compiled_program.program();
     let flag_var = variable_index(&topology, "flag");
-    let mut rt = Runtime::new(&program).expect("runtime init");
+    let mut rt = Runtime::new(program).expect("runtime init");
     let mut io = sim::SimIo::new(0, 0, 0, 0);
 
     rt.tick(&mut io).expect("tick");
@@ -2474,7 +2542,7 @@ fn make_add_registry() -> ExternFunctionRegistry {
 
 fn call_registry(
     registry: &ExternFunctionRegistry,
-    function: &'static str,
+    function: &str,
     args: &[f32],
     outputs: &mut [f32],
 ) -> Result<usize, ExternRuntimeError> {
@@ -2487,8 +2555,9 @@ fn call_registry(
 
 #[test]
 fn bridge_executes_call_extern_and_writes_bound_variable() {
-    let program = compile_to_runtime(PLC_EXTERN_FIXTURE, 1);
-    let mut rt = Runtime::new(&program).expect("runtime init");
+    let compiled_program = compile_to_runtime(PLC_EXTERN_FIXTURE, 1);
+    let program = compiled_program.program();
+    let mut rt = Runtime::new(program).expect("runtime init");
     let mut io = sim::SimIo::new(1, 1, 0, 0);
     let registry = make_add_registry();
 
@@ -2505,8 +2574,9 @@ fn bridge_executes_call_extern_and_writes_bound_variable() {
 
 #[test]
 fn runtime_tick_without_handler_reports_extern_handler_requirement() {
-    let program = compile_to_runtime(PLC_EXTERN_FIXTURE, 1);
-    let mut rt = Runtime::new(&program).expect("runtime init");
+    let compiled_program = compile_to_runtime(PLC_EXTERN_FIXTURE, 1);
+    let program = compiled_program.program();
+    let mut rt = Runtime::new(program).expect("runtime init");
     let mut io = sim::SimIo::new(1, 1, 0, 0);
 
     let err = rt
@@ -2520,8 +2590,9 @@ fn runtime_tick_without_handler_reports_extern_handler_requirement() {
 
 #[test]
 fn runtime_tick_with_extern_propagates_registry_error_with_function_context() {
-    let program = compile_to_runtime(PLC_EXTERN_FIXTURE, 1);
-    let mut rt = Runtime::new(&program).expect("runtime init");
+    let compiled_program = compile_to_runtime(PLC_EXTERN_FIXTURE, 1);
+    let program = compiled_program.program();
+    let mut rt = Runtime::new(program).expect("runtime init");
     let mut io = sim::SimIo::new(1, 1, 0, 0);
     let registry = ExternFunctionRegistry::with_time_source(|| 0);
 
@@ -2571,8 +2642,9 @@ fn make_range_checked_registry() -> ExternFunctionRegistry {
 
 #[test]
 fn runtime_tick_with_extern_propagates_input_range_violation_details() {
-    let program = compile_to_runtime(PLC_EXTERN_FIXTURE, 1);
-    let mut rt = Runtime::new(&program).expect("runtime init");
+    let compiled_program = compile_to_runtime(PLC_EXTERN_FIXTURE, 1);
+    let program = compiled_program.program();
+    let mut rt = Runtime::new(program).expect("runtime init");
     let mut io = sim::SimIo::new(1, 1, 0, 0);
     let registry = make_range_checked_registry();
 
@@ -2602,8 +2674,9 @@ fn runtime_tick_with_extern_propagates_input_range_violation_details() {
 
 #[test]
 fn runtime_tick_with_extern_propagates_output_range_violation_details() {
-    let program = compile_to_runtime(PLC_EXTERN_FIXTURE, 1);
-    let mut rt = Runtime::new(&program).expect("runtime init");
+    let compiled_program = compile_to_runtime(PLC_EXTERN_FIXTURE, 1);
+    let program = compiled_program.program();
+    let mut rt = Runtime::new(program).expect("runtime init");
     let mut io = sim::SimIo::new(1, 1, 0, 0);
     let mut registry = ExternFunctionRegistry::with_time_source(|| 0);
     registry
@@ -2649,8 +2722,9 @@ fn runtime_tick_with_extern_propagates_output_range_violation_details() {
 
 #[test]
 fn runtime_tick_with_extern_propagates_timeout_details() {
-    let program = compile_to_runtime(PLC_EXTERN_FIXTURE, 1);
-    let mut rt = Runtime::new(&program).expect("runtime init");
+    let compiled_program = compile_to_runtime(PLC_EXTERN_FIXTURE, 1);
+    let program = compiled_program.program();
+    let mut rt = Runtime::new(program).expect("runtime init");
     let mut io = sim::SimIo::new(1, 1, 0, 0);
 
     let ticks = Arc::new(AtomicU64::new(0));
@@ -2733,8 +2807,10 @@ task fallback:
 
 #[test]
 fn runtime_tick_with_error_code_variable_routes_to_fallback_branch() {
-    let (program, topology) = compile_runtime_and_topology(PLC_EXTERN_ERROR_FLOW_FIXTURE, 1);
-    let mut rt = Runtime::new(&program).expect("runtime init");
+    let (compiled_program, topology) =
+        compile_runtime_and_topology(PLC_EXTERN_ERROR_FLOW_FIXTURE, 1);
+    let program = compiled_program.program();
+    let mut rt = Runtime::new(program).expect("runtime init");
     let mut io = sim::SimIo::new(1, 1, 0, 0);
     let last_error_var = variable_index(&topology, "last_error");
 
@@ -2834,8 +2910,10 @@ task error:
 
 #[test]
 fn runtime_tick_with_error_code_supports_retry_then_success_flow() {
-    let (program, topology) = compile_runtime_and_topology(PLC_EXTERN_RETRY_FLOW_FIXTURE, 1);
-    let mut rt = Runtime::new(&program).expect("runtime init");
+    let (compiled_program, topology) =
+        compile_runtime_and_topology(PLC_EXTERN_RETRY_FLOW_FIXTURE, 1);
+    let program = compiled_program.program();
+    let mut rt = Runtime::new(program).expect("runtime init");
     let mut io = sim::SimIo::new(1, 1, 0, 0);
     let last_error_var = variable_index(&topology, "last_error");
     let mut attempts = 0usize;
@@ -2893,8 +2971,9 @@ fn runtime_tick_with_error_code_supports_retry_then_success_flow() {
 
 #[test]
 fn runtime_tick_with_error_code_rejects_out_of_range_variable_slot() {
-    let program = compile_to_runtime(PLC_EXTERN_FIXTURE, 1);
-    let mut rt = Runtime::new(&program).expect("runtime init");
+    let compiled_program = compile_to_runtime(PLC_EXTERN_FIXTURE, 1);
+    let program = compiled_program.program();
+    let mut rt = Runtime::new(program).expect("runtime init");
     let mut io = sim::SimIo::new(1, 1, 0, 0);
     let registry = make_add_registry();
 
@@ -2966,6 +3045,56 @@ fn bridge_rejects_program_when_extern_worst_case_exceeds_tick_budget() {
     }
 }
 
+const PLC_CONCURRENT_EXTERN_TICK_BUDGET_FIXTURE: &str = r#"
+[topology]
+
+extern function slow_left(v: float) -> float {
+    rust_module: "math::slow_left",
+    pure: true,
+    time_bound_us: 600
+}
+extern function slow_right(v: float) -> float {
+    rust_module: "math::slow_right",
+    pure: true,
+    time_bound_us: 600
+}
+
+variable x: float = 1.0
+variable left: float = 0.0
+variable right: float = 0.0
+
+[constraints]
+
+[tasks]
+
+task left_task:
+    step run:
+        action: call slow_left(x) -> left
+    step done:
+        action: log "left done"
+
+task right_task:
+    step run:
+        action: call slow_right(x) -> right
+    step done:
+        action: log "right done"
+"#;
+
+#[test]
+fn bridge_sums_extern_wcet_across_concurrent_root_tasks() {
+    let err = compile_to_runtime_result(PLC_CONCURRENT_EXTERN_TICK_BUDGET_FIXTURE, 1)
+        .expect_err("concurrent root task WCET must share one physical tick budget");
+
+    assert!(matches!(
+        err,
+        BridgeError::ExternTickBudgetExceeded {
+            tick_ms: 1,
+            tick_budget_us: 1_000,
+            worst_case_us: 1_200,
+        }
+    ));
+}
+
 const PLC_EXTERN_QUADRATIC_TUPLE_FIXTURE: &str = r#"
 [topology]
 
@@ -3015,8 +3144,10 @@ task done:
 
 #[test]
 fn bridge_executes_quadratic_fit_with_tuple_binding_end_to_end() {
-    let (program, topology) = compile_runtime_and_topology(PLC_EXTERN_QUADRATIC_TUPLE_FIXTURE, 2);
-    let mut rt = Runtime::new(&program).expect("runtime init");
+    let (compiled_program, topology) =
+        compile_runtime_and_topology(PLC_EXTERN_QUADRATIC_TUPLE_FIXTURE, 2);
+    let program = compiled_program.program();
+    let mut rt = Runtime::new(program).expect("runtime init");
     let mut io = sim::SimIo::new(1, 1, 0, 0);
     let registry = ExternFunctionRegistry::new();
 
@@ -3076,8 +3207,10 @@ task done:
 
 #[test]
 fn bridge_executes_pid_then_uses_output_in_followup_extern_action() {
-    let (program, topology) = compile_runtime_and_topology(PLC_EXTERN_PID_CONTROL_FIXTURE, 5);
-    let mut rt = Runtime::new(&program).expect("runtime init");
+    let (compiled_program, topology) =
+        compile_runtime_and_topology(PLC_EXTERN_PID_CONTROL_FIXTURE, 5);
+    let program = compiled_program.program();
+    let mut rt = Runtime::new(program).expect("runtime init");
     let mut io = sim::SimIo::new(1, 1, 0, 0);
     let registry = ExternFunctionRegistry::new();
     let pid_out_idx = variable_index(&topology, "pid_out") as usize;
@@ -3165,8 +3298,9 @@ task done:
 
 #[test]
 fn runtime_tick_with_extern_propagates_quadratic_fit_runtime_error() {
-    let program = compile_to_runtime(PLC_EXTERN_QUADRATIC_ERROR_FIXTURE, 2);
-    let mut rt = Runtime::new(&program).expect("runtime init");
+    let compiled_program = compile_to_runtime(PLC_EXTERN_QUADRATIC_ERROR_FIXTURE, 2);
+    let program = compiled_program.program();
+    let mut rt = Runtime::new(program).expect("runtime init");
     let mut io = sim::SimIo::new(1, 1, 0, 0);
     let registry = ExternFunctionRegistry::new();
 
@@ -3300,8 +3434,9 @@ task fault:
 
 #[test]
 fn runtime_routes_axis_move_to_safety_fault_when_state_claim_occupies_resource() {
-    let program = compile_to_runtime(PLC_SRI_STATE_CONFLICT_FIXTURE, 10);
-    let mut rt = Runtime::new(&program).expect("runtime init");
+    let compiled_program = compile_to_runtime(PLC_SRI_STATE_CONFLICT_FIXTURE, 10);
+    let program = compiled_program.program();
+    let mut rt = Runtime::new(program).expect("runtime init");
     let mut io = sim::SimIo::new(0, 1, 0, 0);
     let mut motion_calls = 0usize;
 
@@ -3321,8 +3456,9 @@ fn runtime_routes_axis_move_to_safety_fault_when_state_claim_occupies_resource()
 
 #[test]
 fn runtime_keeps_action_tag_claim_active_while_axis_move_is_pending() {
-    let program = compile_to_runtime(PLC_SRI_PENDING_CONFLICT_FIXTURE, 10);
-    let mut rt = Runtime::new(&program).expect("runtime init");
+    let compiled_program = compile_to_runtime(PLC_SRI_PENDING_CONFLICT_FIXTURE, 10);
+    let program = compiled_program.program();
+    let mut rt = Runtime::new(program).expect("runtime init");
     let mut io = sim::SimIo::new(0, 0, 0, 0);
     let mut seen_tags = Vec::new();
 

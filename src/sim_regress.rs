@@ -301,7 +301,7 @@ fn run_one_case(
         }
     };
 
-    let program = match compile_plc_to_runtime_program(&plc_source, scenario.tick_ms) {
+    let compiled_program = match compile_plc_to_runtime_program(&plc_source, scenario.tick_ms) {
         Ok(p) => p,
         Err(msg) => {
             let failure = Failure::compile_error(msg);
@@ -318,10 +318,11 @@ fn run_one_case(
         }
     };
 
-    let (num_di, num_do, num_ai, num_ao) = io_sizes_for_program_and_scenario(&program, &scenario);
+    let program = compiled_program.program();
+    let (num_di, num_do, num_ai, num_ao) = io_sizes_for_program_and_scenario(program, &scenario);
     let mut io = sim::SimIo::new(num_di, num_do, num_ai, num_ao);
 
-    let run = match sim::run_program_for_scenario(&program, &scenario, &mut io) {
+    let run = match sim::run_program_for_scenario(program, &scenario, &mut io) {
         Ok(run) => run,
         Err(e) => {
             let failure = Failure::runtime_error(e.to_string());
@@ -354,7 +355,7 @@ fn run_one_case(
 
         if options.minimize {
             let (min_scenario, min_run, min_summary) =
-                minimize_failure_case(&program, &scenario, &failure)?;
+                minimize_failure_case(program, &scenario, &failure)?;
             let minimized_scenario_path = artifact_dir.join("minimized_scenario.yaml");
             let minimized_trace_path = artifact_dir.join("minimized_trace.jsonl");
             let minimized_report_path = artifact_dir.join("minimized_report.json");
@@ -403,7 +404,7 @@ fn run_one_case(
 }
 
 fn minimize_failure_case(
-    program: &Program<'static>,
+    program: &Program<'_>,
     scenario: &sim::Scenario,
     failure: &Failure,
 ) -> Result<(sim::Scenario, sim::SimRunOutput, FailureMinimizationSummary), String> {
@@ -657,7 +658,7 @@ fn run_matches_failure_signature(
 }
 
 fn scenario_matches_failure_signature(
-    program: &Program<'static>,
+    program: &Program<'_>,
     scenario: &sim::Scenario,
     target_signature: &FailureSignature<'_>,
     num_di: usize,
@@ -678,7 +679,7 @@ fn input_assignment_count(scenario: &sim::Scenario) -> usize {
 }
 
 fn run_program_for_options(
-    program: &Program<'static>,
+    program: &Program<'_>,
     scenario: &sim::Scenario,
     num_di: usize,
     num_do: usize,
@@ -706,7 +707,7 @@ fn write_failure_report_json(report_path: &Path, failure: &Failure) -> Result<()
 fn compile_plc_to_runtime_program(
     plc_source: &str,
     tick_ms: u64,
-) -> Result<Program<'static>, String> {
+) -> Result<crate::runtime_bridge::CompiledRuntimeProgram, String> {
     let program = parse_plc(plc_source).map_err(|e| e.to_string())?;
     let expanded = preprocess_program(&program).map_err(|errors| {
         errors

@@ -36,6 +36,68 @@ fn topology_relation_name(relation: &TopologyRelation) -> &'static str {
     }
 }
 
+fn extract_station_protocol_model(topology: &TopologySection) -> IrStationProtocolModel {
+    let controllers = if topology.controller_inventory.is_empty() {
+        topology
+            .devices
+            .iter()
+            .filter(|device| matches!(device.device_type, DeviceType::Plc))
+            .map(|device| device.name.clone())
+            .collect()
+    } else {
+        topology.controller_inventory.clone()
+    };
+
+    IrStationProtocolModel {
+        controllers,
+        stations: topology
+            .stations
+            .iter()
+            .map(|station| IrStationProtocol {
+                name: station.name.clone(),
+                owns: station.owns.clone(),
+                tasks: station.tasks.clone(),
+            })
+            .collect(),
+        handshakes: topology
+            .handshakes
+            .iter()
+            .map(|handshake| IrStationHandshake {
+                name: handshake.name.clone(),
+                from_station: handshake.from.clone(),
+                to_station: handshake.to.clone(),
+                request: handshake.request.clone(),
+                allow: handshake.allow.clone(),
+                complete: handshake.complete.clone(),
+                timeout_ms: duration_to_ms(&handshake.timeout),
+                timeout_target_task: handshake.timeout.target.task.clone(),
+                timeout_target_step: handshake.timeout.target.step.clone(),
+            })
+            .collect(),
+        transfer_points: topology
+            .transfer_points
+            .iter()
+            .map(|transfer| IrStationTransferPoint {
+                name: transfer.name.clone(),
+                from_station: transfer.from_station.clone(),
+                to_station: transfer.to_station.clone(),
+                site: transfer.site.clone(),
+                handshake: transfer.handshake.clone(),
+            })
+            .collect(),
+        controller_syncs: topology
+            .controller_syncs
+            .iter()
+            .map(|sync| IrControllerSyncContract {
+                name: sync.name.clone(),
+                controllers: sync.controllers.clone(),
+                max_skew_ms: duration_value_to_ms(&sync.max_skew),
+                heartbeat_ms: duration_value_to_ms(&sync.heartbeat),
+            })
+            .collect(),
+    }
+}
+
 fn extract_variable_defs(
     topology: &TopologySection,
     errors: &mut Vec<PlcError>,
@@ -165,8 +227,27 @@ fn extract_cam_table_defs(
         let mut slave_positions = Vec::with_capacity(table.points.len());
         let mut monotonic_ok = true;
         for point in &table.points {
-            master_positions.push(point.master as f32);
-            slave_positions.push(point.slave as f32);
+            let master = match finite_f32(point.master, line, "cam_table master coordinate") {
+                Ok(value) => value,
+                Err(error) => {
+                    errors.push(error);
+                    monotonic_ok = false;
+                    break;
+                }
+            };
+            let slave = match finite_f32(point.slave, line, "cam_table slave coordinate") {
+                Ok(value) => value,
+                Err(error) => {
+                    errors.push(error);
+                    monotonic_ok = false;
+                    break;
+                }
+            };
+            master_positions.push(master);
+            slave_positions.push(slave);
+        }
+        if master_positions.len() != table.points.len() {
+            continue;
         }
         for i in 1..master_positions.len() {
             if master_positions[i] <= master_positions[i - 1] {
@@ -196,15 +277,30 @@ fn extract_cam_table_defs(
             }
         }
 
+        let spline_coeffs = compute_spline_coeffs(
+            &master_positions,
+            &slave_positions,
+            matches!(table.mode, CamTableMode::Periodic),
+        );
+        if spline_coeffs.iter().any(|coeff| {
+            !coeff.a.is_finite()
+                || !coeff.b.is_finite()
+                || !coeff.c.is_finite()
+                || !coeff.d.is_finite()
+        }) {
+            errors.push(PlcError::semantic_with_reason(
+                line,
+                format!("cam_table {} produces non-finite f32 spline coefficients", table.name),
+                "reduce the coordinate magnitude or increase spacing between master points",
+            ));
+            continue;
+        }
+
         defs.push(CamTableIr {
             name: table.name.clone(),
             periodic: matches!(table.mode, CamTableMode::Periodic),
             num_points: master_positions.len(),
-            spline_coeffs: compute_spline_coeffs(
-                &master_positions,
-                &slave_positions,
-                matches!(table.mode, CamTableMode::Periodic),
-            ),
+            spline_coeffs,
             master_positions,
             slave_positions,
         });
@@ -318,20 +414,66 @@ fn extract_cam_coupling_defs(
             continue;
         }
 
+        let gear_ratio = match finite_f32(
+            attrs.gear_ratio.unwrap_or(1.0),
+            line,
+            "cam_coupling gear_ratio",
+        ) {
+            Ok(value) => value,
+            Err(error) => {
+                errors.push(error);
+                continue;
+            }
+        };
+        let phase_offset = match finite_f32(
+            attrs.phase_offset.unwrap_or(0.0),
+            line,
+            "cam_coupling phase_offset",
+        ) {
+            Ok(value) => value,
+            Err(error) => {
+                errors.push(error);
+                continue;
+            }
+        };
+        let following_error_limit = match finite_f32(
+            attrs.following_error_limit.unwrap_or(1.0),
+            line,
+            "cam_coupling following_error_limit",
+        ) {
+            Ok(value) => value,
+            Err(error) => {
+                errors.push(error);
+                continue;
+            }
+        };
+
         defs.push(CamCouplingDef {
             name: device.name.clone(),
             master: master.clone(),
             slave: slave.clone(),
             table: table.clone(),
             interpolation,
-            gear_ratio: attrs.gear_ratio.unwrap_or(1.0) as f32,
-            phase_offset: attrs.phase_offset.unwrap_or(0.0) as f32,
-            following_error_limit: attrs.following_error_limit.unwrap_or(1.0) as f32,
+            gear_ratio,
+            phase_offset,
+            following_error_limit,
             slave_feedback,
         });
     }
 
     defs
+}
+
+fn finite_f32(value: f64, line: usize, context: &str) -> Result<f32, PlcError> {
+    let lowered = value as f32;
+    if !value.is_finite() || !lowered.is_finite() || (value != 0.0 && lowered == 0.0) {
+        return Err(PlcError::semantic_with_reason(
+            line.max(1),
+            format!("{context} is outside the finite f32 range: {value}"),
+            "use a finite value representable by the runtime f32 model",
+        ));
+    }
+    Ok(lowered)
 }
 
 fn compute_spline_coeffs(master: &[f32], slave: &[f32], periodic: bool) -> Vec<SplineCoeff> {
@@ -554,7 +696,7 @@ fn lower_variable_initial_value(
     let raw = variable.initial_value.trim();
     match variable.var_type {
         AstVariableType::Float => {
-            let value = raw.parse::<f32>().map_err(|_| {
+            let value = raw.parse::<f64>().map_err(|_| {
                 PlcError::type_mismatch_with_reason(
                     line,
                     "float",
@@ -563,6 +705,7 @@ fn lower_variable_initial_value(
                     "float 初值应为数字字面量（如 0.0）",
                 )
             })?;
+            let value = finite_f32(value, line, "variable float initial value")?;
             Ok((IrVariableType::Float, value))
         }
         AstVariableType::Int => {
@@ -1112,7 +1255,7 @@ fn extract_pid_loops(topology: &TopologySection, errors: &mut Vec<PlcError>) -> 
     pid_loops
 }
 
-pub fn build_constraint_set_from_ast(
+pub(crate) fn build_constraint_set_from_ast(
     topology: &TopologySection,
     constraints: &ConstraintsSection,
     tasks: &TasksSection,

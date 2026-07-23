@@ -28,7 +28,7 @@ import InputTerminalNode from '../nodes/InputTerminalNode';
 import OutputTerminalNode from '../nodes/OutputTerminalNode';
 import ContextMenu, { type MenuItem } from '../ContextMenu';
 import type { NodeData } from '../../stores/topologyStore';
-import { CanvasInteractionProvider } from './CanvasInteractionContext';
+import { CanvasInteractionContext } from './CanvasInteractionContext';
 import {
   buildTagGroupColorMap,
   getPrimaryTagValue,
@@ -87,7 +87,7 @@ const TopologyCanvas: React.FC<TopologyCanvasProps> = ({ readOnly = false, showR
 
   const { currentUser } = useAppStore();
   const liveSimulationEnabled = false;
-  const [isInteractive, setIsInteractive] = useState(!readOnly);
+  const [isInteractive, setIsInteractive] = useState(true);
   const reactFlowRef = useRef<ReactFlowInstance<Node, Edge> | null>(null);
 
   const [contextMenu, setContextMenu] = useState<{
@@ -315,10 +315,6 @@ const TopologyCanvas: React.FC<TopologyCanvasProps> = ({ readOnly = false, showR
   }, [nodes, edges, deleteNode, deleteEdge, readOnly, t]);
 
   useEffect(() => {
-    setIsInteractive(!readOnly);
-  }, [readOnly]);
-
-  useEffect(() => {
     if (!locationFocus.active || !focusSets || focusSets.focusNodeIds.size === 0) {
       return;
     }
@@ -336,7 +332,7 @@ const TopologyCanvas: React.FC<TopologyCanvasProps> = ({ readOnly = false, showR
   }, [focusSets, locationFocus.active, locationFocus.requestId]);
 
   const onSelectionChange = useCallback(
-    ({ nodes: selectedNodes }: { nodes: any[] }) => {
+    ({ nodes: selectedNodes }: { nodes: Node[] }) => {
       setSelectedNodeId(selectedNodes.length === 1 ? selectedNodes[0].id : null);
     },
     [setSelectedNodeId]
@@ -692,7 +688,7 @@ const TopologyCanvas: React.FC<TopologyCanvasProps> = ({ readOnly = false, showR
           {t('canvas.liveControlsUnavailableNotice')}
         </div>
       )}
-      <CanvasInteractionProvider value={{ readOnly, liveSimulationEnabled }}>
+      <CanvasInteractionContext.Provider value={{ readOnly, liveSimulationEnabled }}>
         <ReactFlow
           nodes={renderNodes}
           edges={renderEdges}
@@ -746,13 +742,13 @@ const TopologyCanvas: React.FC<TopologyCanvasProps> = ({ readOnly = false, showR
                 fault: '#f5222d',
                 running: '#722ed1',
               };
-              const d = node.data as any;
-              return statusColors[d?.status] || '#4a4a4a';
+              const status = (node.data as NodeData | undefined)?.status;
+              return status ? statusColors[status] || '#4a4a4a' : '#4a4a4a';
             }}
             maskColor="rgba(0,0,0,0.4)"
           />
         </ReactFlow>
-      </CanvasInteractionProvider>
+      </CanvasInteractionContext.Provider>
       {contextMenu && (
         <ContextMenu
           x={contextMenu.x}

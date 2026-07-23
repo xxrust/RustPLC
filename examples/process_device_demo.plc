@@ -18,6 +18,7 @@ timing: task.main must_complete_within 500ms
 task main:
     step heat:
         action: heater.heat_to(oven, 80)
+        timeout: 100ms -> goto fault.timeout
 
     step hold:
         delay: 50ms
@@ -27,3 +28,7 @@ task main:
 task done:
     step halt:
         action: log "process device action complete"
+
+task fault:
+    step timeout:
+        action: log "process device action timeout"

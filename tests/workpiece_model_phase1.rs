@@ -165,9 +165,10 @@ fn runtime_bridge_lowers_phase1_example_into_runtime_program() {
     let constraints = build_constraint_set(&program).expect("constraints should build");
     let state_machine = build_state_machine(&program).expect("state machine should build");
 
-    let runtime_program =
+    let compiled_runtime_program =
         state_machine_to_runtime_program(&topology, &constraints, &state_machine, 10)
             .expect("runtime bridge should lower phase1 workpiece model");
+    let runtime_program = compiled_runtime_program.program();
 
     assert_eq!(runtime_program.workpiece_types.len(), 1);
     assert_eq!(runtime_program.workpiece_sites.len(), 3);
@@ -213,12 +214,13 @@ fn runtime_executes_phase1_example_end_to_end() {
     let constraints = build_constraint_set(&program).expect("constraints should build");
     let state_machine = build_state_machine(&program).expect("state machine should build");
 
-    let runtime_program =
+    let compiled_runtime_program =
         state_machine_to_runtime_program(&topology, &constraints, &state_machine, 10)
             .expect("runtime bridge should lower phase1 workpiece model");
+    let runtime_program = compiled_runtime_program.program();
 
     let mut io = MemIo::new();
-    let mut runtime = Runtime::new(&runtime_program).expect("runtime should initialize");
+    let mut runtime = Runtime::new(runtime_program).expect("runtime should initialize");
     runtime
         .tick(&mut io)
         .expect("phase1 example should execute");

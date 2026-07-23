@@ -15,6 +15,7 @@ fn process_device_program() -> Program<'static> {
             port: "self",
             args: &ARGS,
             result_buckets: &RESULT_BUCKETS,
+            timeout: None,
         },
     }];
     static STEPS: [Step<'static>; 2] = [
@@ -129,6 +130,132 @@ fn process_device_action_fault_is_explicit_runtime_error() {
                 kind: ProcessDeviceActionFaultKind::MotionFault,
                 code: 17,
             },
+        }
+    );
+}
+
+#[test]
+fn process_device_action_pending_honors_explicit_timeout_route() {
+    static ACTIONS: [Action; 1] = [Action::ProcessDeviceAction {
+        command: ProcessDeviceActionCommand {
+            family: "heater",
+            action: "heat_to",
+            target: "oven",
+            port: "self",
+            args: &["80"],
+            result_buckets: &["complete", "timeout"],
+            timeout: Some(Timeout {
+                after_ticks: 2,
+                target: StepId(2),
+            }),
+        },
+    }];
+    static STEPS: [Step<'static>; 3] = [
+        Step {
+            name: "heat",
+            instr: Instr::Action {
+                actions: &ACTIONS,
+                next: StepId(1),
+            },
+        },
+        Step {
+            name: "done",
+            instr: Instr::Halt,
+        },
+        Step {
+            name: "timeout",
+            instr: Instr::Halt,
+        },
+    ];
+    static TASKS: [Task<'static>; 1] = [Task {
+        name: "main",
+        steps: &STEPS,
+        entry: StepId(0),
+    }];
+    static PROGRAM: Program<'static> = Program {
+        tasks: &TASKS,
+        pid_loops: &[],
+        var_init: &[],
+        cam_configs: &[],
+        cam_tables: &[],
+        axis_fault_policies: &[],
+        semantic_resources: &[],
+        resource_claims: &[],
+        workpiece_types: &[],
+        workpiece_sites: &[],
+        workpiece_holders: &[],
+    };
+
+    let mut io = MemIo::new();
+    let mut rt = Runtime::new(&PROGRAM).expect("runtime init");
+    for _ in 0..3 {
+        rt.tick_with_process_device(&mut io, |_| ProcessDeviceActionResult::Pending)
+            .expect("pending action timeout should route without a runtime error");
+    }
+    assert_eq!(rt.location().step, StepId(2));
+    assert_eq!(
+        rt.task_context(0).unwrap().pending_action_state,
+        TaskPendingActionState::Idle
+    );
+}
+
+#[test]
+fn process_device_handler_cannot_return_undeclared_result_bucket() {
+    static ACTIONS: [Action; 1] = [Action::ProcessDeviceAction {
+        command: ProcessDeviceActionCommand {
+            family: "conveyor",
+            action: "start",
+            target: "belt",
+            port: "self",
+            args: &[],
+            result_buckets: &["complete", "timeout"],
+            timeout: None,
+        },
+    }];
+    static STEPS: [Step<'static>; 2] = [
+        Step {
+            name: "start",
+            instr: Instr::Action {
+                actions: &ACTIONS,
+                next: StepId(1),
+            },
+        },
+        Step {
+            name: "done",
+            instr: Instr::Halt,
+        },
+    ];
+    static TASKS: [Task<'static>; 1] = [Task {
+        name: "main",
+        steps: &STEPS,
+        entry: StepId(0),
+    }];
+    static PROGRAM: Program<'static> = Program {
+        tasks: &TASKS,
+        pid_loops: &[],
+        var_init: &[],
+        cam_configs: &[],
+        cam_tables: &[],
+        axis_fault_policies: &[],
+        semantic_resources: &[],
+        resource_claims: &[],
+        workpiece_types: &[],
+        workpiece_sites: &[],
+        workpiece_holders: &[],
+    };
+
+    let mut io = MemIo::new();
+    let mut rt = Runtime::new(&PROGRAM).expect("runtime init");
+    let err = rt
+        .tick_with_process_device(&mut io, |_| ProcessDeviceActionResult::safety_fault(9))
+        .expect_err("handler result outside declared contract must fail");
+    assert_eq!(
+        err,
+        RuntimeError::ProcessDeviceActionUndeclaredResult {
+            family: "conveyor",
+            action: "start",
+            target: "belt",
+            result_bucket: "safety_fault",
         }
     );
 }

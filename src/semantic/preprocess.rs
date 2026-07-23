@@ -19,16 +19,19 @@ pub fn preprocess_program_with_library(
     program: &PlcProgram,
     device_library: Option<&crate::device_library::DeviceLibrary>,
 ) -> Result<PlcProgram, Vec<PlcError>> {
-    let expanded_tasks = expand_repeat_blocks(&program.tasks)?;
-    let controller_io_aliases = resolve_controller_io_aliases(&program.topology)?;
+    validate_unique_source_device_names(&program.topology)?;
+    let templated_topology = expand_device_templates(&program.topology)?;
+    let templated_tasks = expand_task_templates(&program.tasks)?;
+    let expanded_tasks = expand_repeat_blocks(&templated_tasks)?;
+    let controller_io_aliases = resolve_controller_io_aliases(&templated_topology)?;
     let used_controller_ports = collect_used_controller_port_ids(
-        &program.topology,
+        &templated_topology,
         &program.constraints,
         &expanded_tasks,
         &controller_io_aliases,
     );
     let expanded_topology = expand_plc_controller_devices(
-        &program.topology,
+        &templated_topology,
         &used_controller_ports,
         &controller_io_aliases,
     )?;
@@ -67,6 +70,323 @@ fn device_type_str(device_type: &DeviceType) -> &'static str {
         DeviceType::Pump => "pump",
         DeviceType::Heater => "heater",
         DeviceType::VisionSensor => "vision_sensor",
+    }
+}
+
+fn expand_device_templates(topology: &TopologySection) -> Result<TopologySection, Vec<PlcError>> {
+    if topology.device_templates.is_empty() && topology.device_instances.is_empty() {
+        return Ok(topology.clone());
+    }
+
+    let mut errors = Vec::new();
+    let templates = topology
+        .device_templates
+        .iter()
+        .map(|template| (template.name.clone(), template))
+        .collect::<HashMap<_, _>>();
+    let mut devices = topology.devices.clone();
+    let mut names = devices
+        .iter()
+        .map(|device| device.name.clone())
+        .collect::<HashSet<_>>();
+
+    for template in &topology.device_templates {
+        let mut params = HashSet::new();
+        for param in &template.params {
+            if !params.insert(param.clone()) {
+                errors.push(PlcError::semantic_with_reason(
+                    template.line.max(1),
+                    format!(
+                        "[TPL-001] device_template '{}' declares duplicate parameter '{}'.",
+                        template.name, param
+                    ),
+                    "Declare each parameter once.".to_string(),
+                ));
+            }
+        }
+        for device in &template.devices {
+            if let TemplateDeviceType::Parameter(param) = &device.device_type {
+                if !params.contains(param) {
+                    errors.push(PlcError::undefined_reference_with_reason(
+                        device.line.max(1),
+                        "device_template parameter",
+                        param,
+                        format!(
+                            "[TPL-003] device_template '{}' references undeclared type parameter",
+                            template.name
+                        ),
+                    ));
+                }
+            }
+        }
+    }
+
+    for instance in &topology.device_instances {
+        let Some(template) = templates.get(&instance.template) else {
+            errors.push(PlcError::undefined_reference_with_reason(
+                instance.line.max(1),
+                "device_template",
+                &instance.template,
+                format!(
+                    "[TPL-004] device_instance '{}' references undefined template",
+                    instance.name
+                ),
+            ));
+            continue;
+        };
+        if template.params.len() != instance.type_args.len() {
+            errors.push(PlcError::semantic_with_reason(
+                instance.line.max(1),
+                format!(
+                    "[TPL-005] device_instance '{}' passes {} type argument(s), but template '{}' expects {}.",
+                    instance.name,
+                    instance.type_args.len(),
+                    template.name,
+                    template.params.len()
+                ),
+                "Match the device_template type argument count.".to_string(),
+            ));
+            continue;
+        }
+        let type_args = template
+            .params
+            .iter()
+            .cloned()
+            .zip(instance.type_args.iter().cloned())
+            .collect::<HashMap<_, _>>();
+        for item in &template.devices {
+            let name = format!("{}_{}", instance.name, item.local_name);
+            if !names.insert(name.clone()) {
+                errors.push(PlcError::duplicate_definition_with_reason(
+                    instance.line.max(1),
+                    "device",
+                    &name,
+                    "device_instance expansion produced a duplicate device name",
+                ));
+                continue;
+            }
+            let device_type = match &item.device_type {
+                TemplateDeviceType::Concrete(kind) => kind.clone(),
+                TemplateDeviceType::Parameter(param) => {
+                    type_args.get(param).cloned().unwrap_or(DeviceType::Sensor)
+                }
+            };
+            devices.push(DeviceDeclaration {
+                line: instance.line.max(item.line).max(1),
+                name,
+                device_type,
+                attributes: item.attributes.clone(),
+            });
+        }
+    }
+
+    if !errors.is_empty() {
+        return Err(errors);
+    }
+
+    let mut rewritten = topology.clone();
+    rewritten.devices = devices;
+    rewritten.device_templates.clear();
+    rewritten.device_instances.clear();
+    Ok(rewritten)
+}
+
+fn expand_task_templates(tasks: &TasksSection) -> Result<TasksSection, Vec<PlcError>> {
+    if tasks.task_templates.is_empty() && tasks.task_instances.is_empty() {
+        return Ok(tasks.clone());
+    }
+
+    let mut errors = Vec::new();
+    let templates = tasks
+        .task_templates
+        .iter()
+        .map(|template| (template.name.clone(), template))
+        .collect::<HashMap<_, _>>();
+    let mut expanded = tasks.tasks.clone();
+
+    for template in &tasks.task_templates {
+        let mut params = HashSet::new();
+        for param in &template.params {
+            if !params.insert(param.clone()) {
+                errors.push(PlcError::semantic_with_reason(
+                    template.line.max(1),
+                    format!(
+                        "[TTPL-001] task_template '{}' declares duplicate parameter '{}'.",
+                        template.name, param
+                    ),
+                    "Declare each parameter once.".to_string(),
+                ));
+            }
+        }
+    }
+
+    for instance in &tasks.task_instances {
+        let Some(template) = templates.get(&instance.template) else {
+            errors.push(PlcError::undefined_reference_with_reason(
+                instance.line.max(1),
+                "task_template",
+                &instance.template,
+                format!(
+                    "[TTPL-003] task_instance '{}' references undefined task_template",
+                    instance.name
+                ),
+            ));
+            continue;
+        };
+        if template.params.len() != instance.args.len() {
+            errors.push(PlcError::semantic_with_reason(
+                instance.line.max(1),
+                format!(
+                    "[TTPL-004] task_instance '{}' passes {} argument(s), but task_template '{}' expects {}.",
+                    instance.name,
+                    instance.args.len(),
+                    template.name,
+                    template.params.len()
+                ),
+                "Match the task_template argument count.".to_string(),
+            ));
+            continue;
+        }
+        let substitutions = template
+            .params
+            .iter()
+            .cloned()
+            .zip(instance.args.iter().cloned())
+            .collect::<HashMap<_, _>>();
+        for task in &template.tasks {
+            let expanded_task = format!("{}_{}", instance.name, task.name);
+            let step_names = task
+                .steps
+                .iter()
+                .map(|step| step.name.clone())
+                .collect::<HashSet<_>>();
+            let mut task_out = task.clone();
+            task_out.line = instance.line.max(task.line).max(1);
+            task_out.name = expanded_task.clone();
+            task_out.steps = task
+                .steps
+                .iter()
+                .map(|step| {
+                    let mut step_out = step.clone();
+                    step_out.name = format!("{}_{}", instance.name, step.name);
+                    step_out.statements = step
+                        .statements
+                        .iter()
+                        .map(|statement| {
+                            rewrite_template_statement(
+                                statement,
+                                &expanded_task,
+                                &step_names,
+                                &substitutions,
+                                &instance.name,
+                            )
+                        })
+                        .collect();
+                    step_out
+                })
+                .collect();
+            task_out.on_complete = task.on_complete.as_ref().map(|directive| match directive {
+                OnCompleteDirective::Goto { target } => OnCompleteDirective::Goto {
+                    target: rewrite_template_goto(target, &expanded_task, &step_names, instance.name.as_str()),
+                },
+                OnCompleteDirective::Unreachable => OnCompleteDirective::Unreachable,
+            });
+            expanded.push(task_out);
+        }
+    }
+
+    if !errors.is_empty() {
+        return Err(errors);
+    }
+
+    Ok(TasksSection {
+        task_templates: Vec::new(),
+        task_instances: Vec::new(),
+        tasks: expanded,
+    })
+}
+
+fn rewrite_template_statement(
+    statement: &StepStatement,
+    expanded_task: &str,
+    step_names: &HashSet<String>,
+    substitutions: &HashMap<String, String>,
+    instance: &str,
+) -> StepStatement {
+    match statement {
+        StepStatement::Action(ActionStatement::Extend {
+            target,
+            timeout,
+            on_motion_fault,
+            on_safety_fault,
+        }) => StepStatement::Action(ActionStatement::Extend {
+            target: rewrite_template_target(target, substitutions),
+            timeout: timeout.as_ref().map(|timeout| TimeoutDirective {
+                duration: timeout.duration.clone(),
+                target: rewrite_template_goto(&timeout.target, expanded_task, step_names, instance),
+            }),
+            on_motion_fault: on_motion_fault
+                .as_ref()
+                .map(|goto| rewrite_template_goto(goto, expanded_task, step_names, instance)),
+            on_safety_fault: on_safety_fault
+                .as_ref()
+                .map(|goto| rewrite_template_goto(goto, expanded_task, step_names, instance)),
+        }),
+        StepStatement::Action(ActionStatement::Retract {
+            target,
+            timeout,
+            on_motion_fault,
+            on_safety_fault,
+        }) => StepStatement::Action(ActionStatement::Retract {
+            target: rewrite_template_target(target, substitutions),
+            timeout: timeout.as_ref().map(|timeout| TimeoutDirective {
+                duration: timeout.duration.clone(),
+                target: rewrite_template_goto(&timeout.target, expanded_task, step_names, instance),
+            }),
+            on_motion_fault: on_motion_fault
+                .as_ref()
+                .map(|goto| rewrite_template_goto(goto, expanded_task, step_names, instance)),
+            on_safety_fault: on_safety_fault
+                .as_ref()
+                .map(|goto| rewrite_template_goto(goto, expanded_task, step_names, instance)),
+        }),
+        StepStatement::Goto(goto) => {
+            StepStatement::Goto(rewrite_template_goto(goto, expanded_task, step_names, instance))
+        }
+        other => other.clone(),
+    }
+}
+
+fn rewrite_template_target(
+    target: &ActionTarget,
+    substitutions: &HashMap<String, String>,
+) -> ActionTarget {
+    ActionTarget {
+        device: substitutions
+            .get(&target.device)
+            .cloned()
+            .unwrap_or_else(|| target.device.clone()),
+        port: target.port.clone(),
+    }
+}
+
+fn rewrite_template_goto(
+    target: &GotoDirective,
+    expanded_task: &str,
+    step_names: &HashSet<String>,
+    instance: &str,
+) -> GotoDirective {
+    if target.step.is_none() && step_names.contains(&target.task) {
+        return GotoDirective {
+            line: target.line,
+            task: expanded_task.to_string(),
+            step: Some(format!("{}_{}", instance, target.task)),
+        };
+    }
+    GotoDirective {
+        line: target.line,
+        task: target.task.clone(),
+        step: target.step.clone(),
     }
 }
 
@@ -415,9 +735,7 @@ fn validate_extra_param_value(
             .parse::<i64>()
             .map(|_| ())
             .map_err(|_| "参数类型要求 integer（示例：200）".to_string()),
-        "float" | "number" | "ratio" => raw_value
-            .trim()
-            .parse::<f64>()
+        "float" | "number" | "ratio" => parse_finite_schema_number(raw_value.trim())
             .map(|_| ())
             .or_else(|_| validate_number_with_optional_unit(raw_value, &schema.unit))
             .map_err(|_| "参数类型要求 number（示例：12.5 或 2.2kW）".to_string()),
@@ -457,17 +775,13 @@ fn validate_time_param(raw_value: &str) -> Result<(), String> {
     }
 
     if let Some(number) = trimmed.strip_suffix("ms") {
-        number
-            .trim()
-            .parse::<f64>()
+        parse_finite_schema_number(number.trim())
             .map_err(|_| "time 参数格式错误，应为 <number>ms".to_string())?;
         return Ok(());
     }
 
     if let Some(number) = trimmed.strip_suffix('s') {
-        number
-            .trim()
-            .parse::<f64>()
+        parse_finite_schema_number(number.trim())
             .map_err(|_| "time 参数格式错误，应为 <number>s".to_string())?;
         return Ok(());
     }
@@ -494,10 +808,7 @@ fn validate_numeric_with_optional_unit(raw_value: &str, expected_unit: &str) -> 
         return Err("参数值缺少数字部分".to_string());
     }
 
-    number_part
-        .trim()
-        .replace('_', "")
-        .parse::<f64>()
+    parse_finite_schema_number(&number_part.trim().replace('_', ""))
         .map_err(|_| "参数值的数字部分解析失败".to_string())?;
 
     let normalized_unit = unit_part.trim();
@@ -519,7 +830,7 @@ fn validate_numeric_with_optional_unit(raw_value: &str, expected_unit: &str) -> 
 
 fn validate_number_with_optional_unit(raw_value: &str, expected_unit: &str) -> Result<(), String> {
     let trimmed = raw_value.trim();
-    if trimmed.parse::<f64>().is_ok() {
+    if parse_finite_schema_number(trimmed).is_ok() {
         return Ok(());
     }
 
@@ -535,10 +846,7 @@ fn validate_number_with_optional_unit(raw_value: &str, expected_unit: &str) -> R
         return Err("参数值缺少数字部分".to_string());
     }
 
-    number_part
-        .trim()
-        .replace('_', "")
-        .parse::<f64>()
+    parse_finite_schema_number(&number_part.trim().replace('_', ""))
         .map_err(|_| "参数值的数字部分解析失败".to_string())?;
 
     let actual_unit = unit_part.trim();
@@ -552,6 +860,17 @@ fn validate_number_with_optional_unit(raw_value: &str, expected_unit: &str) -> R
         Err(format!(
             "参数单位不匹配，期望 `{expected_unit}`，实际 `{actual_unit}`"
         ))
+    }
+}
+
+fn parse_finite_schema_number(raw: &str) -> Result<f64, String> {
+    let value = raw
+        .parse::<f64>()
+        .map_err(|_| "numeric value is invalid".to_string())?;
+    if value.is_finite() {
+        Ok(value)
+    } else {
+        Err("numeric value must be finite".to_string())
     }
 }
 
@@ -1169,6 +1488,12 @@ fn expand_plc_controller_devices(
     if plc_devices.is_empty() {
         return Ok(topology.clone());
     }
+    let mut controller_inventory = topology.controller_inventory.clone();
+    for plc in &plc_devices {
+        if !controller_inventory.contains(&plc.name) {
+            controller_inventory.push(plc.name.clone());
+        }
+    }
 
     let mut port_lookup = HashMap::<(String, String), ResolvedPlcEndpoint>::new();
     let mut synthetic_declarations = HashMap::<String, DeviceDeclaration>::new();
@@ -1331,10 +1656,14 @@ fn expand_plc_controller_devices(
 
     Ok(TopologySection {
         devices: rewritten_devices,
+        device_templates: Vec::new(),
+        device_instances: Vec::new(),
+        controller_inventory,
         controller_io: Vec::new(),
         stations: topology.stations.clone(),
         handshakes: topology.handshakes.clone(),
         transfer_points: topology.transfer_points.clone(),
+        controller_syncs: topology.controller_syncs.clone(),
         workpiece_types: topology.workpiece_types.clone(),
         workpiece_sites: topology.workpiece_sites.clone(),
         workpiece_holders: topology.workpiece_holders.clone(),
@@ -1377,7 +1706,13 @@ fn resolve_plc_ports(
 }
 
 fn load_controller_profile(profile_id: &str) -> Result<DeviceDef, PlcError> {
-    let path = Path::new(CONTROLLER_PROFILES_DIR).join(format!("{profile_id}.toml"));
+    let relative_path = Path::new(CONTROLLER_PROFILES_DIR).join(format!("{profile_id}.toml"));
+    let manifest_path = Path::new(env!("CARGO_MANIFEST_DIR")).join(&relative_path);
+    let path = if relative_path.exists() {
+        relative_path
+    } else {
+        manifest_path
+    };
     let content = fs::read_to_string(&path).map_err(|err| {
         PlcError::semantic_with_reason(
             1,
@@ -1808,6 +2143,8 @@ fn expand_repeat_blocks(tasks: &TasksSection) -> Result<TasksSection, Vec<PlcErr
 
     if errors.is_empty() {
         Ok(TasksSection {
+            task_templates: Vec::new(),
+            task_instances: Vec::new(),
             tasks: rewritten_tasks,
         })
     } else {

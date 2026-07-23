@@ -1,4 +1,5 @@
-﻿pub fn build_state_machine_from_ast(tasks: &TasksSection) -> Result<StateMachine, Vec<PlcError>> {
+#[cfg(test)]
+pub(crate) fn build_state_machine_from_ast(tasks: &TasksSection) -> Result<StateMachine, Vec<PlcError>> {
     build_state_machine_from_ast_with_context(tasks, &WaitExpressionContext::default(), None)
 }
 
@@ -7,6 +8,7 @@ fn build_state_machine_from_ast_with_context(
     wait_ctx: &WaitExpressionContext,
     device_kinds: Option<&HashMap<String, DeviceKind>>,
 ) -> Result<StateMachine, Vec<PlcError>> {
+    validate_axis_lowering_prerequisites(tasks)?;
     let mut builder = StateMachineBuilder::default();
     let mut errors = Vec::new();
 
@@ -305,6 +307,59 @@ fn build_state_machine_from_ast_with_context(
         Ok(state_machine)
     } else {
         Err(errors)
+    }
+}
+
+fn validate_axis_lowering_prerequisites(tasks: &TasksSection) -> Result<(), Vec<PlcError>> {
+    let mut errors = Vec::new();
+    for task in &tasks.tasks {
+        for step in &task.steps {
+            validate_axis_lowering_statements(
+                &step.statements,
+                step.line.max(task.line).max(1),
+                &mut errors,
+            );
+        }
+    }
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(errors)
+    }
+}
+
+fn validate_axis_lowering_statements(
+    statements: &[StepStatement],
+    line: usize,
+    errors: &mut Vec<PlcError>,
+) {
+    for statement in statements {
+        match statement {
+            StepStatement::Action(ActionStatement::AxisMoveRelative { speed, .. })
+            | StepStatement::Action(ActionStatement::AxisMoveAbsolute { speed, .. })
+                if speed.is_none() =>
+            {
+                errors.push(PlcError::semantic_with_reason(
+                    line,
+                    "[AXIS-LOWER-001] axis move speed is unresolved before state-machine lowering",
+                    "run the full semantic builder or provide an explicit speed/parameter set",
+                ));
+            }
+            StepStatement::Repeat { body, .. } => {
+                validate_axis_lowering_statements(body, line, errors);
+            }
+            StepStatement::Parallel(block) => {
+                for branch in &block.branches {
+                    validate_axis_lowering_statements(&branch.statements, line, errors);
+                }
+            }
+            StepStatement::Race(block) => {
+                for branch in &block.branches {
+                    validate_axis_lowering_statements(&branch.statements, line, errors);
+                }
+            }
+            _ => {}
+        }
     }
 }
 

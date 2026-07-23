@@ -1,5 +1,5 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { Button, Card, List, Select, Slider, Space, Tag, Typography } from 'antd';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { Button, Card, Empty, List, Select, Slider, Space, Tag, Typography } from 'antd';
 import {
   FastBackwardOutlined,
   FastForwardOutlined,
@@ -20,6 +20,22 @@ import { formatTimestamp } from '../utils/time';
 
 const { Option } = Select;
 const { Paragraph, Text, Title } = Typography;
+
+type SignalKind = 'digital' | 'analog';
+
+interface SignalSeries {
+  id: string;
+  label: string;
+  groupLabel: string;
+  kind: SignalKind;
+  values: Array<boolean | number>;
+  min?: number;
+  max?: number;
+  color: string;
+}
+
+const WAVEFORM_WIDTH = 720;
+const WAVEFORM_ROW_HEIGHT = 28;
 
 const RUN_PRESETS: Record<
   string,
@@ -108,6 +124,310 @@ function frameDelta(previous: TickSnapshot | undefined, current: TickSnapshot | 
     .filter((item): item is string => Boolean(item));
 }
 
+function buildSignalSeries(
+  ticks: TickSnapshot[],
+  t: (key: string) => string
+): SignalSeries[] {
+  return [
+    ...buildBooleanSeries(
+      ticks,
+      'digital_inputs',
+      t('replayPage.digitalInputs'),
+      'DI',
+      '#2563eb'
+    ),
+    ...buildBooleanSeries(
+      ticks,
+      'digital_outputs',
+      t('replayPage.digitalOutputs'),
+      'DO',
+      '#16a34a'
+    ),
+    ...buildNumberSeries(
+      ticks,
+      'analog_inputs',
+      t('replayPage.analogInputs'),
+      'AI',
+      '#d97706'
+    ),
+    ...buildNumberSeries(
+      ticks,
+      'analog_outputs',
+      t('replayPage.analogOutputs'),
+      'AO',
+      '#7c3aed'
+    ),
+  ];
+}
+
+function buildBooleanSeries(
+  ticks: TickSnapshot[],
+  field: 'digital_inputs' | 'digital_outputs',
+  groupLabel: string,
+  prefix: string,
+  color: string
+): SignalSeries[] {
+  const width = Math.max(...ticks.map((tick) => tick[field]?.length ?? 0), 0);
+  return Array.from({ length: width }, (_, index) => ({
+    id: `${field}-${index}`,
+    label: `${prefix}${index}`,
+    groupLabel,
+    kind: 'digital' as const,
+    values: ticks.map((tick) => tick[field]?.[index] === true),
+    color,
+  }));
+}
+
+function buildNumberSeries(
+  ticks: TickSnapshot[],
+  field: 'analog_inputs' | 'analog_outputs',
+  groupLabel: string,
+  prefix: string,
+  color: string
+): SignalSeries[] {
+  const width = Math.max(...ticks.map((tick) => tick[field]?.length ?? 0), 0);
+  return Array.from({ length: width }, (_, index) => {
+    const values = ticks.map((tick) => {
+      const value = tick[field]?.[index];
+      return typeof value === 'number' && Number.isFinite(value) ? value : 0;
+    });
+    const min = Math.min(...values);
+    const max = Math.max(...values);
+    return {
+      id: `${field}-${index}`,
+      label: `${prefix}${index}`,
+      groupLabel,
+      kind: 'analog' as const,
+      values,
+      min,
+      max,
+      color,
+    };
+  });
+}
+
+function xForIndex(index: number, total: number): number {
+  if (total <= 1) {
+    return 0;
+  }
+  return (index / (total - 1)) * WAVEFORM_WIDTH;
+}
+
+function digitalPath(values: Array<boolean | number>): string {
+  if (values.length === 0) {
+    return '';
+  }
+  const highY = 7;
+  const lowY = WAVEFORM_ROW_HEIGHT - 7;
+  const yFor = (value: boolean | number) => (value === true || value === 1 ? highY : lowY);
+  const parts = [`M 0 ${yFor(values[0])}`];
+
+  for (let index = 1; index < values.length; index += 1) {
+    const x = xForIndex(index, values.length);
+    parts.push(`L ${x} ${yFor(values[index - 1])}`);
+    parts.push(`L ${x} ${yFor(values[index])}`);
+  }
+
+  if (values.length === 1) {
+    parts.push(`L ${WAVEFORM_WIDTH} ${yFor(values[0])}`);
+  }
+
+  return parts.join(' ');
+}
+
+function analogPath(values: Array<boolean | number>, min = 0, max = 0): string {
+  if (values.length === 0) {
+    return '';
+  }
+  const top = 5;
+  const bottom = WAVEFORM_ROW_HEIGHT - 5;
+  const span = max - min || 1;
+  const yFor = (value: boolean | number) => {
+    const numeric = typeof value === 'number' && Number.isFinite(value) ? value : 0;
+    return bottom - ((numeric - min) / span) * (bottom - top);
+  };
+
+  return values
+    .map((value, index) => `${index === 0 ? 'M' : 'L'} ${xForIndex(index, values.length)} ${yFor(value)}`)
+    .join(' ');
+}
+
+function formatSignalValue(value: boolean | number | undefined): string {
+  if (typeof value === 'boolean') {
+    return value ? '1' : '0';
+  }
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return Number.isInteger(value) ? String(value) : value.toFixed(2);
+  }
+  return '-';
+}
+
+interface TraceWaveformPanelProps {
+  ticks: TickSnapshot[];
+  currentFrameIndex: number;
+  activeTick?: number;
+  tickMs?: number;
+  t: (key: string, options?: Record<string, unknown>) => string;
+}
+
+const TraceWaveformPanel: React.FC<TraceWaveformPanelProps> = ({
+  ticks,
+  currentFrameIndex,
+  activeTick,
+  tickMs = 0,
+  t,
+}) => {
+  const series = useMemo(() => buildSignalSeries(ticks, t), [ticks, t]);
+  const markerX = xForIndex(currentFrameIndex, ticks.length);
+  const groupedSeries = useMemo(
+    () =>
+      series.reduce<Array<{ groupLabel: string; rows: SignalSeries[] }>>((groups, item) => {
+        const currentGroup = groups[groups.length - 1];
+        if (currentGroup?.groupLabel === item.groupLabel) {
+          currentGroup.rows.push(item);
+        } else {
+          groups.push({ groupLabel: item.groupLabel, rows: [item] });
+        }
+        return groups;
+      }, []),
+    [series]
+  );
+
+  return (
+    <Card title={t('replayPage.signalWaveforms')}>
+      {series.length > 0 ? (
+        <div style={{ display: 'grid', gap: 16 }}>
+          <Space wrap size={[8, 8]}>
+            <Tag>
+              {typeof activeTick === 'number'
+                ? t('replayPage.tickRange', { current: activeTick, total: ticks[ticks.length - 1]?.tick ?? 0 })
+                : t('replayPage.noTrace')}
+            </Tag>
+            <Tag>{t('replayPage.timeMsValue', { value: (activeTick ?? 0) * tickMs })}</Tag>
+          </Space>
+
+          <div
+            style={{
+              border: '1px solid #e2e8f0',
+              borderRadius: 8,
+              overflow: 'hidden',
+              background: '#ffffff',
+            }}
+          >
+            {groupedSeries.map((group) => (
+              <div key={group.groupLabel}>
+                <div
+                  style={{
+                    padding: '8px 12px',
+                    background: '#f8fafc',
+                    borderBottom: '1px solid #e2e8f0',
+                    color: '#475569',
+                    fontSize: 12,
+                    fontWeight: 600,
+                  }}
+                >
+                  {group.groupLabel}
+                </div>
+                {group.rows.map((row) => {
+                  const currentValue = row.values[currentFrameIndex];
+                  const path =
+                    row.kind === 'digital'
+                      ? digitalPath(row.values)
+                      : analogPath(row.values, row.min, row.max);
+
+                  return (
+                    <div
+                      key={row.id}
+                      style={{
+                        display: 'grid',
+                        gridTemplateColumns: '88px minmax(360px, 1fr) 72px',
+                        alignItems: 'center',
+                        minHeight: WAVEFORM_ROW_HEIGHT + 10,
+                        borderBottom: '1px solid #f1f5f9',
+                      }}
+                    >
+                      <Text
+                        strong
+                        style={{
+                          paddingLeft: 12,
+                          fontSize: 12,
+                          color: '#334155',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        {row.label}
+                      </Text>
+                      <div style={{ overflowX: 'auto', padding: '4px 0' }}>
+                        <svg
+                          width={WAVEFORM_WIDTH}
+                          height={WAVEFORM_ROW_HEIGHT}
+                          viewBox={`0 0 ${WAVEFORM_WIDTH} ${WAVEFORM_ROW_HEIGHT}`}
+                          role="img"
+                          aria-label={`${row.groupLabel} ${row.label}`}
+                          style={{ display: 'block' }}
+                        >
+                          <line
+                            x1="0"
+                            y1={WAVEFORM_ROW_HEIGHT - 7}
+                            x2={WAVEFORM_WIDTH}
+                            y2={WAVEFORM_ROW_HEIGHT - 7}
+                            stroke="#e2e8f0"
+                            strokeWidth="1"
+                          />
+                          {row.kind === 'analog' ? (
+                            <line
+                              x1="0"
+                              y1={WAVEFORM_ROW_HEIGHT / 2}
+                              x2={WAVEFORM_WIDTH}
+                              y2={WAVEFORM_ROW_HEIGHT / 2}
+                              stroke="#f1f5f9"
+                              strokeWidth="1"
+                            />
+                          ) : null}
+                          <path
+                            d={path}
+                            fill="none"
+                            stroke={row.color}
+                            strokeWidth={row.kind === 'digital' ? 2.5 : 2}
+                            strokeLinejoin="round"
+                            strokeLinecap="round"
+                          />
+                          <line
+                            x1={markerX}
+                            y1="0"
+                            x2={markerX}
+                            y2={WAVEFORM_ROW_HEIGHT}
+                            stroke="#0f172a"
+                            strokeWidth="1"
+                            strokeDasharray="3 3"
+                          />
+                        </svg>
+                      </div>
+                      <Text
+                        style={{
+                          justifySelf: 'end',
+                          paddingRight: 12,
+                          fontVariantNumeric: 'tabular-nums',
+                          color: '#475569',
+                          fontSize: 12,
+                        }}
+                      >
+                        {formatSignalValue(currentValue)}
+                      </Text>
+                    </div>
+                  );
+                })}
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : (
+        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('replayPage.noWaveformData')} />
+      )}
+    </Card>
+  );
+};
+
 const ReplayPage: React.FC = () => {
   const { t } = useTranslation();
   const { currentProject } = useAppStore();
@@ -116,7 +436,10 @@ const ReplayPage: React.FC = () => {
     state.nodes.map((node) => node.id).join('|')
   );
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
-  const [currentFrameIndex, setCurrentFrameIndex] = useState(0);
+  const [frameState, setFrameState] = useState<{ runId: string | null; index: number }>({
+    runId: null,
+    index: 0,
+  });
   const [isPlaying, setIsPlaying] = useState(false);
   const [playSpeed, setPlaySpeed] = useState(1);
 
@@ -125,45 +448,43 @@ const ReplayPage: React.FC = () => {
     queryFn: () => runApi.listRuns(20),
   });
 
-  const runs = runsData?.data ?? [];
-
-  useEffect(() => {
-    if (!selectedRunId && runs.length > 0) {
-      const preferredRun =
-        runs.find((run) => runMatchesCurrentProject(run, currentProject)) ??
-        runs.find((run) => run.status === 'fail') ??
-        runs[0];
-      setSelectedRunId(preferredRun?.run_id ?? null);
-    }
-  }, [currentProject, runs, selectedRunId]);
+  const runs = useMemo(() => runsData?.data ?? [], [runsData?.data]);
+  const preferredRunId = useMemo(() => {
+    const preferredRun =
+      runs.find((run) => runMatchesCurrentProject(run, currentProject)) ??
+      runs.find((run) => run.status === 'fail') ??
+      runs[0];
+    return preferredRun?.run_id ?? null;
+  }, [currentProject, runs]);
+  const activeRunId = selectedRunId ?? preferredRunId;
 
   const selectedRun = useMemo(
-    () => runs.find((run) => run.run_id === selectedRunId),
-    [runs, selectedRunId]
+    () => runs.find((run) => run.run_id === activeRunId),
+    [activeRunId, runs]
   );
 
   const { data: runStatusData, isLoading: isRunLoading } = useQuery({
-    queryKey: ['replay-run-status', selectedRunId],
-    queryFn: () => runApi.getRunStatus(selectedRunId!),
-    enabled: Boolean(selectedRunId),
+    queryKey: ['replay-run-status', activeRunId],
+    queryFn: () => runApi.getRunStatus(activeRunId!),
+    enabled: Boolean(activeRunId),
   });
 
   const { data: traceData, isLoading: isTraceLoading } = useQuery({
-    queryKey: ['trace', selectedRunId],
-    queryFn: () => traceApi.getTrace(selectedRunId!),
-    enabled: Boolean(selectedRunId),
+    queryKey: ['trace', activeRunId],
+    queryFn: () => traceApi.getTrace(activeRunId!),
+    enabled: Boolean(activeRunId),
   });
 
   const { data: geometryData, isLoading: isGeometryLoading } = useQuery({
-    queryKey: ['replay-geometry', selectedRunId],
-    queryFn: () => geometryApi.getGeometry(selectedRunId!),
-    enabled: Boolean(selectedRunId),
+    queryKey: ['replay-geometry', activeRunId],
+    queryFn: () => geometryApi.getGeometry(activeRunId!),
+    enabled: Boolean(activeRunId),
   });
 
   const { data: keypointsData, isLoading: isKeypointsLoading } = useQuery({
-    queryKey: ['replay-keypoints', selectedRunId],
-    queryFn: () => traceApi.getKeypoints(selectedRunId!),
-    enabled: Boolean(selectedRunId),
+    queryKey: ['replay-keypoints', activeRunId],
+    queryFn: () => traceApi.getKeypoints(activeRunId!),
+    enabled: Boolean(activeRunId),
   });
 
   const run = runStatusData?.data ?? selectedRun;
@@ -171,6 +492,8 @@ const ReplayPage: React.FC = () => {
 
   const ticks = trace?.ticks || [];
   const maxFrameIndex = Math.max(ticks.length - 1, 0);
+  const currentFrameIndex =
+    frameState.runId === activeRunId ? Math.min(frameState.index, maxFrameIndex) : 0;
   const currentSnapshot = ticks[currentFrameIndex];
   const previousSnapshot = currentFrameIndex > 0 ? ticks[currentFrameIndex - 1] : undefined;
   const activeTick = currentSnapshot?.tick;
@@ -179,17 +502,16 @@ const ReplayPage: React.FC = () => {
     (item) => typeof activeTick === 'number' && Math.abs(item.tick - activeTick) <= 1
   );
   const changedLines = frameDelta(previousSnapshot, currentSnapshot);
-
-  useEffect(() => {
-    setCurrentFrameIndex(0);
-    setIsPlaying(false);
-  }, [selectedRunId]);
-
-  useEffect(() => {
-    if (currentFrameIndex > maxFrameIndex) {
-      setCurrentFrameIndex(maxFrameIndex);
-    }
-  }, [currentFrameIndex, maxFrameIndex]);
+  const setCurrentFrameIndex = useCallback((next: number | ((previous: number) => number)) => {
+    setFrameState((previous) => {
+      const base = previous.runId === activeRunId ? Math.min(previous.index, maxFrameIndex) : 0;
+      const rawIndex = typeof next === 'function' ? next(base) : next;
+      return {
+        runId: activeRunId,
+        index: Math.min(Math.max(rawIndex, 0), maxFrameIndex),
+      };
+    });
+  }, [activeRunId, maxFrameIndex]);
 
   useEffect(() => {
     if (!isPlaying || currentFrameIndex >= maxFrameIndex) {
@@ -199,7 +521,7 @@ const ReplayPage: React.FC = () => {
       setCurrentFrameIndex((prev) => Math.min(prev + 1, maxFrameIndex));
     }, 1000 / playSpeed);
     return () => window.clearInterval(interval);
-  }, [currentFrameIndex, isPlaying, maxFrameIndex, playSpeed]);
+  }, [currentFrameIndex, isPlaying, maxFrameIndex, playSpeed, setCurrentFrameIndex]);
 
   useEffect(() => {
     if (!currentSnapshot) {
@@ -223,8 +545,11 @@ const ReplayPage: React.FC = () => {
         <Select
           style={{ width: 460 }}
           placeholder={t('replayPage.selectRunPlaceholder')}
-          value={selectedRunId ?? undefined}
-          onChange={(value) => setSelectedRunId(value)}
+          value={activeRunId ?? undefined}
+          onChange={(value) => {
+            setSelectedRunId(value);
+            setIsPlaying(false);
+          }}
         >
           {runs.map((runItem) => (
             <Option key={runItem.run_id} value={runItem.run_id}>
@@ -235,7 +560,7 @@ const ReplayPage: React.FC = () => {
         </Select>
       </Card>
 
-      {selectedRunId ? (
+      {activeRunId ? (
         <>
           <RunReviewCockpit
             run={run}
@@ -331,6 +656,14 @@ const ReplayPage: React.FC = () => {
               />
             </Space>
           </Card>
+
+          <TraceWaveformPanel
+            ticks={ticks}
+            currentFrameIndex={currentFrameIndex}
+            activeTick={activeTick}
+            tickMs={trace?.tick_ms}
+            t={t}
+          />
 
           <Card title={t('replayPage.frameDelta')}>
             <Space direction="vertical" size="middle" style={{ width: '100%' }}>

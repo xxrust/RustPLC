@@ -247,6 +247,61 @@ pub struct TopologyLink {
     pub kind: ConnectionType,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct StationProtocol {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub owns: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tasks: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct StationHandshake {
+    pub name: String,
+    pub from_station: String,
+    pub to_station: String,
+    pub request: String,
+    pub allow: String,
+    pub complete: String,
+    pub timeout_ms: u64,
+    pub timeout_target_task: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout_target_step: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct StationTransferPoint {
+    pub name: String,
+    pub from_station: String,
+    pub to_station: String,
+    pub site: String,
+    pub handshake: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ControllerSyncContract {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub controllers: Vec<String>,
+    pub max_skew_ms: u64,
+    pub heartbeat_ms: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct StationProtocolModel {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub controllers: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub stations: Vec<StationProtocol>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub handshakes: Vec<StationHandshake>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub transfer_points: Vec<StationTransferPoint>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub controller_syncs: Vec<ControllerSyncContract>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct TopologyGraph {
     pub graph: DiGraph<Device, ConnectionType>,
@@ -254,6 +309,8 @@ pub struct TopologyGraph {
     pub pid_loops: Vec<PidLoop>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub links: Vec<TopologyLink>,
+    #[serde(default, skip_serializing_if = "StationProtocolModel::is_empty")]
+    pub station_protocol: StationProtocolModel,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub variables: Vec<VariableDef>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -274,6 +331,7 @@ impl TopologyGraph {
             graph: DiGraph::new(),
             pid_loops: Vec::new(),
             links: Vec::new(),
+            station_protocol: StationProtocolModel::default(),
             variables: Vec::new(),
             cam_tables: Vec::new(),
             cam_couplings: Vec::new(),
@@ -289,6 +347,16 @@ impl TopologyGraph {
 
     pub fn add_connection(&mut self, from: NodeIndex, to: NodeIndex, kind: ConnectionType) {
         self.graph.add_edge(from, to, kind);
+    }
+}
+
+impl StationProtocolModel {
+    pub fn is_empty(&self) -> bool {
+        self.controllers.is_empty()
+            && self.stations.is_empty()
+            && self.handshakes.is_empty()
+            && self.transfer_points.is_empty()
+            && self.controller_syncs.is_empty()
     }
 }
 

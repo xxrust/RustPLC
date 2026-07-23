@@ -11,14 +11,14 @@ use crate::ir::{
 use petgraph::algo::kosaraju_scc;
 use petgraph::graph::DiGraph;
 use petgraph::visit::EdgeRef;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt;
 
 #[cfg(feature = "z3-solver")]
 use z3::ast::Bool;
 #[cfg(feature = "z3-solver")]
-use z3::{Config, Context, SatResult, Solver};
+use z3::{Config, SatResult, Solver};
 
 #[derive(Debug, Clone, Default)]
 pub struct SafetyConfig {
@@ -31,7 +31,7 @@ pub enum SafetyProofLevel {
     Bounded,
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum SafetyRuleStatusKind {
     Bound,
@@ -39,7 +39,7 @@ pub enum SafetyRuleStatusKind {
     Degraded,
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SafetyCoverage {
     pub bound_rules: usize,
     pub degraded_rules: usize,
@@ -47,7 +47,7 @@ pub struct SafetyCoverage {
     pub total_rules: usize,
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SafetyAnalogThresholdDetail {
     pub expr: String,
     pub device: String,
@@ -58,7 +58,7 @@ pub struct SafetyAnalogThresholdDetail {
     pub total_intervals: usize,
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SafetyRuleStatus {
     pub line: usize,
     pub rule: String,

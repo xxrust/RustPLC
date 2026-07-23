@@ -10,6 +10,7 @@ use rust_plc::semantic::{
     build_constraint_set, build_state_machine, build_topology_graph, preprocess_program,
 };
 use rust_plc::verification::timing::estimate_program_timing;
+use rust_plc::verification::verify_all;
 use rustplc_device_semantics::{ActionResultBucket, DefaultFeedbackPolicy};
 
 #[test]
@@ -237,7 +238,6 @@ task main:
     let topology = build_topology_graph(&expanded).expect("topology");
     let constraints = build_constraint_set(&expanded).expect("constraints");
     let state_machine = build_state_machine(&expanded).expect("state machine");
-
     let device_action = state_machine
         .transitions
         .iter()
@@ -293,9 +293,10 @@ task main:
         StCodegenError::DeviceActionUnsupported { target, .. } if target == "oven"
     )));
 
-    let runtime_program =
+    let compiled_runtime_program =
         state_machine_to_runtime_program(&topology, &constraints, &state_machine, 10)
             .expect("runtime bridge should preserve first-class process action");
+    let runtime_program = compiled_runtime_program.program();
     let Instr::Action { actions, next } = runtime_program.tasks[0].steps[0].instr else {
         panic!("process action step should lower to runtime action instruction");
     };
@@ -308,7 +309,7 @@ task main:
     assert_eq!(command.target, "oven");
     assert_eq!(command.args, &["80"]);
 
-    let mut runtime = Runtime::new(&runtime_program).expect("runtime init");
+    let mut runtime = Runtime::new(runtime_program).expect("runtime init");
     let mut io = sim::SimIo::new(0, 0, 0, 0);
     assert_eq!(
         runtime
@@ -361,4 +362,90 @@ task main:
 
     assert!(rendered.contains("[PROC-002]"));
     assert!(rendered.contains("[PROC-003]"));
+}
+
+#[test]
+fn process_device_action_step_timeout_is_preserved_by_runtime_bridge() {
+    let input = r#"
+[topology]
+device plc_main: plc { model_ref: openplc_softplc }
+device oven: heater { open_loop_policy: commissioned_low_risk_fixture, response_time: 50ms }
+
+[constraints]
+
+[tasks]
+task main:
+    step heat:
+        action: heater.heat_to(oven, 80)
+        timeout: 20ms -> goto fault.timeout
+    step done:
+        action: log "done"
+
+task fault:
+    step timeout:
+        action: log "timeout"
+"#;
+
+    let program = parse_plc(input).expect("parse");
+    let expanded = preprocess_program(&program).expect("preprocess");
+    let topology = build_topology_graph(&expanded).expect("topology");
+    let constraints = build_constraint_set(&expanded).expect("constraints");
+    let state_machine = build_state_machine(&expanded).expect("state machine");
+    verify_all(&expanded, &topology, &constraints, &state_machine)
+        .expect("explicit timeout must make pending device action finite for verification");
+    let compiled_runtime_program =
+        state_machine_to_runtime_program(&topology, &constraints, &state_machine, 10)
+            .expect("runtime bridge");
+    let runtime_program = compiled_runtime_program.program();
+
+    let Instr::Action { actions, .. } = runtime_program.tasks[0].steps[0].instr else {
+        panic!("device action should lower to runtime action instruction");
+    };
+    let Action::ProcessDeviceAction { command } = actions[0] else {
+        panic!("device action should remain first-class");
+    };
+    let timeout = command
+        .timeout
+        .expect("step timeout must reach runtime command");
+    assert_eq!(timeout.after_ticks, 2);
+
+    let mut runtime = Runtime::new(runtime_program).expect("runtime init");
+    let mut io = sim::SimIo::new(0, 0, 0, 0);
+    for _ in 0..3 {
+        runtime
+            .tick_with_process_device(&mut io, |_| ProcessDeviceActionResult::Pending)
+            .expect("pending action should route at timeout");
+    }
+    assert_eq!(runtime.location().step, timeout.target);
+}
+
+#[test]
+fn process_device_action_without_timeout_is_not_treated_as_finite_by_liveness() {
+    let input = r#"
+[topology]
+device plc_main: plc { model_ref: openplc_softplc }
+device oven: heater { open_loop_policy: commissioned_low_risk_fixture, response_time: 50ms }
+
+[constraints]
+
+[tasks]
+task main:
+    step heat:
+        action: heater.heat_to(oven, 80)
+    step done:
+        action: log "done"
+"#;
+
+    let program = parse_plc(input).expect("parse");
+    let expanded = preprocess_program(&program).expect("preprocess");
+    let topology = build_topology_graph(&expanded).expect("topology");
+    let constraints = build_constraint_set(&expanded).expect("constraints");
+    let state_machine = build_state_machine(&expanded).expect("state machine");
+
+    let errors = verify_all(&expanded, &topology, &constraints, &state_machine)
+        .expect_err("response_time alone must not prove a Pending runtime action terminates");
+    assert!(errors.iter().any(|error| {
+        error.checker == "liveness"
+            && (error.reason.contains("pending") || error.reason.contains("Pending"))
+    }));
 }

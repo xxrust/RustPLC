@@ -74,6 +74,7 @@ pub(crate) fn collect_scenario_init_hints(
         10,
     )
     .map_err(|e| e.to_string())?;
+    let runtime = runtime.program();
 
     let mut used_di = BTreeSet::<u16>::new();
     let mut used_ai = BTreeSet::<u16>::new();

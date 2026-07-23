@@ -3,6 +3,7 @@ mod component;
 mod deployment;
 mod diagnostics;
 mod flowchart;
+mod lsp;
 mod project;
 mod scenario;
 mod shared;
@@ -112,6 +113,17 @@ pub(super) fn run() {
         return;
     }
     if let Some(result) = flowchart::try_dispatch(&program, &first, &remaining) {
+        if let Err(msg) = result.result {
+            if let Some(prefix) = result.error_prefix {
+                eprintln!("{prefix} {msg}");
+            } else {
+                eprintln!("{msg}");
+            }
+            std::process::exit(1);
+        }
+        return;
+    }
+    if let Some(result) = lsp::try_dispatch(&program, &first, &remaining) {
         if let Err(msg) = result.result {
             if let Some(prefix) = result.error_prefix {
                 eprintln!("{prefix} {msg}");

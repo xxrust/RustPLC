@@ -1,0 +1,343 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>RustPLC 安全与架构审计改动总结</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #18201d;
+      --muted: #5b6761;
+      --line: #d8dedb;
+      --paper: #ffffff;
+      --soft: #f4f7f5;
+      --green: #17663a;
+      --green-soft: #e8f4ec;
+      --amber: #8a5a00;
+      --amber-soft: #fff3d4;
+      --red: #a3352a;
+      --red-soft: #fdecea;
+      --blue: #285f8f;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: var(--soft);
+      color: var(--ink);
+      font-family: "Segoe UI", "Microsoft YaHei", Arial, sans-serif;
+      font-size: 16px;
+      line-height: 1.65;
+      letter-spacing: 0;
+    }
+
+    a { color: var(--blue); text-decoration-thickness: 1px; text-underline-offset: 3px; }
+    code, pre { font-family: "Cascadia Code", "SFMono-Regular", Consolas, monospace; }
+
+    header {
+      background: #17221e;
+      color: #f7faf8;
+      padding: 52px 24px 44px;
+      border-bottom: 5px solid #3d9b67;
+    }
+
+    .header-inner, main, footer { width: min(1120px, calc(100% - 40px)); margin: 0 auto; }
+    .eyebrow { margin: 0 0 10px; color: #a9d9bb; font-size: 13px; font-weight: 700; text-transform: uppercase; }
+    h1 { margin: 0; max-width: 850px; font-size: clamp(32px, 5vw, 56px); line-height: 1.12; font-weight: 760; }
+    .subtitle { max-width: 850px; margin: 18px 0 0; color: #d5dfda; font-size: 18px; }
+    .meta { margin-top: 26px; display: flex; flex-wrap: wrap; gap: 10px 22px; color: #b9c7c0; font-size: 14px; }
+
+    main { padding: 36px 0 64px; }
+    section { padding: 34px 0; border-bottom: 1px solid var(--line); }
+    section:last-child { border-bottom: 0; }
+    h2 { margin: 0 0 16px; font-size: 25px; line-height: 1.25; }
+    h3 { margin: 24px 0 8px; font-size: 18px; }
+    p { margin: 8px 0 14px; }
+    .lead { max-width: 900px; font-size: 19px; }
+
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin: 24px 0 8px;
+    }
+
+    .metric {
+      min-height: 124px;
+      padding: 18px;
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 6px;
+    }
+
+    .metric strong { display: block; font-size: 28px; line-height: 1.1; color: var(--green); }
+    .metric span { display: block; margin-top: 10px; color: var(--muted); font-size: 14px; }
+
+    .status {
+      display: inline-flex;
+      align-items: center;
+      min-height: 26px;
+      padding: 2px 9px;
+      border-radius: 4px;
+      font-size: 13px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+
+    .done { color: var(--green); background: var(--green-soft); }
+    .track { color: var(--amber); background: var(--amber-soft); }
+    .debt { color: var(--red); background: var(--red-soft); }
+
+    .callout {
+      margin: 20px 0;
+      padding: 16px 18px;
+      background: var(--paper);
+      border-left: 4px solid var(--blue);
+    }
+
+    .ascii-diagram {
+      margin: 22px 0 10px;
+      padding: 20px;
+      overflow-x: auto;
+      background: #111a17;
+      color: #d8e7df;
+      border-radius: 6px;
+      font-size: 13px;
+      line-height: 1.55;
+    }
+
+    .caption { color: var(--muted); font-size: 14px; }
+
+    table { width: 100%; border-collapse: collapse; background: var(--paper); }
+    th, td { padding: 13px 14px; border: 1px solid var(--line); text-align: left; vertical-align: top; }
+    th { background: #edf2ef; font-size: 14px; }
+    td code { font-size: 13px; overflow-wrap: anywhere; }
+
+    .risk-list { display: grid; gap: 12px; }
+    .risk-item { padding: 18px 0; border-top: 1px solid var(--line); }
+    .risk-item:first-child { border-top: 0; }
+    .risk-title { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+    .risk-title h3 { margin: 0; }
+
+    .command-list { display: grid; gap: 8px; }
+    .command {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 18px;
+      align-items: center;
+      padding: 12px 14px;
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 5px;
+    }
+    .command code { overflow-wrap: anywhere; }
+
+    ul { padding-left: 22px; }
+    li { margin: 7px 0; }
+    footer { padding: 0 0 44px; color: var(--muted); font-size: 13px; }
+
+    @media (max-width: 780px) {
+      header { padding: 38px 4px 34px; }
+      .header-inner, main, footer { width: min(100% - 28px, 1120px); }
+      .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      table { display: block; overflow-x: auto; }
+      .command { grid-template-columns: 1fr; gap: 7px; }
+    }
+
+    @media (max-width: 460px) {
+      .metrics { grid-template-columns: 1fr; }
+      h1 { font-size: 34px; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="header-inner">
+      <p class="eyebrow">Security &amp; Architecture Audit</p>
+      <h1>RustPLC 安全与架构审计改动总结</h1>
+      <p class="subtitle">本次改动把 Web 控制面、semantic 前门、runtime 所有权、并发验证和依赖安全收敛到可执行、可验证、可持续门禁的工程状态。</p>
+      <div class="meta">
+        <span>审计日期：2026-07-23</span>
+        <span>工作区：E:\personal_project\rust_plc</span>
+        <span>范围：本次安全与架构审计相关改动</span>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <section>
+      <h2>审计结论</h2>
+      <p class="lead">代码库原先存在可远程触达的 Web 控制风险、semantic 契约绕过、runtime 内存生命周期问题、verification/runtime 口径漂移和已知依赖漏洞。本次已完成高风险项修复，并通过全 workspace、全 target 回归。</p>
+
+      <div class="metrics">
+        <div class="metric"><strong>PASS</strong><span>cargo check<br>workspace + all targets</span></div>
+        <div class="metric"><strong>PASS</strong><span>cargo test<br>workspace + all targets</span></div>
+        <div class="metric"><strong>0</strong><span>npm audit<br>已知漏洞</span></div>
+        <div class="metric"><strong>4</strong><span>RustSec 允许的<br>停止维护警告</span></div>
+      </div>
+
+      <div class="callout">本报告只归纳审计相关修复。当前工作树还包含用户原有改动、新模块和文档，不应把完整 Git diff 视为本次审计的单一变更集。</div>
+    </section>
+
+    <section>
+      <h2>收敛后的机制链</h2>
+      <pre class="ascii-diagram"><code>External user / Web UI / CLI
+              |
+              v
+  +-----------------------------+
+  | Web security front door     |
+  | localhost default           |
+  | Bearer auth + CORS allowlist|
+  | path / size / time limits   |
+  +--------------+--------------+
+                 |
+                 v
+Parser -> AST -> Shared Semantic Compile -> Canonical IR
+                                      |          |
+                         +------------+          +-------------+
+                         v                                     v
+                 Verification                         Runtime Bridge
+          safety/liveness/timing/causality        checked lowering + arena
+                         |                                     |
+                         +----------------+--------------------+
+                                          v
+                                     runtime-core
+                                 task-local tick execution
+                                          |
+                              +-----------+-----------+
+                              v                       v
+                           I/O HAL                 Codegen / Sim
+
+Persistence boundaries:
+workspace inputs -> canonical containment check -> bounded artifacts
+run requests      -> semaphore + timeout          -> bounded run records</code></pre>
+      <p class="caption">该链路明确了输入前门、唯一语义汇合点、验证分支、执行所有权和持久化边界。CLI 与 Web 现在共享同一个 semantic 编译服务。</p>
+    </section>
+
+    <section>
+      <h2>已修复问题</h2>
+      <table>
+        <thead>
+          <tr><th>领域</th><th>原风险</th><th>当前机制</th><th>状态</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Web 控制面</td>
+            <td>默认远程监听、缺少鉴权、CORS 边界宽松。</td>
+            <td>默认 localhost；远程模式要求显式开关、Bearer Token 和来源白名单。</td>
+            <td><span class="status done">已修复</span></td>
+          </tr>
+          <tr>
+            <td>文件与进程边界</td>
+            <td>路径逃逸、无限制文件读取、命令输出与任务堆积。</td>
+            <td>canonical containment、UUID run ID、并发信号量、运行超时、输入/输出/记录上限。</td>
+            <td><span class="status done">已修复</span></td>
+          </tr>
+          <tr>
+            <td>Semantic 前门</td>
+            <td>raw I/O 绕过、重复设备、非有限数值、表达式资源消耗和 panic 路径。</td>
+            <td>源码级门禁、finite/f32 范围检查、表达式深度与节点预算、结构化诊断。</td>
+            <td><span class="status done">已修复</span></td>
+          </tr>
+          <tr>
+            <td>编译架构</td>
+            <td>CLI 与 Web 独立拼装 semantic 管线，结果可能漂移。</td>
+            <td><code>compile_semantic_program_with_library</code> 成为共享编译入口。</td>
+            <td><span class="status done">已修复</span></td>
+          </tr>
+          <tr>
+            <td>Runtime 所有权</td>
+            <td>bridge 使用 <code>Box::leak</code> 满足静态引用，编译程序无法回收。</td>
+            <td><code>CompiledRuntimeProgram</code> 使用 <code>Bump + self_cell</code> 持有 runtime 数据。</td>
+            <td><span class="status done">已修复</span></td>
+          </tr>
+          <tr>
+            <td>并发与 workpiece</td>
+            <td>root task、extern WCET、carrier slot、类型和 pending action 在 runtime/verification 间存在口径差。</td>
+            <td>共享 graph-based roots、并发 WCET 合计、容量门禁、checked StepId、DeviceAction 生命周期。</td>
+            <td><span class="status done">已修复</span></td>
+          </tr>
+          <tr>
+            <td>依赖安全</td>
+            <td>Rust <code>rand 0.8.5</code> unsound；前端包含 Axios、React Router、DOMPurify、Vite 等漏洞。</td>
+            <td>升级 axum/tungstenite 与前端依赖；DOMPurify 使用项目 override 固定到修复版本。</td>
+            <td><span class="status done">已修复</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>关键实现证据</h2>
+      <ul>
+        <li><a href="../../crates/web-server/src/main.rs">crates/web-server/src/main.rs</a>：HTTP handler 与应用装配；安全、artifact、run service、协作和测试已拆到相邻模块。</li>
+        <li><a href="../../crates/web-server/src/tests.rs">crates/web-server/src/tests.rs</a>：Web 控制面的 45 项回归测试。</li>
+        <li><a href="../../src/cli/utilities/documentation.rs">src/cli/utilities/documentation.rs</a> 与 <a href="../../src/cli/utilities/keyence.rs">src/cli/utilities/keyence.rs</a>：CLI 文档/示例与 KEYENCE 命令域。</li>
+        <li><a href="../../src/semantic/semantic_compile.rs">src/semantic/semantic_compile.rs</a>：统一 semantic 编译服务。</li>
+        <li><a href="../../src/semantic/semantic_core.rs">src/semantic/semantic_core.rs</a>：raw I/O 前门与源码级语义检查。</li>
+        <li><a href="../../src/runtime_bridge.rs">src/runtime_bridge.rs</a>：runtime 程序所有权容器。</li>
+        <li><a href="../../src/task_root_selection.rs">src/task_root_selection.rs</a>：runtime 与 verification 共用的 graph-based root 选择。</li>
+        <li><a href="../../tests/runtime_bridge_us006.rs">tests/runtime_bridge_us006.rs</a>：并发、轴动作、底层端口映射和 bridge 兜底回归。</li>
+        <li><a href="../../.github/workflows/rp2040_regression.yml">.github/workflows/rp2040_regression.yml</a>：RustSec、npm audit、前端构建及全 target workspace 测试门禁。</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>依赖与持续集成</h2>
+      <p>Rust 依赖门禁拒绝已知漏洞、unsound 和 yanked crate。npm 门禁使用官方 registry，并在干净安装后执行生产构建。</p>
+      <ul>
+        <li><code>serde_yaml 0.9</code> 已全部迁移到维护中的 <code>serde_yaml_ng 0.10</code>。</li>
+        <li><code>tungstenite 0.24</code> 的直接使用已升级到 <code>0.30</code>；Web 服务升级到 <code>axum 0.8</code>。</li>
+        <li>npm 官方审计覆盖 390 个依赖，结果为 0 个已知漏洞。</li>
+        <li>CI 的 workspace 测试口径已提升为 <code>cargo test --workspace --all-targets</code>。</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>残余风险与下一步</h2>
+      <div class="risk-list">
+        <div class="risk-item">
+          <div class="risk-title"><span class="status done">P1 已收敛</span><h3>Web server 已完成第一轮职责拆分</h3></div>
+          <p><code>main.rs</code> 从约 5377 行降到约 3102 行；安全配置、artifact 存储、run service、协作通道和 45 项测试已进入独立模块。剩余 HTTP handler 聚合属于后续低风险整理。</p>
+        </div>
+        <div class="risk-item">
+          <div class="risk-title"><span class="status done">P2 已收敛</span><h3>CLI utilities 已恢复命令域边界</h3></div>
+          <p><code>utilities.rs</code> 从约 3718 行降到约 1615 行；文档/示例索引与 KEYENCE 生成器已分别进入子模块，CLI 行为保持不变。</p>
+        </div>
+        <div class="risk-item">
+          <div class="risk-title"><span class="status done">P2 已收敛</span><h3>前端 lint 门禁已闭合</h3></div>
+          <p><code>npm run lint</code> 当前为 0 个错误和 0 个警告；显式类型、hooks 生命周期和 Fast Refresh 导出边界已完成清理。</p>
+        </div>
+        <div class="risk-item">
+          <div class="risk-title"><span class="status track">P2 跟踪</span><h3>嵌入式工具链保留 4 个停止维护警告</h3></div>
+          <p>升级 <code>defmt</code>、<code>defmt-rtt</code> 与 <code>panic-probe</code> 后，旧 <code>proc-macro-error2</code> 链已移除；剩余 <code>bare-metal</code>、<code>paste</code> 与 <code>proc-macro-error</code> 来自当前 Cortex-M、STM32 HAL 与 PIO 上游，扫描未发现漏洞或 unsound。</p>
+        </div>
+        <div class="risk-item">
+          <div class="risk-title"><span class="status done">P3 已收敛</span><h3>Monaco 编辑器依赖图已缩小</h3></div>
+          <p>编辑器改为最小 editor API 与单一通用 worker，专属 chunk 从约 4.46 MB 降到约 2.66 MB，并继续保持路由级懒加载；RustPLC markers、completion、hover、definition 与 reference 能力保持不变。</p>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>验证标准</h2>
+      <div class="command-list">
+        <div class="command"><code>cargo fmt --all</code><span class="status done">PASS</span></div>
+        <div class="command"><code>cargo check --workspace --all-targets</code><span class="status done">PASS</span></div>
+        <div class="command"><code>cargo test --workspace --all-targets</code><span class="status done">PASS</span></div>
+        <div class="command"><code>git diff --check</code><span class="status done">PASS</span></div>
+        <div class="command"><code>cargo audit --no-fetch --stale --deny unsound --deny yanked</code><span class="status done">PASS</span></div>
+        <div class="command"><code>npm audit --registry=https://registry.npmjs.org</code><span class="status done">0 vulnerabilities</span></div>
+        <div class="command"><code>npm run build</code><span class="status done">PASS</span></div>
+        <div class="command"><code>npm run lint</code><span class="status done">0 errors / 0 warnings</span></div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    RustPLC security and architecture audit summary. Generated from verified workspace results on 2026-07-23.
+  </footer>
+</body>
+</html>

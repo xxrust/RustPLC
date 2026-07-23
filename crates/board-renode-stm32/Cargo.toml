@@ -18,7 +18,7 @@ nb = "1"
 [build-dependencies]
 toml = "0.8"
 serde = { version = "1", features = ["derive"] }
-serde_yaml = "0.9"
+serde_yaml = { package = "serde_yaml_ng", version = "0.10" }
 
 [package.metadata.rust-analyzer]
 rustc_private = false

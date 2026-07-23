@@ -1524,8 +1524,9 @@ fn z3_sanity_probe() {
     // can run in toolchains without system cmake/libz3 while still supporting Z3 runs.
     let mut cfg = Config::new();
     cfg.set_model_generation(false);
-    let ctx = Context::new(&cfg);
-    let solver = Solver::new(&ctx);
-    solver.assert(&Bool::from_bool(&ctx, true));
-    let _ = solver.check() == SatResult::Sat;
+    z3::with_z3_config(&cfg, || {
+        let solver = Solver::new();
+        solver.assert(&Bool::from_bool(true));
+        let _ = solver.check() == SatResult::Sat;
+    });
 }

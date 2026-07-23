@@ -540,7 +540,7 @@ task main:
 "#;
 
         let program = parse_plc(input).expect("变量示例应能解析");
-        let topology = build_topology_graph(&program).expect("变量示例应能构建拓扑");
+        let topology = build_topology_from_ast(&program.topology).expect("变量示例应能构建拓扑");
 
         assert_eq!(topology.variables.len(), 3);
         assert_eq!(topology.variables[0].name, "master_pos");
@@ -800,6 +800,32 @@ task main:
     }
 
     #[test]
+    fn rejects_cam_points_outside_f32_range() {
+        let input = r#"
+[topology]
+cam_table huge: oneshot [
+    (0, 0),
+    (400000000000000000000000000000000000000, 1),
+]
+
+[constraints]
+
+[tasks]
+task main:
+    step idle:
+"#;
+
+        let program = parse_plc(input).expect("large finite f64 literal should parse");
+        let errors = build_topology_graph(&program).expect_err("cam IR requires finite f32 values");
+        let rendered = errors
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(rendered.contains("f32") || rendered.contains("range"), "{rendered}");
+    }
+
+    #[test]
     fn rejects_raw_motor_drive_write_when_process_device_exists() {
         let input = r#"
 [topology]
@@ -844,7 +870,8 @@ task main:
 "#;
 
         let program = parse_plc(input).expect("source should parse");
-        let errors = build_state_machine(&program).expect_err("coil conflict fails");
+        let errors = build_state_machine_allow_raw_io_for_test(&program)
+            .expect_err("coil conflict fails");
         let joined = errors
             .iter()
             .map(|err| err.to_string())
@@ -871,7 +898,7 @@ task main:
 "#;
 
         let program = parse_plc(input).expect("示例语法应可解析");
-        let errors = build_topology_graph(&program).expect_err("错误变量初值应被拒绝");
+        let errors = build_topology_from_ast(&program.topology).expect_err("错误变量初值应被拒绝");
         let joined = errors
             .iter()
             .map(|err| err.to_string())
@@ -899,7 +926,7 @@ task main:
 "#;
 
         let program = parse_plc(input).expect("示例语法应可解析");
-        let errors = build_topology_graph(&program).expect_err("变量与设备重名应报错");
+        let errors = build_topology_from_ast(&program.topology).expect_err("变量与设备重名应报错");
         let joined = errors
             .iter()
             .map(|err| err.to_string())

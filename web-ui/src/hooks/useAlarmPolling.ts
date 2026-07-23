@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { alarmApi } from '../services/api';
-import type { AlarmEvent } from './useAlarmWebSocket';
+import type { AlarmEvent } from '../types';
 
 export const useAlarmPolling = (enabled: boolean) => {
   const [alarms, setAlarms] = useState<AlarmEvent[]>([]);
@@ -11,7 +11,7 @@ export const useAlarmPolling = (enabled: boolean) => {
     const fetchAlarms = async () => {
       try {
         const response = await alarmApi.getAlarms({ limit: 20 });
-        setAlarms(response.data as AlarmEvent[]);
+        setAlarms(response.data);
       } catch (error) {
         console.error('Failed to fetch alarms:', error);
       }

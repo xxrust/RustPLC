@@ -1,8 +1,10 @@
 ﻿#[cfg(test)]
 mod tests {
     use super::{
-        build_constraint_set, build_state_machine, build_timing_model, build_topology_graph,
-        preprocess_program, preprocess_program_with_library, validate_source_topology_semantics,
+        build_constraint_set, build_state_machine, build_state_machine_allow_raw_io_for_test,
+        build_state_machine_from_ast, build_timing_model, build_topology_from_ast,
+        build_topology_graph, preprocess_program, preprocess_program_with_library,
+        validate_source_topology_semantics,
     };
     use crate::device_library::DeviceLibrary;
     use crate::ir::{

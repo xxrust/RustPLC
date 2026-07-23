@@ -151,7 +151,7 @@ pub struct AxisFaultPolicy<'a> {
     pub auto_reset_policy: AxisAutoResetPolicy,
     pub manual_ack_required: bool,
     pub propagation_scope: AxisFaultPropagationScope,
-    pub propagation_targets: &'a [&'static str],
+    pub propagation_targets: &'a [&'a str],
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

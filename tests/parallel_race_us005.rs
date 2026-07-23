@@ -1,12 +1,12 @@
 use io_traits::{DigitalInputId, DigitalOutputId, Tick};
 use runtime_core::Runtime;
 use rust_plc::parser::parse_plc;
-use rust_plc::runtime_bridge::state_machine_to_runtime_program;
+use rust_plc::runtime_bridge::{CompiledRuntimeProgram, state_machine_to_runtime_program};
 use rust_plc::semantic::{
     build_constraint_set, build_state_machine, build_topology_graph, preprocess_program,
 };
 
-fn compile_to_runtime(plc_source: &str, tick_ms: u64) -> runtime_core::Program<'static> {
+fn compile_to_runtime(plc_source: &str, tick_ms: u64) -> CompiledRuntimeProgram {
     let program = parse_plc(plc_source).expect("parse plc");
     let expanded = preprocess_program(&program).expect("preprocess");
     let topology = build_topology_graph(&expanded).expect("topology");
@@ -143,8 +143,9 @@ task done:
     step halt:
 "#;
 
-    let program = compile_to_runtime(plc, 10);
-    let mut rt = Runtime::new(&program).expect("runtime init");
+    let compiled_program = compile_to_runtime(plc, 10);
+    let program = compiled_program.program();
+    let mut rt = Runtime::new(program).expect("runtime init");
     let mut io = sim::SimIo::new(0, 2, 0, 0);
 
     rt.tick(&mut io).expect("tick");
@@ -207,8 +208,9 @@ task winner_b:
     step hold:
 "#;
 
-    let program = compile_to_runtime(plc, 10);
-    let mut rt = Runtime::new(&program).expect("runtime init");
+    let compiled_program = compile_to_runtime(plc, 10);
+    let program = compiled_program.program();
+    let mut rt = Runtime::new(program).expect("runtime init");
     let mut io = sim::SimIo::new(2, 0, 0, 0);
     io.schedule_digital_input(Tick(0), DigitalInputId(0), true);
     io.schedule_digital_input(Tick(0), DigitalInputId(1), true);
@@ -256,8 +258,9 @@ task done:
     step halt:
 "#;
 
-    let program = compile_to_runtime(plc, 10);
-    let mut rt = Runtime::new(&program).expect("runtime init");
+    let compiled_program = compile_to_runtime(plc, 10);
+    let program = compiled_program.program();
+    let mut rt = Runtime::new(program).expect("runtime init");
     let mut io = sim::SimIo::new(2, 0, 0, 0);
     io.schedule_digital_input(Tick(0), DigitalInputId(0), true);
     io.schedule_digital_input(Tick(1), DigitalInputId(1), true);

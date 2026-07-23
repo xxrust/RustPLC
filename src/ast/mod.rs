@@ -12,6 +12,12 @@ pub struct PlcProgram {
 pub struct TopologySection {
     pub devices: Vec<DeviceDeclaration>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub device_templates: Vec<DeviceTemplateDeclaration>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub device_instances: Vec<DeviceInstanceDeclaration>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub controller_inventory: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub controller_io: Vec<ControllerIoDeclaration>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub stations: Vec<StationDeclaration>,
@@ -19,6 +25,8 @@ pub struct TopologySection {
     pub handshakes: Vec<HandshakeDeclaration>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub transfer_points: Vec<TransferPointDeclaration>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub controller_syncs: Vec<ControllerSyncDeclaration>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub workpiece_types: Vec<WorkpieceTypeDeclaration>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -70,6 +78,43 @@ pub enum ControllerIoDirection {
     Output,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeviceTemplateDeclaration {
+    #[serde(default)]
+    pub line: usize,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub params: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub devices: Vec<TemplateDeviceDeclaration>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TemplateDeviceDeclaration {
+    #[serde(default)]
+    pub line: usize,
+    pub local_name: String,
+    pub device_type: TemplateDeviceType,
+    pub attributes: DeviceAttributes,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", content = "value", rename_all = "snake_case")]
+pub enum TemplateDeviceType {
+    Concrete(DeviceType),
+    Parameter(String),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeviceInstanceDeclaration {
+    #[serde(default)]
+    pub line: usize,
+    pub name: String,
+    pub template: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub type_args: Vec<DeviceType>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct StationDeclaration {
     #[serde(default)]
@@ -103,6 +148,17 @@ pub struct TransferPointDeclaration {
     pub to_station: String,
     pub site: String,
     pub handshake: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ControllerSyncDeclaration {
+    #[serde(default)]
+    pub line: usize,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub controllers: Vec<String>,
+    pub max_skew: DurationValue,
+    pub heartbeat: DurationValue,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -616,7 +672,32 @@ pub struct CausalityConstraint {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct TasksSection {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub task_templates: Vec<TaskTemplateDeclaration>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub task_instances: Vec<TaskInstanceDeclaration>,
     pub tasks: Vec<TaskDeclaration>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TaskTemplateDeclaration {
+    #[serde(default)]
+    pub line: usize,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub params: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tasks: Vec<TaskDeclaration>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TaskInstanceDeclaration {
+    #[serde(default)]
+    pub line: usize,
+    pub name: String,
+    pub template: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub args: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1065,10 +1146,14 @@ mod tests {
                     device_type: DeviceType::DigitalOutput,
                     attributes: DeviceAttributes::default(),
                 }],
+                device_templates: Vec::new(),
+                device_instances: Vec::new(),
+                controller_inventory: Vec::new(),
                 controller_io: Vec::new(),
                 stations: Vec::new(),
                 handshakes: Vec::new(),
                 transfer_points: Vec::new(),
+                controller_syncs: Vec::new(),
                 workpiece_types: Vec::new(),
                 workpiece_sites: Vec::new(),
                 workpiece_holders: Vec::new(),
@@ -1105,6 +1190,8 @@ mod tests {
             },
             constraints: ConstraintsSection::default(),
             tasks: TasksSection {
+                task_templates: Vec::new(),
+                task_instances: Vec::new(),
                 tasks: vec![TaskDeclaration {
                     line: 6,
                     name: "main".to_string(),

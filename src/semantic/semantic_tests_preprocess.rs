@@ -780,3 +780,121 @@ task main:
         "应提示 PLC 端点必须显式指定端口"
     );
 }
+
+#[test]
+fn preprocess_expands_generic_task_template_instances() {
+    let input = r#"
+[topology]
+device clamp: cylinder
+
+[constraints]
+
+[tasks]
+task_template cycle<ACT>:
+    task run:
+        step start:
+            action: extend ACT
+            timeout: 100ms -> goto fault
+            goto done
+        step done:
+        step fault:
+    on_complete: unreachable
+task_instance clamp_cycle: cycle<clamp>
+"#;
+
+    let program = parse_plc(input).expect("parse");
+    let expanded = preprocess_program(&program).expect("task template should expand");
+    let task = expanded
+        .tasks
+        .tasks
+        .iter()
+        .find(|task| task.name == "clamp_cycle_run")
+        .expect("expanded task");
+    assert_eq!(task.steps[0].name, "clamp_cycle_start");
+    match &task.steps[0].statements[0] {
+        crate::ast::StepStatement::Action(crate::ast::ActionStatement::Extend { target, timeout, .. }) => {
+            assert_eq!(target.device, "clamp");
+            let timeout = timeout.as_ref().expect("timeout");
+            assert_eq!(timeout.target.task, "clamp_cycle_run");
+            assert_eq!(timeout.target.step.as_deref(), Some("clamp_cycle_fault"));
+        }
+        other => panic!("expected extend action, got {other:?}"),
+    }
+}
+
+#[test]
+fn preprocess_rejects_invalid_generic_task_template_instances() {
+    let input = r#"
+[topology]
+device clamp: cylinder
+
+[constraints]
+
+[tasks]
+task_template cycle<ACT, ACT>:
+    task run:
+        step start:
+            action: extend ACT
+task_instance missing_template: missing<clamp>
+task_instance bad_arity: cycle<clamp>
+"#;
+
+    let program = parse_plc(input).expect("parse");
+    let errors = preprocess_program(&program).expect_err("invalid task template should fail");
+    let rendered = errors.iter().map(|error| format!("{error}")).collect::<Vec<_>>().join("\n");
+    assert!(rendered.contains("[TTPL-001]"), "{rendered}");
+    assert!(rendered.contains("[TTPL-003]"), "{rendered}");
+    assert!(rendered.contains("[TTPL-004]"), "{rendered}");
+}
+#[test]
+fn preprocess_expands_generic_device_template_instances() {
+    let input = r#"
+[topology]
+device_template single<T> {
+    device main: T { purpose: "templated actuator" }
+}
+device_instance clamp: single<solenoid_valve>
+
+[constraints]
+
+[tasks]
+task main:
+    step idle:
+"#;
+
+    let program = parse_plc(input).expect("parse");
+    let expanded = preprocess_program(&program).expect("device template should expand");
+    assert!(expanded.topology.device_templates.is_empty());
+    assert!(expanded.topology.device_instances.is_empty());
+    let device = expanded
+        .topology
+        .devices
+        .iter()
+        .find(|device| device.name == "clamp_main")
+        .expect("expanded device");
+    assert!(matches!(device.device_type, crate::ast::DeviceType::SolenoidValve));
+}
+
+#[test]
+fn state_machine_rejects_raw_controller_io_without_model_ref_gate() {
+    let input = r#"
+[topology]
+device plc_main: plc
+
+[constraints]
+
+[tasks]
+task main:
+    step write_raw:
+        action: set plc_main.Y0 on
+"#;
+
+    let program = parse_plc(input).expect("source should parse");
+    let errors = build_state_machine(&program).expect_err("raw IO must not depend on model_ref");
+    let rendered = errors
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(rendered.contains("SEM-110"), "{rendered}");
+}

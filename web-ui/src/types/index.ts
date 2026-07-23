@@ -44,6 +44,7 @@ export interface AlarmEvent {
   evidence_ref: string;
   evidence_source: EvidenceSource;
   scenario_or_recipe_id: string;
+  acknowledged?: boolean;
 }
 
 export interface VerificationSummary {
@@ -51,6 +52,111 @@ export interface VerificationSummary {
   liveness: { status: 'pass' | 'fail'; details: string };
   timing: { status: 'pass' | 'fail'; details: string };
   causality: { status: 'pass' | 'fail'; details: string };
+}
+
+export type PlcDiagnosticSeverity = 'error' | 'warning' | 'info';
+
+export interface PlcDiagnosticIssue {
+  severity: PlcDiagnosticSeverity;
+  stage: string;
+  message: string;
+  line: number;
+  column: number;
+  code?: string;
+  suggestion?: string;
+}
+
+export interface PlcDiagnosticsSummary {
+  topology_devices: number;
+  tasks: number;
+  states: number;
+  transitions: number;
+  constraints: number;
+  verification_warnings: number;
+}
+
+export interface PlcDiagnosticsResponse {
+  valid: boolean;
+  stage: string;
+  errors: string[];
+  issues: PlcDiagnosticIssue[];
+  summary: PlcDiagnosticsSummary;
+}
+
+export type PlcSymbolKind = 'device' | 'task' | 'step' | 'variable' | 'resource' | 'workpiece';
+
+export interface PlcLanguageSymbol {
+  name: string;
+  qualified_name: string;
+  kind: PlcSymbolKind;
+  line: number;
+  detail: string;
+  documentation: string;
+}
+
+export interface PlcLanguageCompletion {
+  label: string;
+  kind: string;
+  detail?: string;
+  documentation?: string;
+  insert_text?: string;
+  snippet: boolean;
+}
+
+export interface PlcLanguageSnapshot {
+  symbols: PlcLanguageSymbol[];
+  completions: PlcLanguageCompletion[];
+}
+
+export interface PlcRealtimeAnalysisResponse {
+  request_id?: number;
+  diagnostics: PlcDiagnosticsResponse;
+  language: PlcLanguageSnapshot;
+}
+
+export interface DslCapabilityEntry {
+  id: string;
+  status: string;
+  layer: string;
+  summary: string;
+  evidence: string[];
+}
+
+export interface DslTemplateAsset {
+  id: string;
+  status: string;
+  summary: string;
+  paths: string[];
+}
+
+export interface DslUnsupportedFeature {
+  id: string;
+  status: string;
+  reason: string;
+  required_contract: string;
+}
+
+export interface DslCapabilitiesReport {
+  schema_version: number;
+  command: string;
+  output: string;
+  parser_contract: string;
+  supported_features: DslCapabilityEntry[];
+  template_assets: DslTemplateAsset[];
+  unsupported_features: DslUnsupportedFeature[];
+}
+
+export interface CollabEvent {
+  room: string;
+  kind: 'hello' | 'edit' | 'cursor' | 'comment' | 'error' | string;
+  client_id: string;
+  user_name?: string;
+  content?: string;
+  revision?: number;
+  cursor_line?: number;
+  cursor_column?: number;
+  comment?: string;
+  at_ms: number;
 }
 
 export interface RunStatus {
@@ -378,7 +484,7 @@ export interface TickSnapshot {
   analog_inputs: number[];
   digital_outputs: boolean[];
   analog_outputs: number[];
-  component_states?: Record<string, any>;
+  component_states?: Record<string, unknown>;
 }
 
 export interface TraceData {
@@ -436,11 +542,17 @@ export interface FlowchartTaskDiagram {
 export interface FlowchartTopologySummary {
   device_count: number;
   link_count: number;
+  station_count: number;
+  handshake_count: number;
+  transfer_point_count: number;
   devices?: string[];
   variables: string[];
   workpiece_sites: string[];
   workpiece_holders: string[];
   workpiece_types: string[];
+  stations: string[];
+  handshakes: string[];
+  transfer_points: string[];
   links: string[];
 }
 
@@ -451,6 +563,33 @@ export interface FlowchartArtifact {
   system_contract?: FlowchartSystemContractSummary | null;
   tasks: FlowchartTaskDiagram[];
   topology: FlowchartTopologySummary;
+}
+
+export interface FlowchartEditorStep {
+  id: string;
+  label?: string;
+  action?: string;
+  delay_ms?: number;
+}
+
+export interface FlowchartEditorTransition {
+  from: string;
+  to: string;
+  guard?: string;
+}
+
+export interface FlowchartGeneratePlcRequest {
+  project_id?: string | null;
+  task_name: string;
+  steps: FlowchartEditorStep[];
+  transitions: FlowchartEditorTransition[];
+}
+
+export interface FlowchartGeneratePlcResponse {
+  source: string;
+  valid: boolean;
+  diagnostics: PlcDiagnosticsResponse;
+  normalized_task_name: string;
 }
 
 export interface TimingReport {

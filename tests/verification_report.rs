@@ -177,6 +177,93 @@ task done:
 "#
 }
 
+fn multi_controller_without_station_protocol_source() -> &'static str {
+    r#"
+[topology]
+device plc_load: plc {
+    purpose: "load station controller"
+    model_ref: openplc_softplc
+}
+device plc_press: plc {
+    purpose: "press station controller"
+    model_ref: openplc_softplc
+}
+device load_lamp: solenoid_valve {
+    purpose: "load station output"
+    response_time: 20ms
+}
+device press_lamp: solenoid_valve {
+    purpose: "press station output"
+    response_time: 20ms
+}
+relation { from: plc_load.Y0, to: load_lamp.coil, via: driven_by }
+relation { from: plc_press.Y0, to: press_lamp.coil, via: driven_by }
+
+[constraints]
+
+[tasks]
+task main:
+    step idle:
+        action: set load_lamp on
+"#
+}
+
+fn station_protocol_contract_source() -> &'static str {
+    r#"
+[topology]
+device plc_load: plc {
+    purpose: "load station controller"
+    model_ref: openplc_softplc
+}
+device plc_press: plc {
+    purpose: "press station controller"
+    model_ref: openplc_softplc
+}
+device load_fixture: cylinder {
+    purpose: "load station fixture"
+}
+device press_fixture: cylinder {
+    purpose: "press station fixture"
+}
+workpiece part: workpiece_type {
+    ingress_sites: [handoff]
+}
+site handoff: workpiece_location { capacity: 1 }
+
+station load_station { owns: [load_fixture], tasks: [load_cycle] }
+station press_station { owns: [press_fixture], tasks: [press_cycle] }
+handshake load_to_press_ready {
+    from: load_station,
+    to: press_station,
+    request: load_request,
+    allow: press_allow,
+    complete: load_complete,
+    timeout: 500ms -> goto fault.timeout
+}
+transfer_point load_to_press {
+    from_station: load_station,
+    to_station: press_station,
+    site: handoff,
+    handshake: load_to_press_ready
+}
+controller_sync load_press_sync {
+    controllers: [plc_load, plc_press],
+    max_skew: 5ms,
+    heartbeat: 100ms
+}
+
+[constraints]
+
+[tasks]
+task load_cycle:
+    step idle:
+task press_cycle:
+    step idle:
+task fault:
+    step timeout:
+"#
+}
+
 #[test]
 fn cli_writes_structured_verification_report_with_counts() {
     let base = temp_dir("rust_plc_verification_report_ok");
@@ -213,9 +300,79 @@ fn cli_writes_structured_verification_report_with_counts() {
     assert!(report["verification"]["liveness"]["warnings"].is_array());
     assert!(report["verification"]["timing"]["warnings"].is_array());
     assert!(report["verification"]["causality"]["warnings"].is_array());
+    assert!(report["verification"]["station_protocol"]["warnings"].is_array());
     assert!(report["verification"]["liveness"]["checked_rules"].is_number());
     assert!(report["verification"]["timing"]["checked_rules"].is_number());
     assert!(report["verification"]["causality"]["checked_rules"].is_number());
+    assert!(report["verification"]["station_protocol"]["checked_rules"].is_number());
+}
+
+#[test]
+fn station_protocol_checker_warns_on_multi_controller_without_contract() {
+    let base = temp_dir("rust_plc_verification_report_station_protocol_warn");
+    let plc_path = write_plc(
+        &base,
+        "multi_controller.plc",
+        multi_controller_without_station_protocol_source(),
+    );
+    let report_path = base.join("station_protocol_report.json");
+
+    let output = run_compile_report(&plc_path, &report_path, &[]);
+    assert!(
+        output.status.success(),
+        "multi-controller source should compile with station protocol warning, stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let report = read_report(&report_path);
+    let station_protocol = &report["verification"]["station_protocol"];
+    assert_eq!(station_protocol["checked_rules"], 0);
+    let warnings = station_protocol["warnings"]
+        .as_array()
+        .expect("station protocol warnings should be an array");
+    assert!(
+        warnings.iter().any(|warning| warning["code"] == "STP-001"
+            && warning["message"]
+                .as_str()
+                .is_some_and(|message| message.contains("2 PLC controllers"))),
+        "expected STP-001 warning in station protocol summary, got: {warnings:?}"
+    );
+    assert!(
+        warnings.iter().any(|warning| warning["code"] == "STP-002"
+            && warning["message"]
+                .as_str()
+                .is_some_and(|message| message.contains("controller_sync"))),
+        "expected STP-002 warning in station protocol summary, got: {warnings:?}"
+    );
+}
+
+#[test]
+fn station_protocol_checker_counts_explicit_contract() {
+    let base = temp_dir("rust_plc_verification_report_station_protocol_ok");
+    let plc_path = write_plc(
+        &base,
+        "station_protocol.plc",
+        station_protocol_contract_source(),
+    );
+    let report_path = base.join("station_protocol_report.json");
+
+    let output = run_compile_report(&plc_path, &report_path, &[]);
+    assert!(
+        output.status.success(),
+        "station protocol source should compile, stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let report = read_report(&report_path);
+    let station_protocol = &report["verification"]["station_protocol"];
+    assert_eq!(station_protocol["checked_rules"], 5);
+    assert!(
+        station_protocol["warnings"]
+            .as_array()
+            .expect("station protocol warnings should be an array")
+            .is_empty(),
+        "explicit station protocol should not emit warnings: {station_protocol:?}"
+    );
 }
 
 #[test]

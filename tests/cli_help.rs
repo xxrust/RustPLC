@@ -132,6 +132,7 @@ fn compile_mode_help_short_circuits_before_touching_input_path() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("<source.plc|source.bundle.toml>"));
     assert!(stderr.contains("Core options:"));
+    assert!(stderr.contains("--cache-dir <dir>"));
     assert!(stderr.contains("Examples:"));
     assert!(!stderr.contains("Failed to read"));
     assert!(!stderr.contains("Expected a .plc or .bundle.toml path"));

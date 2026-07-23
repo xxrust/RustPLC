@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import axios from 'axios';
 import { useTranslation } from 'react-i18next';
 import { useAppStore } from '../stores/appStore';
 import { useTopologyStore } from '../stores/topologyStore';
@@ -10,7 +11,7 @@ import { toComponentTopology } from '../utils/topologySerialization';
 interface Tab {
   id: string;
   label: string;
-  view: 'topology' | 'flowchart' | 'replay' | 'scenario' | 'run' | 'diagnosis' | 'audit';
+  view: 'plc' | 'topology' | 'flowchart' | 'replay' | 'scenario' | 'run' | 'diagnosis' | 'audit';
   dirty?: boolean;
 }
 
@@ -33,6 +34,12 @@ function localizeUserName(name: string | undefined, t: (key: string) => string):
   return name || '';
 }
 
+interface ValidationError {
+  code: string;
+  path: string;
+  message: string;
+}
+
 function localizeUserRole(role: string | undefined, t: (key: string) => string): string {
   const map: Record<string, string> = {
     operator: 'user.roleOperator',
@@ -49,7 +56,7 @@ const TopBar: React.FC<TopBarProps> = ({ tabs, activeTabId, onTabClick, onTabClo
   const { nodes, edges, setHasUnsavedChanges } = useTopologyStore();
   const [showNewTab, setShowNewTab] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [validationErrors, setValidationErrors] = useState<any[]>([]);
+  const [validationErrors, setValidationErrors] = useState<ValidationError[]>([]);
 
   const totalAlarms = alarmCount.critical + alarmCount.warning;
 
@@ -87,15 +94,19 @@ const TopBar: React.FC<TopBarProps> = ({ tabs, activeTabId, onTabClick, onTabClo
       await topologyApi.saveTopology(currentProject, topology);
       setHasUnsavedChanges(false);
       alert(t('notifications.saveSuccess'));
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Failed to save topology:', error);
-      alert(error.response?.data?.message || t('notifications.saveFailed'));
+      const message = axios.isAxiosError<{ message?: string }>(error)
+        ? error.response?.data?.message
+        : undefined;
+      alert(message || t('notifications.saveFailed'));
     } finally {
       setSaving(false);
     }
   };
 
   const NEW_TAB_OPTIONS: Array<{ view: Tab['view']; label: string }> = [
+    { view: 'plc', label: t('tabs.plc') },
     { view: 'topology', label: t('tabs.topology') },
     { view: 'flowchart', label: t('tabs.flowchart') },
     { view: 'replay', label: t('tabs.replay') },

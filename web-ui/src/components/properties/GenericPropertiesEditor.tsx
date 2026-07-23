@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import type { NodeData } from '../../stores/topologyStore';
 
 interface GenericPropertiesEditorProps {
   nodeId: string;
-  data: any;
-  onUpdate: (nodeId: string, data: Partial<any>) => void;
+  data: NodeData;
+  onUpdate: (nodeId: string, data: Partial<NodeData>) => void;
 }
 
 const GenericPropertiesEditor: React.FC<GenericPropertiesEditorProps> = ({
@@ -13,11 +14,11 @@ const GenericPropertiesEditor: React.FC<GenericPropertiesEditorProps> = ({
   onUpdate,
 }) => {
   const { t } = useTranslation();
-  const [formData, setFormData] = useState<any>(data);
+  const [formData, setFormData] = useState<Partial<NodeData>>({ ...data });
   const [jsonError, setJsonError] = useState<string>('');
   const [isDirty, setIsDirty] = useState(false);
 
-  const handleFieldChange = (key: string, value: any) => {
+  const handleFieldChange = (key: string, value: unknown) => {
     setFormData({ ...formData, [key]: value });
     setIsDirty(true);
   };
@@ -36,23 +37,18 @@ const GenericPropertiesEditor: React.FC<GenericPropertiesEditorProps> = ({
   };
 
   const handleSave = () => {
-    try {
-      // Basic validation - ensure label exists
-      if (!formData.label || formData.label.trim() === '') {
-        setJsonError('Label is required');
-        return;
-      }
-
-      onUpdate(nodeId, formData);
-      setIsDirty(false);
-      setJsonError('');
-    } catch (error) {
-      setJsonError('Invalid data format');
+    if (!formData.label || formData.label.trim() === '') {
+      setJsonError('Label is required');
+      return;
     }
+
+    onUpdate(nodeId, formData);
+    setIsDirty(false);
+    setJsonError('');
   };
 
   const handleRevert = () => {
-    setFormData(data);
+    setFormData({ ...data });
     setIsDirty(false);
     setJsonError('');
   };

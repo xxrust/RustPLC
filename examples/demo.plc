@@ -66,5 +66,5 @@ task cycle:
 
 task fault:
     step safe_stop:
-        action: set valve_a.coil off
+        action: set valve_a off
     on_complete: goto ready

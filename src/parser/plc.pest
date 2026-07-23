@@ -139,6 +139,17 @@ attribute = { attribute_name ~ ":" ~ attribute_value }
 attribute_block = { "{" ~ attribute ~ ((","? ~ attribute))* ~ ","? ~ "}" }
 
 device_declaration = { "device" ~ identifier ~ ":" ~ device_type ~ attribute_block? }
+template_param_list = { "<" ~ identifier ~ ("," ~ identifier)* ~ ","? ~ ">" }
+template_type_arg_list = { "<" ~ device_type ~ ("," ~ device_type)* ~ ","? ~ ">" }
+template_identifier_arg_list = { "<" ~ identifier ~ ("," ~ identifier)* ~ ","? ~ ">" }
+template_device_type = { device_type | identifier }
+template_device_declaration = { "device" ~ identifier ~ ":" ~ template_device_type ~ attribute_block? }
+device_template_declaration = {
+    "device_template" ~ identifier ~ template_param_list ~ "{" ~ template_device_declaration* ~ "}"
+}
+device_instance_declaration = {
+    "device_instance" ~ identifier ~ ":" ~ identifier ~ template_type_arg_list
+}
 station_field_name = { "owns" | "tasks" }
 station_field = { station_field_name ~ ":" ~ identifier_list }
 station_block = { "{" ~ station_field ~ ((","? ~ station_field))* ~ ","? ~ "}" }
@@ -190,6 +201,13 @@ transfer_point_field_name = { "from_station" | "to_station" | "site" | "handshak
 transfer_point_field = { transfer_point_field_name ~ ":" ~ identifier }
 transfer_point_block = { "{" ~ transfer_point_field ~ ((","? ~ transfer_point_field))* ~ ","? ~ "}" }
 transfer_point_declaration = { "transfer_point" ~ identifier ~ transfer_point_block }
+controller_sync_field = {
+    "controllers" ~ ":" ~ identifier_list
+    | "max_skew" ~ ":" ~ duration_value
+    | "heartbeat" ~ ":" ~ duration_value
+}
+controller_sync_block = { "{" ~ controller_sync_field ~ ((","? ~ controller_sync_field))* ~ ","? ~ "}" }
+controller_sync_declaration = { "controller_sync" ~ identifier ~ controller_sync_block }
 cam_table_mode = { "periodic" | "oneshot" }
 cam_point = { "(" ~ number ~ "," ~ number ~ ")" }
 cam_point_list = { "[" ~ cam_point ~ ("," ~ cam_point)* ~ ","? ~ "]" }
@@ -215,10 +233,13 @@ relation_field = { relation_field_name ~ ":" ~ relation_field_value }
 relation_declaration = { "relation" ~ "{" ~ relation_field ~ ((","? ~ relation_field))* ~ ","? ~ "}" }
 topology_entry = _{
     device_declaration
+    | device_template_declaration
+    | device_instance_declaration
     | controller_io_declaration
     | station_declaration
     | handshake_declaration
     | transfer_point_declaration
+    | controller_sync_declaration
     | workpiece_type_declaration
     | workpiece_site_declaration
     | workpiece_holder_declaration
@@ -528,6 +549,10 @@ axis_move_statement = {
 repeat_block = { "repeat" ~ integer ~ ":" ~ step_statement+ }
 
 if_else_statement = { "if" ~ ":" ~ simple_condition ~ goto_statement ~ "else" ~ ":" ~ goto_statement }
+match_pattern = { boolean_value | number | string_literal | identifier }
+match_case = { "case" ~ match_pattern ~ "->" ~ goto_statement }
+match_default = { "default" ~ "->" ~ goto_statement }
+match_statement = { "match" ~ condition_operand ~ ":" ~ match_case+ ~ match_default }
 
 parallel_branch_statement = {
     axis_move_statement
@@ -540,6 +565,7 @@ parallel_branch_statement = {
     | allow_indefinite_wait_statement
     | goto_statement
     | if_else_statement
+    | match_statement
     | repeat_block
 }
 parallel_branch = { !("on_complete" ~ ":") ~ identifier ~ ":" ~ parallel_branch_statement+ }
@@ -556,6 +582,7 @@ race_branch_statement = {
     | allow_indefinite_wait_statement
     | goto_statement
     | if_else_statement
+    | match_statement
     | repeat_block
 }
 race_branch = { !("on_complete" ~ ":") ~ identifier ~ ":" ~ race_branch_statement+ ~ then_goto_statement }
@@ -571,6 +598,7 @@ step_statement = {
     | timeout_statement
     | goto_statement
     | if_else_statement
+    | match_statement
     | parallel_statement
     | race_statement
     | allow_indefinite_wait_statement
@@ -580,8 +608,15 @@ step_declaration = { "step" ~ identifier ~ ":" ~ step_statement* }
 
 on_complete_statement = { "on_complete" ~ ":" ~ (goto_statement | "unreachable") }
 task_declaration = { "task" ~ identifier ~ ":" ~ step_declaration* ~ on_complete_statement? }
+task_template_declaration = {
+    "task_template" ~ identifier ~ template_param_list ~ ":" ~ task_declaration+
+}
+task_instance_declaration = {
+    "task_instance" ~ identifier ~ ":" ~ identifier ~ template_identifier_arg_list
+}
 
-tasks_section = { section_tasks ~ task_declaration* }
+tasks_entry = _{ task_template_declaration | task_instance_declaration | task_declaration }
+tasks_section = { section_tasks ~ tasks_entry* }
 tasks_file = { SOI ~ tasks_section ~ EOI }
 
 plc_file = { SOI ~ topology_section ~ constraints_section ~ tasks_section ~ EOI }

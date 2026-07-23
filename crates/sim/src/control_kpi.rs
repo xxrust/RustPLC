@@ -6,14 +6,14 @@ use runtime_core::{Program, Runtime, RuntimeError};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum ControlKpiError {
+pub enum ControlKpiError<'a> {
     Parse { path: String, message: String },
     Validation { path: String, message: String },
     MissingPidLoop { requested: usize, available: usize },
-    Runtime(RuntimeError),
+    Runtime(RuntimeError<'a>),
 }
 
-impl fmt::Display for ControlKpiError {
+impl fmt::Display for ControlKpiError<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             ControlKpiError::Parse { path, message } => {
@@ -34,10 +34,10 @@ impl fmt::Display for ControlKpiError {
     }
 }
 
-impl std::error::Error for ControlKpiError {}
+impl std::error::Error for ControlKpiError<'_> {}
 
-impl From<RuntimeError> for ControlKpiError {
-    fn from(value: RuntimeError) -> Self {
+impl<'a> From<RuntimeError<'a>> for ControlKpiError<'a> {
+    fn from(value: RuntimeError<'a>) -> Self {
         ControlKpiError::Runtime(value)
     }
 }
@@ -54,7 +54,7 @@ pub struct PidControlScenario {
 }
 
 impl PidControlScenario {
-    pub fn from_yaml_str(yaml: &str) -> Result<Self, ControlKpiError> {
+    pub fn from_yaml_str(yaml: &str) -> Result<Self, ControlKpiError<'static>> {
         let mut docs = serde_yaml::Deserializer::from_str(yaml);
         let Some(doc) = docs.next() else {
             return Err(ControlKpiError::Parse {
@@ -80,7 +80,7 @@ impl PidControlScenario {
         }
     }
 
-    fn validate(&self) -> Result<(), ControlKpiError> {
+    fn validate(&self) -> Result<(), ControlKpiError<'static>> {
         if self.tick_ms == 0 {
             return Err(ControlKpiError::Validation {
                 path: "tick_ms".to_string(),
@@ -113,7 +113,7 @@ pub enum ProcessModelConfig {
 }
 
 impl ProcessModelConfig {
-    fn validate(&self) -> Result<(), ControlKpiError> {
+    fn validate(&self) -> Result<(), ControlKpiError<'static>> {
         match self {
             ProcessModelConfig::FirstOrder { tau_ms, .. } => {
                 if *tau_ms == 0 {
@@ -155,10 +155,10 @@ pub struct PidKpiReport {
     pub kpi: PidKpi,
 }
 
-pub fn run_pid_kpi(
-    program: &Program<'_>,
+pub fn run_pid_kpi<'a>(
+    program: &'a Program<'a>,
     scenario: &PidControlScenario,
-) -> Result<PidKpiReport, ControlKpiError> {
+) -> Result<PidKpiReport, ControlKpiError<'a>> {
     let Some(pid) = program.pid_loops.get(scenario.loop_index).copied() else {
         return Err(ControlKpiError::MissingPidLoop {
             requested: scenario.loop_index,

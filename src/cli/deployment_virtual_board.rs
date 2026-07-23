@@ -33,17 +33,18 @@
         })?;
     let scenario = parse_scenario_yaml(&scenario_yaml)?;
 
-    let program = compile_loaded_plc_to_runtime_program(&loaded, scenario.tick_ms)?;
+    let compiled_program = compile_loaded_plc_to_runtime_program(&loaded, scenario.tick_ms)?;
+    let program = compiled_program.program();
 
-    let (num_di, num_do, num_ai, num_ao) = io_sizes_for_program_and_scenario(&program, &scenario);
+    let (num_di, num_do, num_ai, num_ao) = io_sizes_for_program_and_scenario(program, &scenario);
     let mut io = sim::SimIo::new(num_di, num_do, num_ai, num_ao);
-    sim::attach_inferred_plant_from_program(&mut io, &program);
+    sim::attach_inferred_plant_from_program(&mut io, program);
     scenario
         .apply_to_simio(&mut io)
         .map_err(|e| format!("scenario apply failed: {e}"))?;
 
     let mut rt =
-        runtime_core::Runtime::new(&program).map_err(|e| format!("runtime init failed: {e:?}"))?;
+        runtime_core::Runtime::new(program).map_err(|e| format!("runtime init failed: {e:?}"))?;
     let mut axis_driver = sim::DeterministicAxisDriver::new();
 
     println!("boot ok");
@@ -77,7 +78,7 @@
         )
         .map_err(|e| format!("runtime tick failed: {e:?}"))?;
 
-        if is_halted(&rt, &program) {
+        if is_halted(&rt, program) {
             break;
         }
     }
@@ -281,11 +282,11 @@ fn run_virtual_board_subcommand(
         })?;
     let scenario = parse_scenario_yaml(&scenario_yaml)?;
 
-    let program = compile_loaded_plc_to_runtime_program(&loaded, scenario.tick_ms)?;
+    let compiled_program = compile_loaded_plc_to_runtime_program(&loaded, scenario.tick_ms)?;
     write_virtual_board_artifacts(
         Path::new(&plc_path),
         &scenario_path,
-        &program,
+        compiled_program.program(),
         &scenario,
         &out_dir,
     )?;

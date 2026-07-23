@@ -8,12 +8,12 @@ use crate::{
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum SimRunError {
+pub enum SimRunError<'a> {
     Scenario(ScenarioError),
-    Runtime(RuntimeError),
+    Runtime(RuntimeError<'a>),
 }
 
-impl fmt::Display for SimRunError {
+impl fmt::Display for SimRunError<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             SimRunError::Scenario(e) => write!(f, "{e}"),
@@ -42,16 +42,16 @@ fix:\n\
     }
 }
 
-impl std::error::Error for SimRunError {}
+impl std::error::Error for SimRunError<'_> {}
 
-impl From<ScenarioError> for SimRunError {
+impl<'a> From<ScenarioError> for SimRunError<'a> {
     fn from(value: ScenarioError) -> Self {
         SimRunError::Scenario(value)
     }
 }
 
-impl From<RuntimeError> for SimRunError {
-    fn from(value: RuntimeError) -> Self {
+impl<'a> From<RuntimeError<'a>> for SimRunError<'a> {
+    fn from(value: RuntimeError<'a>) -> Self {
         SimRunError::Runtime(value)
     }
 }
@@ -66,7 +66,7 @@ pub fn run_program_for_scenario<'a>(
     program: &'a Program<'a>,
     scenario: &Scenario,
     io: &mut SimIo,
-) -> Result<SimRunOutput, SimRunError> {
+) -> Result<SimRunOutput, SimRunError<'a>> {
     run_program_for_scenario_with_tick_observer(program, scenario, io, |_| {})
 }
 
@@ -75,7 +75,7 @@ pub fn run_program_for_scenario_with_tick_observer<'a>(
     scenario: &Scenario,
     io: &mut SimIo,
     mut on_tick_start: impl FnMut(&SimIo),
-) -> Result<SimRunOutput, SimRunError> {
+) -> Result<SimRunOutput, SimRunError<'a>> {
     attach_inferred_plant_from_program(io, program);
     scenario.apply_to_simio(io)?;
 

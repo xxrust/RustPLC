@@ -1,4 +1,4 @@
-﻿#![no_std]
+#![no_std]
 #![forbid(unsafe_code)]
 
 #[cfg(test)]
@@ -39,16 +39,16 @@ pub struct TraceEvent {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct LogEvent {
+pub struct LogEvent<'a> {
     pub tick: Tick,
     pub task: usize,
     pub step: StepId,
     pub message_id: u16,
-    pub message: &'static str,
+    pub message: &'a str,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RuntimeError {
+pub enum RuntimeError<'a> {
     ProgramHasNoTasks,
     TooManyTasks {
         configured: usize,
@@ -92,46 +92,46 @@ pub enum RuntimeError {
         resource_count: usize,
     },
     ExternCallRequiresHandler {
-        function: &'static str,
+        function: &'a str,
     },
     AxisMotionRequiresHandler {
-        target: &'static str,
+        target: &'a str,
     },
     ProcessDeviceActionRequiresHandler {
-        family: &'static str,
-        action: &'static str,
-        target: &'static str,
+        family: &'a str,
+        action: &'a str,
+        target: &'a str,
     },
     AxisNotHomed {
-        target: &'static str,
+        target: &'a str,
     },
     TooManyAxisHomingTargets {
         max: usize,
     },
     ExternCallFailed {
-        function: &'static str,
+        function: &'a str,
     },
     ExternReturnArityMismatch {
-        function: &'static str,
+        function: &'a str,
         expected: usize,
         got: usize,
     },
     ExternArgumentLimitExceeded {
-        function: &'static str,
+        function: &'a str,
         configured: usize,
         max: usize,
     },
     ExternReturnLimitExceeded {
-        function: &'static str,
+        function: &'a str,
         configured: usize,
         max: usize,
     },
     ExternBindingVariableOutOfRange {
-        function: &'static str,
+        function: &'a str,
         variable: u16,
     },
     ExternErrorCodeVariableOutOfRange {
-        function: &'static str,
+        function: &'a str,
         variable: u16,
     },
     DigitalEdgeInputOutOfRange {
@@ -143,67 +143,78 @@ pub enum RuntimeError {
         max: usize,
     },
     AxisFault {
-        target: &'static str,
+        target: &'a str,
         fault: AxisFault,
     },
     ProcessDeviceActionFault {
-        family: &'static str,
-        action: &'static str,
-        target: &'static str,
+        family: &'a str,
+        action: &'a str,
+        target: &'a str,
         fault: ProcessDeviceActionFault,
     },
+    ProcessDeviceActionUndeclaredResult {
+        family: &'a str,
+        action: &'a str,
+        target: &'a str,
+        result_bucket: &'a str,
+    },
     CylinderFeedbackFault {
-        target: &'static str,
+        target: &'a str,
         fault: CylinderFeedbackFault,
     },
     WorkpieceSourceUnderflow {
-        endpoint: &'static str,
+        endpoint: &'a str,
     },
     WorkpieceDuplicateOccupancy {
-        endpoint: &'static str,
+        endpoint: &'a str,
         count: usize,
     },
     WorkpieceOverflow {
-        endpoint: &'static str,
+        endpoint: &'a str,
         capacity: u32,
         occupancy: usize,
     },
     WorkpieceDuplicateMount {
-        slot: &'static str,
+        slot: &'a str,
+        token_id: WorkpieceTokenId,
+    },
+    WorkpieceTypeMismatch {
+        endpoint: &'a str,
+        expected: &'a str,
         token_id: WorkpieceTokenId,
     },
     WorkpieceTypeSourceUnderflow {
-        workpiece_type: &'static str,
+        workpiece_type: &'a str,
     },
     WorkpieceTypeSourceAmbiguity {
-        workpiece_type: &'static str,
+        workpiece_type: &'a str,
         count: usize,
     },
     WorkpieceSplitOverflow {
-        workpiece_type: &'static str,
+        workpiece_type: &'a str,
         capacity: u32,
         occupancy: usize,
     },
     WorkpieceMergeInputUnderflow {
-        target_type: &'static str,
-        input_ref: &'static str,
-        required_type: &'static str,
+        target_type: &'a str,
+        input_ref: &'a str,
+        required_type: &'a str,
     },
     WorkpieceDuplicateConsumedMergeInput {
-        input_ref: &'static str,
+        input_ref: &'a str,
     },
     WorkpieceMergeArityMismatch {
-        target_type: &'static str,
+        target_type: &'a str,
         input_refs: usize,
         input_types: usize,
     },
     WorkpieceMergeOverflow {
-        target_type: &'static str,
+        target_type: &'a str,
         capacity: u32,
         occupancy: usize,
     },
     WorkpieceEndpointUndefined {
-        endpoint: &'static str,
+        endpoint: &'a str,
     },
     WorkpieceTokenCapacityExceeded {
         required: usize,
@@ -217,26 +228,26 @@ pub enum RuntimeError {
         token_id: WorkpieceTokenId,
     },
     UnsupportedWorkpieceEffect {
-        effect: &'static str,
+        effect: &'a str,
     },
 }
 
 #[derive(Debug, PartialEq)]
-pub enum RuntimeTickError<E> {
-    Core(RuntimeError),
+pub enum RuntimeTickError<'a, E> {
+    Core(RuntimeError<'a>),
     ExternCallFailed {
-        function: &'static str,
+        function: &'a str,
         error: E,
     },
     ExternReturnArityMismatch {
-        function: &'static str,
+        function: &'a str,
         expected: usize,
         got: usize,
     },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub enum Action {
+pub enum Action<'a> {
     SetDigital {
         id: DigitalOutputId,
         value: bool,
@@ -254,9 +265,9 @@ pub enum Action {
         expr: ExprProgram,
     },
     CallExtern {
-        function: &'static str,
-        arg_exprs: &'static [ExprProgram],
-        binding_vars: &'static [u16],
+        function: &'a str,
+        arg_exprs: &'a [ExprProgram],
+        binding_vars: &'a [u16],
     },
     CamEngage {
         cam_index: u16,
@@ -273,47 +284,47 @@ pub enum Action {
         offset_expr: ExprProgram,
     },
     AxisMove {
-        command: AxisMotionCommand,
+        command: AxisMotionCommand<'a>,
     },
     ProcessDeviceAction {
-        command: ProcessDeviceActionCommand,
+        command: ProcessDeviceActionCommand<'a>,
     },
     WorkpieceAcquire {
-        workpiece_type: &'static str,
-        holder: &'static str,
-        from: &'static str,
+        workpiece_type: &'a str,
+        holder: &'a str,
+        from: &'a str,
     },
     WorkpieceTransfer {
-        from: &'static str,
-        to: &'static str,
+        from: &'a str,
+        to: &'a str,
     },
     WorkpieceFinish {
-        at: &'static str,
-        terminal_state: &'static str,
+        at: &'a str,
+        terminal_state: &'a str,
     },
     WorkpieceMount {
-        workpiece_type: &'static str,
-        slot: &'static str,
+        workpiece_type: &'a str,
+        slot: &'a str,
     },
     WorkpieceUnmount {
-        workpiece_type: &'static str,
-        slot: &'static str,
-        to: &'static str,
+        workpiece_type: &'a str,
+        slot: &'a str,
+        to: &'a str,
     },
     WorkpieceTransformCarrier {
-        carrier: &'static str,
-        frame: &'static str,
+        carrier: &'a str,
+        frame: &'a str,
     },
     WorkpieceSplit {
-        source_type: &'static str,
-        target_type: &'static str,
+        source_type: &'a str,
+        target_type: &'a str,
         count: u32,
         consumed: bool,
     },
     WorkpieceMerge {
-        input_refs: &'static [&'static str],
-        input_types: &'static [&'static str],
-        target_type: &'static str,
+        input_refs: &'a [&'a str],
+        input_types: &'a [&'a str],
+        target_type: &'a str,
         consumed_inputs: bool,
     },
     Extend {
@@ -323,43 +334,44 @@ pub enum Action {
         output: DigitalOutputId,
     },
     CylinderMotion {
-        target: &'static str,
+        target: &'a str,
         output: DigitalOutputId,
         expect_extended: bool,
-        confirm_inputs: &'static [DigitalInputId],
-        opposing_inputs: &'static [DigitalInputId],
+        confirm_inputs: &'a [DigitalInputId],
+        opposing_inputs: &'a [DigitalInputId],
         timeout: Option<Timeout>,
         fault_routing: Option<CylinderFaultRouting>,
     },
     Log {
         message_id: u16,
-        message: &'static str,
+        message: &'a str,
     },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct AxisMotionCommand {
-    pub target: &'static str,
-    pub port: &'static str,
+pub struct AxisMotionCommand<'a> {
+    pub target: &'a str,
+    pub port: &'a str,
     pub kind: AxisMoveKind,
     pub value: f32,
     pub speed: f32,
     pub acceleration: f32,
     pub deceleration: f32,
-    pub semantic_tag: Option<&'static str>,
+    pub semantic_tag: Option<&'a str>,
     pub require_homed: bool,
     pub timeout: Option<Timeout>,
-    pub fault_routing: Option<AxisFaultRouting>,
+    pub fault_routing: Option<AxisFaultRouting<'a>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ProcessDeviceActionCommand {
-    pub family: &'static str,
-    pub action: &'static str,
-    pub target: &'static str,
-    pub port: &'static str,
-    pub args: &'static [&'static str],
-    pub result_buckets: &'static [&'static str],
+pub struct ProcessDeviceActionCommand<'a> {
+    pub family: &'a str,
+    pub action: &'a str,
+    pub target: &'a str,
+    pub port: &'a str,
+    pub args: &'a [&'a str],
+    pub result_buckets: &'a [&'a str],
+    pub timeout: Option<Timeout>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -458,13 +470,13 @@ impl AxisFaultRouteRule {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct AxisFaultRouting {
+pub struct AxisFaultRouting<'a> {
     pub on_reject: StepId,
     pub on_motion_fault: StepId,
     pub on_safety_fault: StepId,
-    pub on_reject_routes: &'static [AxisFaultRouteRule],
-    pub on_motion_fault_routes: &'static [AxisFaultRouteRule],
-    pub on_safety_fault_routes: &'static [AxisFaultRouteRule],
+    pub on_reject_routes: &'a [AxisFaultRouteRule],
+    pub on_motion_fault_routes: &'a [AxisFaultRouteRule],
+    pub on_safety_fault_routes: &'a [AxisFaultRouteRule],
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -473,7 +485,7 @@ pub struct CylinderFaultRouting {
     pub on_safety_fault: StepId,
 }
 
-impl AxisFaultRouting {
+impl AxisFaultRouting<'_> {
     pub fn resolve_target(&self, fault: AxisFault) -> StepId {
         let route_kind = AxisFaultRouteKind::from_fault_kind(fault.kind);
         let (primary, routes) = match fault.kind {
@@ -662,7 +674,7 @@ pub struct PidConfig {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Instr<'a> {
     Action {
-        actions: &'a [Action],
+        actions: &'a [Action<'a>],
         next: StepId,
     },
     WaitAllDigital {
@@ -800,7 +812,7 @@ pub enum WorkpieceTerminalStatus<'a> {
 
 include!("runtime_workpiece_store.rs");
 impl<'a> Program<'a> {
-    pub fn task(&self, index: usize) -> Result<&Task<'a>, RuntimeError> {
+    pub fn task(&self, index: usize) -> Result<&Task<'a>, RuntimeError<'a>> {
         self.tasks
             .get(index)
             .ok_or(RuntimeError::InvalidTaskIndex { task: index })
@@ -840,41 +852,41 @@ impl Default for TaskTimeoutState {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum TaskPendingActionState {
+pub enum TaskPendingActionState<'a> {
     #[default]
     Idle,
     AxisMotion {
-        target: &'static str,
+        target: &'a str,
         action_index: usize,
-        semantic_tag: Option<&'static str>,
+        semantic_tag: Option<&'a str>,
     },
     ProcessDeviceAction {
-        family: &'static str,
-        action: &'static str,
-        target: &'static str,
+        family: &'a str,
+        action: &'a str,
+        target: &'a str,
         action_index: usize,
     },
     CylinderMotion {
-        target: &'static str,
+        target: &'a str,
         action_index: usize,
         opposing_cleared_once: bool,
     },
     ExternCall {
-        function: &'static str,
+        function: &'a str,
     },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct TaskRuntimeContext {
+pub struct TaskRuntimeContext<'a> {
     pub current_step: StepId,
     pub step_entered_at: Option<Tick>,
     pub wait_state: TaskWaitState,
     pub timeout_state: TaskTimeoutState,
-    pub pending_action_state: TaskPendingActionState,
+    pub pending_action_state: TaskPendingActionState<'a>,
     pub edge_consumed_at: Option<Tick>,
 }
 
-impl Default for TaskRuntimeContext {
+impl Default for TaskRuntimeContext<'_> {
     fn default() -> Self {
         Self {
             current_step: StepId(0),
@@ -896,9 +908,9 @@ pub struct Runtime<'a> {
     program: &'a Program<'a>,
     active_task: usize,
     active_task_count: usize,
-    task_contexts: [TaskRuntimeContext; MAX_ACTIVE_TASKS],
+    task_contexts: [TaskRuntimeContext<'a>; MAX_ACTIVE_TASKS],
     axis_stop_state: AxisStopState,
-    axis_homing_targets: [Option<&'static str>; MAX_AXIS_HOMING_TARGETS],
+    axis_homing_targets: [Option<&'a str>; MAX_AXIS_HOMING_TARGETS],
     axis_homing_flags: [bool; MAX_AXIS_HOMING_TARGETS],
     pid_states: [PidState; MAX_PID_LOOPS],
     variables: [f32; MAX_VARIABLES],
@@ -940,7 +952,7 @@ enum StepCompletionDecision {
 }
 
 impl<'a> Runtime<'a> {
-    pub fn new(program: &'a Program<'a>) -> Result<Self, RuntimeError> {
+    pub fn new(program: &'a Program<'a>) -> Result<Self, RuntimeError<'a>> {
         if program.tasks.is_empty() {
             return Err(RuntimeError::ProgramHasNoTasks);
         }
@@ -1032,7 +1044,7 @@ impl<'a> Runtime<'a> {
 
     fn collect_edge_subscriptions(
         program: &Program<'a>,
-    ) -> Result<([bool; MAX_TRACKED_DIGITAL_INPUTS], [bool; MAX_VARIABLES]), RuntimeError> {
+    ) -> Result<([bool; MAX_TRACKED_DIGITAL_INPUTS], [bool; MAX_VARIABLES]), RuntimeError<'a>> {
         let mut digital = [false; MAX_TRACKED_DIGITAL_INPUTS];
         let mut variables = [false; MAX_VARIABLES];
 
@@ -1079,7 +1091,7 @@ impl<'a> Runtime<'a> {
         self.active_task_count
     }
 
-    pub fn task_context(&self, task: usize) -> Result<TaskRuntimeContext, RuntimeError> {
+    pub fn task_context(&self, task: usize) -> Result<TaskRuntimeContext<'a>, RuntimeError<'a>> {
         if task >= self.active_task_count {
             return Err(RuntimeError::InvalidTaskIndex { task });
         }
@@ -1090,7 +1102,7 @@ impl<'a> Runtime<'a> {
         self.axis_stop_state
     }
 
-    fn axis_homing_slot(&mut self, target: &'static str) -> Result<usize, RuntimeError> {
+    fn axis_homing_slot(&mut self, target: &'a str) -> Result<usize, RuntimeError<'a>> {
         let mut free_slot = None;
         for idx in 0..MAX_AXIS_HOMING_TARGETS {
             match self.axis_homing_targets[idx] {
@@ -1115,12 +1127,12 @@ impl<'a> Runtime<'a> {
         })
     }
 
-    fn axis_is_homed(&mut self, target: &'static str) -> Result<bool, RuntimeError> {
+    fn axis_is_homed(&mut self, target: &'a str) -> Result<bool, RuntimeError<'a>> {
         let idx = self.axis_homing_slot(target)?;
         Ok(self.axis_homing_flags[idx])
     }
 
-    fn set_axis_homed(&mut self, target: &'static str, homed: bool) -> Result<(), RuntimeError> {
+    fn set_axis_homed(&mut self, target: &'a str, homed: bool) -> Result<(), RuntimeError<'a>> {
         let idx = self.axis_homing_slot(target)?;
         self.axis_homing_flags[idx] = homed;
         Ok(())
@@ -1144,7 +1156,7 @@ impl<'a> Runtime<'a> {
 
     fn seed_workpiece_tokens(
         program: &'a Program<'a>,
-    ) -> Result<(WorkpieceTokenStore<'a>, WorkpieceTokenId), RuntimeError> {
+    ) -> Result<(WorkpieceTokenStore<'a>, WorkpieceTokenId), RuntimeError<'a>> {
         let mut store = WorkpieceTokenStore::new();
         let mut next_token_id = 0u32;
 
@@ -1205,9 +1217,9 @@ impl<'a> Runtime<'a> {
 
     fn unique_active_token_id_at(
         &self,
-        endpoint: &'static str,
+        endpoint: &'a str,
         mounted: Option<bool>,
-    ) -> Result<WorkpieceTokenId, RuntimeError> {
+    ) -> Result<WorkpieceTokenId, RuntimeError<'a>> {
         if self.workpiece_endpoint_capacity(endpoint).is_none() {
             return Err(RuntimeError::WorkpieceEndpointUndefined { endpoint });
         }
@@ -1234,8 +1246,8 @@ impl<'a> Runtime<'a> {
 
     fn unique_active_token_of_type(
         &self,
-        workpiece_type: &'static str,
-    ) -> Result<WorkpieceToken<'a>, RuntimeError> {
+        workpiece_type: &'a str,
+    ) -> Result<WorkpieceToken<'a>, RuntimeError<'a>> {
         let mut token = None;
         let mut count = 0usize;
         for candidate in self.workpiece_tokens.tokens.iter().flatten() {
@@ -1256,8 +1268,8 @@ impl<'a> Runtime<'a> {
 
     fn ensure_workpiece_destination_capacity(
         &self,
-        endpoint: &'static str,
-    ) -> Result<(), RuntimeError> {
+        endpoint: &'a str,
+    ) -> Result<(), RuntimeError<'a>> {
         let Some(capacity) = self.workpiece_endpoint_capacity(endpoint) else {
             return Err(RuntimeError::WorkpieceEndpointUndefined { endpoint });
         };
@@ -1279,7 +1291,7 @@ impl<'a> Runtime<'a> {
         token_id: WorkpieceTokenId,
         to: &'a str,
         mounted_slot: Option<&'a str>,
-    ) -> Result<(), RuntimeError> {
+    ) -> Result<(), RuntimeError<'a>> {
         self.workpiece_tokens
             .move_token(token_id, to)
             .and_then(|_| {
@@ -1294,7 +1306,7 @@ impl<'a> Runtime<'a> {
         &mut self,
         token_id: WorkpieceTokenId,
         terminal_status: WorkpieceTerminalStatus<'a>,
-    ) -> Result<(), RuntimeError> {
+    ) -> Result<(), RuntimeError<'a>> {
         self.workpiece_tokens
             .finish_token(token_id, terminal_status)
             .map(|_| ())
@@ -1303,10 +1315,10 @@ impl<'a> Runtime<'a> {
 
     fn execute_workpiece_acquire(
         &mut self,
-        _workpiece_type: &'static str,
-        holder: &'static str,
-        from: &'static str,
-    ) -> Result<(), RuntimeError> {
+        _workpiece_type: &'a str,
+        holder: &'a str,
+        from: &'a str,
+    ) -> Result<(), RuntimeError<'a>> {
         let token_id = self.unique_active_token_id_at(from, Some(false))?;
         self.ensure_workpiece_destination_capacity(holder)?;
         self.relocate_workpiece_token(token_id, holder, None)
@@ -1314,9 +1326,9 @@ impl<'a> Runtime<'a> {
 
     fn execute_workpiece_transfer(
         &mut self,
-        from: &'static str,
-        to: &'static str,
-    ) -> Result<(), RuntimeError> {
+        from: &'a str,
+        to: &'a str,
+    ) -> Result<(), RuntimeError<'a>> {
         if from == to {
             return Ok(());
         }
@@ -1328,9 +1340,9 @@ impl<'a> Runtime<'a> {
 
     fn execute_workpiece_finish(
         &mut self,
-        at: &'static str,
-        terminal_state: &'static str,
-    ) -> Result<(), RuntimeError> {
+        at: &'a str,
+        terminal_state: &'a str,
+    ) -> Result<(), RuntimeError<'a>> {
         let token_id = self.unique_active_token_id_at(at, Some(false))?;
         self.finish_workpiece_token(
             token_id,
@@ -1345,7 +1357,7 @@ impl<'a> Runtime<'a> {
         workpiece_type: &'a str,
         location: &'a str,
         mounted_slot: Option<&'a str>,
-    ) -> Result<WorkpieceTokenId, RuntimeError> {
+    ) -> Result<WorkpieceTokenId, RuntimeError<'a>> {
         let token_id = self.next_workpiece_token_id;
         self.workpiece_tokens
             .create_token(token_id, workpiece_type, location)
@@ -1368,7 +1380,7 @@ impl<'a> Runtime<'a> {
     fn ensure_workpiece_token_capacity_for_new_tokens(
         &self,
         additional_tokens: usize,
-    ) -> Result<(), RuntimeError> {
+    ) -> Result<(), RuntimeError<'a>> {
         let required = self
             .workpiece_tokens
             .slots_used()
@@ -1385,7 +1397,7 @@ impl<'a> Runtime<'a> {
     fn ensure_workpiece_lineage_capacity_for_new_records(
         &self,
         additional_records: usize,
-    ) -> Result<(), RuntimeError> {
+    ) -> Result<(), RuntimeError<'a>> {
         let required = self
             .workpiece_lineage
             .len()
@@ -1401,9 +1413,9 @@ impl<'a> Runtime<'a> {
 
     fn execute_workpiece_mount(
         &mut self,
-        workpiece_type: &'static str,
-        slot: &'static str,
-    ) -> Result<(), RuntimeError> {
+        workpiece_type: &'a str,
+        slot: &'a str,
+    ) -> Result<(), RuntimeError<'a>> {
         if self.workpiece_endpoint_capacity(slot).is_none() {
             return Err(RuntimeError::WorkpieceEndpointUndefined { endpoint: slot });
         }
@@ -1438,11 +1450,22 @@ impl<'a> Runtime<'a> {
 
     fn execute_workpiece_unmount(
         &mut self,
-        _workpiece_type: &'static str,
-        slot: &'static str,
-        to: &'static str,
-    ) -> Result<(), RuntimeError> {
+        workpiece_type: &'a str,
+        slot: &'a str,
+        to: &'a str,
+    ) -> Result<(), RuntimeError<'a>> {
         let token_id = self.unique_active_token_id_at(slot, Some(true))?;
+        let token = self
+            .workpiece_tokens
+            .token(token_id)
+            .ok_or(RuntimeError::WorkpieceStoreInvariantViolation { token_id })?;
+        if token.workpiece_type != workpiece_type {
+            return Err(RuntimeError::WorkpieceTypeMismatch {
+                endpoint: slot,
+                expected: workpiece_type,
+                token_id,
+            });
+        }
         if slot == to {
             return self
                 .workpiece_tokens
@@ -1455,22 +1478,18 @@ impl<'a> Runtime<'a> {
         self.relocate_workpiece_token(token_id, to, None)
     }
 
-    fn execute_workpiece_transform_carrier(
-        &mut self,
-        _carrier: &'static str,
-        _frame: &'static str,
-    ) {
+    fn execute_workpiece_transform_carrier(&mut self, _carrier: &'a str, _frame: &'a str) {
         // Carrier transforms only change the carrier reference frame in this phase.
         // Mounted token association is preserved by keeping the slot binding intact.
     }
 
     fn execute_workpiece_split(
         &mut self,
-        source_type: &'static str,
-        target_type: &'static str,
+        source_type: &'a str,
+        target_type: &'a str,
         count: u32,
         consumed: bool,
-    ) -> Result<(), RuntimeError> {
+    ) -> Result<(), RuntimeError<'a>> {
         let source = self.unique_active_token_of_type(source_type)?;
         let output_count = count as usize;
         self.ensure_workpiece_token_capacity_for_new_tokens(output_count)?;
@@ -1526,11 +1545,11 @@ impl<'a> Runtime<'a> {
 
     fn execute_workpiece_merge(
         &mut self,
-        input_refs: &'static [&'static str],
-        input_types: &'static [&'static str],
-        target_type: &'static str,
+        input_refs: &'a [&'a str],
+        input_types: &'a [&'a str],
+        target_type: &'a str,
         consumed_inputs: bool,
-    ) -> Result<(), RuntimeError> {
+    ) -> Result<(), RuntimeError<'a>> {
         if input_refs.len() != input_types.len() {
             return Err(RuntimeError::WorkpieceMergeArityMismatch {
                 target_type,
@@ -1712,7 +1731,7 @@ impl<'a> Runtime<'a> {
         &self,
         task_idx: usize,
         action_index: usize,
-        command: AxisMotionCommand,
+        command: AxisMotionCommand<'a>,
     ) -> Option<AxisFault> {
         let tag = command.semantic_tag?;
         for claim in self.program.resource_claims {
@@ -1734,8 +1753,8 @@ impl<'a> Runtime<'a> {
     }
 
     fn missing_process_device_handler(
-        command: ProcessDeviceActionCommand,
-    ) -> Result<ProcessDeviceActionResult, RuntimeError> {
+        command: ProcessDeviceActionCommand<'a>,
+    ) -> Result<ProcessDeviceActionResult, RuntimeError<'a>> {
         Err(RuntimeError::ProcessDeviceActionRequiresHandler {
             family: command.family,
             action: command.action,
@@ -1743,7 +1762,7 @@ impl<'a> Runtime<'a> {
         })
     }
 
-    pub fn tick<IO: Io>(&mut self, io: &mut IO) -> Result<(), RuntimeError> {
+    pub fn tick<IO: Io>(&mut self, io: &mut IO) -> Result<(), RuntimeError<'a>> {
         self.tick_with_trace_and_logs(io, |_| {}, |_| {})
     }
 
@@ -1751,7 +1770,7 @@ impl<'a> Runtime<'a> {
         &mut self,
         io: &mut IO,
         mut on_event: impl FnMut(TraceEvent),
-    ) -> Result<(), RuntimeError> {
+    ) -> Result<(), RuntimeError<'a>> {
         self.tick_with_trace_and_logs(io, |e| on_event(e), |_| {})
     }
 
@@ -1759,17 +1778,17 @@ impl<'a> Runtime<'a> {
         &mut self,
         io: &mut IO,
         mut on_event: impl FnMut(TraceEvent),
-        mut on_log: impl FnMut(LogEvent),
-    ) -> Result<(), RuntimeError> {
+        mut on_log: impl FnMut(LogEvent<'a>),
+    ) -> Result<(), RuntimeError<'a>> {
         #[derive(Debug)]
         struct MissingExternHandler;
         let mut missing_extern =
-            |_function: &'static str,
+            |_function: &'a str,
              _args: &[f32],
              _results: &mut [f32]|
              -> Result<usize, MissingExternHandler> { Err(MissingExternHandler) };
-        let mut ignore_error_code = |_function: &'static str, _error: &MissingExternHandler| 0.0;
-        let mut missing_axis = |command: AxisMotionCommand| {
+        let mut ignore_error_code = |_function: &'a str, _error: &MissingExternHandler| 0.0;
+        let mut missing_axis = |command: AxisMotionCommand<'a>| {
             Err(RuntimeError::AxisMotionRequiresHandler {
                 target: command.target,
             })
@@ -1783,7 +1802,7 @@ impl<'a> Runtime<'a> {
             None,
             &mut ignore_error_code,
             &mut missing_axis,
-            &mut |_: AxisMotionCommand, _: AxisFault| {},
+            &mut |_: AxisMotionCommand<'a>, _: AxisFault| {},
             &mut missing_process_device,
         )
         .map_err(|err| match err {
@@ -1807,19 +1826,19 @@ impl<'a> Runtime<'a> {
         &mut self,
         io: &mut IO,
         mut on_event: impl FnMut(TraceEvent),
-        mut on_log: impl FnMut(LogEvent),
-        mut on_axis_motion: impl FnMut(AxisMotionCommand) -> AxisMotionResult,
-    ) -> Result<(), RuntimeError> {
+        mut on_log: impl FnMut(LogEvent<'a>),
+        mut on_axis_motion: impl FnMut(AxisMotionCommand<'a>) -> AxisMotionResult,
+    ) -> Result<(), RuntimeError<'a>> {
         #[derive(Debug)]
         struct MissingExternHandler;
 
         let mut missing_extern =
-            |_function: &'static str,
+            |_function: &'a str,
              _args: &[f32],
              _results: &mut [f32]|
              -> Result<usize, MissingExternHandler> { Err(MissingExternHandler) };
-        let mut ignore_error_code = |_function: &'static str, _error: &MissingExternHandler| 0.0;
-        let mut axis_adapter = |command: AxisMotionCommand| Ok(on_axis_motion(command));
+        let mut ignore_error_code = |_function: &'a str, _error: &MissingExternHandler| 0.0;
+        let mut axis_adapter = |command: AxisMotionCommand<'a>| Ok(on_axis_motion(command));
         let mut missing_process_device = Self::missing_process_device_handler;
 
         self.tick_with_trace_and_logs_impl(
@@ -1830,7 +1849,7 @@ impl<'a> Runtime<'a> {
             None,
             &mut ignore_error_code,
             &mut axis_adapter,
-            &mut |_: AxisMotionCommand, _: AxisFault| {},
+            &mut |_: AxisMotionCommand<'a>, _: AxisFault| {},
             &mut missing_process_device,
         )
         .map_err(|err| match err {
@@ -1853,20 +1872,20 @@ impl<'a> Runtime<'a> {
     pub fn tick_with_axis<IO: Io>(
         &mut self,
         io: &mut IO,
-        mut on_axis_motion: impl FnMut(AxisMotionCommand) -> AxisMotionResult,
-    ) -> Result<(), RuntimeError> {
+        mut on_axis_motion: impl FnMut(AxisMotionCommand<'a>) -> AxisMotionResult,
+    ) -> Result<(), RuntimeError<'a>> {
         #[derive(Debug)]
         struct MissingExternHandler;
 
         let mut on_event = |_| {};
         let mut on_log = |_| {};
         let mut missing_extern =
-            |_function: &'static str,
+            |_function: &'a str,
              _args: &[f32],
              _results: &mut [f32]|
              -> Result<usize, MissingExternHandler> { Err(MissingExternHandler) };
-        let mut ignore_error_code = |_function: &'static str, _error: &MissingExternHandler| 0.0;
-        let mut axis_adapter = |command: AxisMotionCommand| Ok(on_axis_motion(command));
+        let mut ignore_error_code = |_function: &'a str, _error: &MissingExternHandler| 0.0;
+        let mut axis_adapter = |command: AxisMotionCommand<'a>| Ok(on_axis_motion(command));
         let mut missing_process_device = Self::missing_process_device_handler;
 
         self.tick_with_trace_and_logs_impl(
@@ -1877,7 +1896,7 @@ impl<'a> Runtime<'a> {
             None,
             &mut ignore_error_code,
             &mut axis_adapter,
-            &mut |_: AxisMotionCommand, _: AxisFault| {},
+            &mut |_: AxisMotionCommand<'a>, _: AxisFault| {},
             &mut missing_process_device,
         )
         .map_err(|err| match err {
@@ -1900,20 +1919,20 @@ impl<'a> Runtime<'a> {
     pub fn tick_with_axis_and_logs<IO: Io>(
         &mut self,
         io: &mut IO,
-        mut on_log: impl FnMut(LogEvent),
-        mut on_axis_motion: impl FnMut(AxisMotionCommand) -> AxisMotionResult,
-    ) -> Result<(), RuntimeError> {
+        mut on_log: impl FnMut(LogEvent<'a>),
+        mut on_axis_motion: impl FnMut(AxisMotionCommand<'a>) -> AxisMotionResult,
+    ) -> Result<(), RuntimeError<'a>> {
         #[derive(Debug)]
         struct MissingExternHandler;
 
         let mut on_event = |_| {};
         let mut missing_extern =
-            |_function: &'static str,
+            |_function: &'a str,
              _args: &[f32],
              _results: &mut [f32]|
              -> Result<usize, MissingExternHandler> { Err(MissingExternHandler) };
-        let mut ignore_error_code = |_function: &'static str, _error: &MissingExternHandler| 0.0;
-        let mut axis_adapter = |command: AxisMotionCommand| Ok(on_axis_motion(command));
+        let mut ignore_error_code = |_function: &'a str, _error: &MissingExternHandler| 0.0;
+        let mut axis_adapter = |command: AxisMotionCommand<'a>| Ok(on_axis_motion(command));
         let mut missing_process_device = Self::missing_process_device_handler;
 
         self.tick_with_trace_and_logs_impl(
@@ -1924,7 +1943,7 @@ impl<'a> Runtime<'a> {
             None,
             &mut ignore_error_code,
             &mut axis_adapter,
-            &mut |_: AxisMotionCommand, _: AxisFault| {},
+            &mut |_: AxisMotionCommand<'a>, _: AxisFault| {},
             &mut missing_process_device,
         )
         .map_err(|err| match err {
@@ -1947,12 +1966,12 @@ impl<'a> Runtime<'a> {
     pub fn tick_with_extern<IO: Io, E>(
         &mut self,
         io: &mut IO,
-        mut on_extern_call: impl FnMut(&'static str, &[f32], &mut [f32]) -> Result<usize, E>,
-    ) -> Result<(), RuntimeTickError<E>> {
+        mut on_extern_call: impl FnMut(&'a str, &[f32], &mut [f32]) -> Result<usize, E>,
+    ) -> Result<(), RuntimeTickError<'a, E>> {
         let mut on_event = |_| {};
         let mut on_log = |_| {};
-        let mut ignore_error_code = |_function: &'static str, _error: &E| 0.0;
-        let mut missing_axis = |command: AxisMotionCommand| {
+        let mut ignore_error_code = |_function: &'a str, _error: &E| 0.0;
+        let mut missing_axis = |command: AxisMotionCommand<'a>| {
             Err(RuntimeError::AxisMotionRequiresHandler {
                 target: command.target,
             })
@@ -1966,7 +1985,7 @@ impl<'a> Runtime<'a> {
             None,
             &mut ignore_error_code,
             &mut missing_axis,
-            &mut |_: AxisMotionCommand, _: AxisFault| {},
+            &mut |_: AxisMotionCommand<'a>, _: AxisFault| {},
             &mut missing_process_device,
         )
     }
@@ -1975,12 +1994,12 @@ impl<'a> Runtime<'a> {
         &mut self,
         io: &mut IO,
         error_code_var: u16,
-        mut on_extern_call: impl FnMut(&'static str, &[f32], &mut [f32]) -> Result<usize, E>,
-        mut map_error_code: impl FnMut(&'static str, &E) -> f32,
-    ) -> Result<(), RuntimeTickError<E>> {
+        mut on_extern_call: impl FnMut(&'a str, &[f32], &mut [f32]) -> Result<usize, E>,
+        mut map_error_code: impl FnMut(&'a str, &E) -> f32,
+    ) -> Result<(), RuntimeTickError<'a, E>> {
         let mut on_event = |_| {};
         let mut on_log = |_| {};
-        let mut missing_axis = |command: AxisMotionCommand| {
+        let mut missing_axis = |command: AxisMotionCommand<'a>| {
             Err(RuntimeError::AxisMotionRequiresHandler {
                 target: command.target,
             })
@@ -1994,7 +2013,7 @@ impl<'a> Runtime<'a> {
             Some(error_code_var),
             &mut map_error_code,
             &mut missing_axis,
-            &mut |_: AxisMotionCommand, _: AxisFault| {},
+            &mut |_: AxisMotionCommand<'a>, _: AxisFault| {},
             &mut missing_process_device,
         )
     }
@@ -2003,11 +2022,11 @@ impl<'a> Runtime<'a> {
         &mut self,
         io: &mut IO,
         mut on_event: impl FnMut(TraceEvent),
-        mut on_extern_call: impl FnMut(&'static str, &[f32], &mut [f32]) -> Result<usize, E>,
-    ) -> Result<(), RuntimeTickError<E>> {
+        mut on_extern_call: impl FnMut(&'a str, &[f32], &mut [f32]) -> Result<usize, E>,
+    ) -> Result<(), RuntimeTickError<'a, E>> {
         let mut on_log = |_| {};
-        let mut ignore_error_code = |_function: &'static str, _error: &E| 0.0;
-        let mut missing_axis = |command: AxisMotionCommand| {
+        let mut ignore_error_code = |_function: &'a str, _error: &E| 0.0;
+        let mut missing_axis = |command: AxisMotionCommand<'a>| {
             Err(RuntimeError::AxisMotionRequiresHandler {
                 target: command.target,
             })
@@ -2021,7 +2040,7 @@ impl<'a> Runtime<'a> {
             None,
             &mut ignore_error_code,
             &mut missing_axis,
-            &mut |_: AxisMotionCommand, _: AxisFault| {},
+            &mut |_: AxisMotionCommand<'a>, _: AxisFault| {},
             &mut missing_process_device,
         )
     }
@@ -2030,11 +2049,11 @@ impl<'a> Runtime<'a> {
         &mut self,
         io: &mut IO,
         mut on_event: impl FnMut(TraceEvent),
-        mut on_log: impl FnMut(LogEvent),
-        mut on_extern_call: impl FnMut(&'static str, &[f32], &mut [f32]) -> Result<usize, E>,
-    ) -> Result<(), RuntimeTickError<E>> {
-        let mut ignore_error_code = |_function: &'static str, _error: &E| 0.0;
-        let mut missing_axis = |command: AxisMotionCommand| {
+        mut on_log: impl FnMut(LogEvent<'a>),
+        mut on_extern_call: impl FnMut(&'a str, &[f32], &mut [f32]) -> Result<usize, E>,
+    ) -> Result<(), RuntimeTickError<'a, E>> {
+        let mut ignore_error_code = |_function: &'a str, _error: &E| 0.0;
+        let mut missing_axis = |command: AxisMotionCommand<'a>| {
             Err(RuntimeError::AxisMotionRequiresHandler {
                 target: command.target,
             })
@@ -2048,7 +2067,7 @@ impl<'a> Runtime<'a> {
             None,
             &mut ignore_error_code,
             &mut missing_axis,
-            &mut |_: AxisMotionCommand, _: AxisFault| {},
+            &mut |_: AxisMotionCommand<'a>, _: AxisFault| {},
             &mut missing_process_device,
         )
     }
@@ -2056,26 +2075,26 @@ impl<'a> Runtime<'a> {
     pub fn tick_with_process_device<IO: Io>(
         &mut self,
         io: &mut IO,
-        mut on_process_device: impl FnMut(ProcessDeviceActionCommand) -> ProcessDeviceActionResult,
-    ) -> Result<(), RuntimeError> {
+        mut on_process_device: impl FnMut(ProcessDeviceActionCommand<'a>) -> ProcessDeviceActionResult,
+    ) -> Result<(), RuntimeError<'a>> {
         #[derive(Debug)]
         struct MissingExternHandler;
 
         let mut on_event = |_| {};
         let mut on_log = |_| {};
         let mut missing_extern =
-            |_function: &'static str,
+            |_function: &'a str,
              _args: &[f32],
              _results: &mut [f32]|
              -> Result<usize, MissingExternHandler> { Err(MissingExternHandler) };
-        let mut ignore_error_code = |_function: &'static str, _error: &MissingExternHandler| 0.0;
-        let mut missing_axis = |command: AxisMotionCommand| {
+        let mut ignore_error_code = |_function: &'a str, _error: &MissingExternHandler| 0.0;
+        let mut missing_axis = |command: AxisMotionCommand<'a>| {
             Err(RuntimeError::AxisMotionRequiresHandler {
                 target: command.target,
             })
         };
         let mut process_adapter =
-            |command: ProcessDeviceActionCommand| Ok(on_process_device(command));
+            |command: ProcessDeviceActionCommand<'a>| Ok(on_process_device(command));
 
         self.tick_with_trace_and_logs_impl(
             io,
@@ -2085,7 +2104,7 @@ impl<'a> Runtime<'a> {
             None,
             &mut ignore_error_code,
             &mut missing_axis,
-            &mut |_: AxisMotionCommand, _: AxisFault| {},
+            &mut |_: AxisMotionCommand<'a>, _: AxisFault| {},
             &mut process_adapter,
         )
         .map_err(|err| match err {
@@ -2109,16 +2128,19 @@ impl<'a> Runtime<'a> {
         &mut self,
         io: &mut IO,
         on_event: &mut impl FnMut(TraceEvent),
-        on_log: &mut impl FnMut(LogEvent),
-        on_extern_call: &mut impl FnMut(&'static str, &[f32], &mut [f32]) -> Result<usize, E>,
+        on_log: &mut impl FnMut(LogEvent<'a>),
+        on_extern_call: &mut impl FnMut(&'a str, &[f32], &mut [f32]) -> Result<usize, E>,
         extern_error_code_var: Option<u16>,
-        map_extern_error_code: &mut impl FnMut(&'static str, &E) -> f32,
-        on_axis_motion: &mut impl FnMut(AxisMotionCommand) -> Result<AxisMotionResult, RuntimeError>,
-        on_axis_fault_policy: &mut impl FnMut(AxisMotionCommand, AxisFault),
+        map_extern_error_code: &mut impl FnMut(&'a str, &E) -> f32,
+        on_axis_motion: &mut impl FnMut(
+            AxisMotionCommand<'a>,
+        ) -> Result<AxisMotionResult, RuntimeError<'a>>,
+        on_axis_fault_policy: &mut impl FnMut(AxisMotionCommand<'a>, AxisFault),
         on_process_device: &mut impl FnMut(
-            ProcessDeviceActionCommand,
-        ) -> Result<ProcessDeviceActionResult, RuntimeError>,
-    ) -> Result<(), RuntimeTickError<E>> {
+            ProcessDeviceActionCommand<'a>,
+        )
+            -> Result<ProcessDeviceActionResult, RuntimeError<'a>>,
+    ) -> Result<(), RuntimeTickError<'a, E>> {
         let now = io.tick();
 
         self.sample_edge_inputs(io);
@@ -2449,6 +2471,17 @@ impl<'a> Runtime<'a> {
                                     };
                                     match result {
                                         ProcessDeviceActionResult::Pending => {
+                                            if let Some(timeout) = command.timeout
+                                                && elapsed >= timeout.after_ticks
+                                            {
+                                                self.task_contexts[task_idx].pending_action_state =
+                                                    TaskPendingActionState::Idle;
+                                                action_transition_override = Some((
+                                                    timeout.target,
+                                                    TransitionReason::Timeout,
+                                                ));
+                                                break;
+                                            }
                                             self.task_contexts[task_idx].pending_action_state =
                                                 TaskPendingActionState::ProcessDeviceAction {
                                                     family: command.family,
@@ -2460,12 +2493,44 @@ impl<'a> Runtime<'a> {
                                             break;
                                         }
                                         ProcessDeviceActionResult::Done => {
+                                            if !command.result_buckets.contains(&"complete") {
+                                                self.task_contexts[task_idx].pending_action_state =
+                                                    TaskPendingActionState::Idle;
+                                                return Err(RuntimeTickError::Core(
+                                                    RuntimeError::ProcessDeviceActionUndeclaredResult {
+                                                        family: command.family,
+                                                        action: command.action,
+                                                        target: command.target,
+                                                        result_bucket: "complete",
+                                                    },
+                                                ));
+                                            }
                                             self.task_contexts[task_idx].pending_action_state =
                                                 TaskPendingActionState::Idle;
                                         }
                                         ProcessDeviceActionResult::Fault(fault) => {
                                             self.task_contexts[task_idx].pending_action_state =
                                                 TaskPendingActionState::Idle;
+                                            let result_bucket = match fault.kind {
+                                                ProcessDeviceActionFaultKind::Timeout => "timeout",
+                                                ProcessDeviceActionFaultKind::Reject => "reject",
+                                                ProcessDeviceActionFaultKind::MotionFault => {
+                                                    "motion_fault"
+                                                }
+                                                ProcessDeviceActionFaultKind::SafetyFault => {
+                                                    "safety_fault"
+                                                }
+                                            };
+                                            if !command.result_buckets.contains(&result_bucket) {
+                                                return Err(RuntimeTickError::Core(
+                                                    RuntimeError::ProcessDeviceActionUndeclaredResult {
+                                                        family: command.family,
+                                                        action: command.action,
+                                                        target: command.target,
+                                                        result_bucket,
+                                                    },
+                                                ));
+                                            }
                                             return Err(RuntimeTickError::Core(
                                                 RuntimeError::ProcessDeviceActionFault {
                                                     family: command.family,
@@ -3023,13 +3088,13 @@ impl<'a> Runtime<'a> {
 
     fn execute_extern_action<E>(
         &mut self,
-        function: &'static str,
-        arg_exprs: &'static [ExprProgram],
-        binding_vars: &'static [u16],
-        on_extern_call: &mut impl FnMut(&'static str, &[f32], &mut [f32]) -> Result<usize, E>,
+        function: &'a str,
+        arg_exprs: &'a [ExprProgram],
+        binding_vars: &'a [u16],
+        on_extern_call: &mut impl FnMut(&'a str, &[f32], &mut [f32]) -> Result<usize, E>,
         extern_error_code_var: Option<u16>,
-        map_extern_error_code: &mut impl FnMut(&'static str, &E) -> f32,
-    ) -> Result<ExternActionResult, RuntimeTickError<E>> {
+        map_extern_error_code: &mut impl FnMut(&'a str, &E) -> f32,
+    ) -> Result<ExternActionResult, RuntimeTickError<'a, E>> {
         if arg_exprs.len() > MAX_EXTERN_ARGS {
             return Err(RuntimeTickError::Core(
                 RuntimeError::ExternArgumentLimitExceeded {
@@ -3107,7 +3172,7 @@ impl<'a> Runtime<'a> {
         Ok(ExternActionResult::Completed)
     }
 
-    fn cam_engage(&mut self, cam_index: u16) -> Result<(), RuntimeError> {
+    fn cam_engage(&mut self, cam_index: u16) -> Result<(), RuntimeError<'a>> {
         let cam_idx = cam_index as usize;
         let Some(cfg) = self.program.cam_configs.get(cam_idx).copied() else {
             return Err(RuntimeError::InvalidCamIndex { cam_index });
@@ -3123,7 +3188,7 @@ impl<'a> Runtime<'a> {
         Ok(())
     }
 
-    fn cam_disengage(&mut self, cam_index: u16) -> Result<(), RuntimeError> {
+    fn cam_disengage(&mut self, cam_index: u16) -> Result<(), RuntimeError<'a>> {
         let cam_idx = cam_index as usize;
         if cam_idx >= self.program.cam_configs.len() {
             return Err(RuntimeError::InvalidCamIndex { cam_index });
@@ -3134,7 +3199,7 @@ impl<'a> Runtime<'a> {
         Ok(())
     }
 
-    fn cam_switch(&mut self, cam_index: u16, table_index: u16) -> Result<(), RuntimeError> {
+    fn cam_switch(&mut self, cam_index: u16, table_index: u16) -> Result<(), RuntimeError<'a>> {
         let cam_idx = cam_index as usize;
         let Some(cfg) = self.program.cam_configs.get(cam_idx) else {
             return Err(RuntimeError::InvalidCamIndex { cam_index });
@@ -3158,7 +3223,7 @@ impl<'a> Runtime<'a> {
         Ok(())
     }
 
-    fn cam_phase(&mut self, cam_index: u16, offset: f32) -> Result<(), RuntimeError> {
+    fn cam_phase(&mut self, cam_index: u16, offset: f32) -> Result<(), RuntimeError<'a>> {
         let cam_idx = cam_index as usize;
         if cam_idx >= self.program.cam_configs.len() {
             return Err(RuntimeError::InvalidCamIndex { cam_index });
@@ -3172,7 +3237,7 @@ impl<'a> Runtime<'a> {
         &self,
         cam_index: u16,
         field: CamDigitalField,
-    ) -> Result<bool, RuntimeError> {
+    ) -> Result<bool, RuntimeError<'a>> {
         let cam_idx = cam_index as usize;
         if cam_idx >= self.program.cam_configs.len() {
             return Err(RuntimeError::InvalidCamIndex { cam_index });
@@ -3185,7 +3250,11 @@ impl<'a> Runtime<'a> {
         })
     }
 
-    fn cam_analog_field(&self, cam_index: u16, field: CamAnalogField) -> Result<f32, RuntimeError> {
+    fn cam_analog_field(
+        &self,
+        cam_index: u16,
+        field: CamAnalogField,
+    ) -> Result<f32, RuntimeError<'a>> {
         let cam_idx = cam_index as usize;
         if cam_idx >= self.program.cam_configs.len() {
             return Err(RuntimeError::InvalidCamIndex { cam_index });
@@ -3211,7 +3280,7 @@ impl<'a> Runtime<'a> {
         tick: Tick,
         task: usize,
         step: StepId,
-        on_log: &mut impl FnMut(LogEvent),
+        on_log: &mut impl FnMut(LogEvent<'a>),
     ) {
         let transition_state = match stop_mode {
             AxisStopMode::Controlled => AxisStopState::ControlledStopping,
@@ -3251,7 +3320,7 @@ impl<'a> Runtime<'a> {
         to: StepId,
         reason: TransitionReason,
         on_event: &mut impl FnMut(TraceEvent),
-    ) -> Result<(), RuntimeError> {
+    ) -> Result<(), RuntimeError<'a>> {
         if task >= self.active_task_count {
             return Err(RuntimeError::InvalidTaskIndex { task });
         }

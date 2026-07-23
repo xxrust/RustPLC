@@ -1,14 +1,14 @@
-﻿
+
 struct TopologyResolver<'a> {
     topology: &'a TopologyGraph,
     by_name: HashMap<&'a str, NodeIndex>,
 }
 
-struct CylinderMotionResolution {
-    target: &'static str,
+struct CylinderMotionResolution<'a> {
+    target: &'a str,
     output: DigitalOutputId,
-    confirm_inputs: &'static [DigitalInputId],
-    opposing_inputs: &'static [DigitalInputId],
+    confirm_inputs: &'a [DigitalInputId],
+    opposing_inputs: &'a [DigitalInputId],
 }
 
 impl<'a> TopologyResolver<'a> {
@@ -123,13 +123,14 @@ impl<'a> TopologyResolver<'a> {
         })
     }
 
-    fn resolve_cylinder_motion(
+    fn resolve_cylinder_motion<'b>(
         &self,
+        arena: &'b Bump,
         state_name: &str,
         device: &str,
         port: &str,
         expect_extended: bool,
-    ) -> Result<Option<CylinderMotionResolution>, BridgeError> {
+    ) -> Result<Option<CylinderMotionResolution<'b>>, BridgeError> {
         let start =
             self.by_name
                 .get(device)
@@ -187,20 +188,21 @@ impl<'a> TopologyResolver<'a> {
         }
 
         Ok(Some(CylinderMotionResolution {
-            target: Box::leak(device.to_string().into_boxed_str()),
+            target: arena.alloc_str(device),
             output: self.resolve_digital_output_id(state_name, device, port)?,
-            confirm_inputs: leak_digital_input_ids(confirm_ids),
-            opposing_inputs: leak_digital_input_ids(opposing_ids),
+            confirm_inputs: leak_digital_input_ids(arena, confirm_ids),
+            opposing_inputs: leak_digital_input_ids(arena, opposing_ids),
         }))
     }
 
-    fn resolve_state_guard_instr(
+    fn resolve_state_guard_instr<'b>(
         &self,
+        arena: &'b Bump,
         state_name: &str,
         state_ref: &StateGuardRef,
         next: StepId,
         timeout: Option<Timeout>,
-    ) -> Result<Instr<'static>, BridgeError> {
+    ) -> Result<Instr<'b>, BridgeError> {
         let start = self
             .by_name
             .get(state_ref.device.as_str())
@@ -231,7 +233,7 @@ impl<'a> TopologyResolver<'a> {
             equals: true,
         }));
         Ok(Instr::WaitAllDigital {
-            conditions: leak_digital_conditions(conditions),
+            conditions: leak_digital_conditions(arena, conditions),
             next,
             timeout,
         })
@@ -479,16 +481,19 @@ impl<'a> TopologyResolver<'a> {
     }
 }
 
-fn leak_digital_input_ids(ids: Vec<u16>) -> &'static [DigitalInputId] {
+fn leak_digital_input_ids<'a>(arena: &'a Bump, ids: Vec<u16>) -> &'a [DigitalInputId] {
     let leaked = ids
         .into_iter()
         .map(DigitalInputId)
         .collect::<Vec<DigitalInputId>>();
-    Box::leak(leaked.into_boxed_slice())
+    arena.alloc_slice_copy(&leaked)
 }
 
-fn leak_digital_conditions(conditions: Vec<DigitalCondition>) -> &'static [DigitalCondition] {
-    Box::leak(conditions.into_boxed_slice())
+fn leak_digital_conditions<'a>(
+    arena: &'a Bump,
+    conditions: Vec<DigitalCondition>,
+) -> &'a [DigitalCondition] {
+    arena.alloc_slice_copy(&conditions)
 }
 
 fn state_port_matches(actual: Option<&str>, requested: &str) -> bool {

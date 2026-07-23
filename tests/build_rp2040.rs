@@ -45,7 +45,7 @@ task main:
         timeout: 50ms -> goto fault
 
     step drive_output:
-        action: set run_lamp.coil on
+        action: set run_lamp on
 
     step sample_analog:
         wait: AI0 >= 0.0
@@ -56,13 +56,13 @@ task main:
 
     step done:
         action: log "build_rp2040_fixture_done"
-        action: set run_lamp.coil off
+        action: set run_lamp off
 
     on_complete: goto done_task
 
 task fault:
     step stop:
-        action: set run_lamp.coil off
+        action: set run_lamp off
         action: set_analog AO0 0.0
 
     on_complete: goto done_task

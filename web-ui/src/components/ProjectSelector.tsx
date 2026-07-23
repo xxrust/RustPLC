@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import { Modal, Select, Space, Typography, message, Divider, Button } from 'antd';
 import { FolderOutlined, FileOutlined } from '@ant-design/icons';
 import { useQuery } from '@tanstack/react-query';
@@ -7,19 +7,23 @@ import { projectApi } from '../services/api';
 import { useAppStore } from '../stores/appStore';
 
 const { Text } = Typography;
-const { Option } = Select;
+const { Option, OptGroup } = Select;
 
 interface Project {
   id: string;
   name: string;
   path: string;
   type: string;
+  category?: string;
+  summary?: string;
+  scenario_path?: string;
 }
 
 export const ProjectSelector: React.FC = () => {
   const { t } = useTranslation();
   const [visible, setVisible] = useState(false);
   const [selectedProject, setSelectedProject] = useState<string | null>(null);
+  const [isSwitching, setIsSwitching] = useState(false);
   const { currentProject, setCurrentProject } = useAppStore();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -29,19 +33,39 @@ export const ProjectSelector: React.FC = () => {
     enabled: visible,
   });
 
-  const projects: Project[] = projectsData?.data?.projects || [];
+  const projects: Project[] = useMemo(() => projectsData?.data?.projects || [], [projectsData?.data?.projects]);
+  const projectsByCategory = useMemo(() => {
+    return projects.reduce<Record<string, Project[]>>((groups, project) => {
+      const category = project.category || t('projectSelector.uncategorized');
+      groups[category] = groups[category] || [];
+      groups[category].push(project);
+      return groups;
+    }, {});
+  }, [projects, t]);
 
   const handleOpen = () => {
     setSelectedProject(currentProject);
     setVisible(true);
   };
 
-  const handleOk = () => {
+  const handleOk = async () => {
     if (selectedProject) {
       const proj = projects.find((p) => p.id === selectedProject);
-      setCurrentProject(selectedProject, proj?.path ?? null, null);
-      message.success(`${t('projectSelector.switched')}: ${selectedProject}`);
-      setVisible(false);
+      try {
+        setIsSwitching(true);
+        if (proj?.type === 'plc') {
+          const source = await projectApi.getProjectSource(proj.id);
+          setCurrentProject(proj.id, source.data.path, source.data.content);
+        } else {
+          setCurrentProject(selectedProject, proj?.path ?? null, null);
+        }
+        message.success(`${t('projectSelector.switched')}: ${selectedProject}`);
+        setVisible(false);
+      } catch {
+        message.error(t('projectSelector.loadTemplateFailed'));
+      } finally {
+        setIsSwitching(false);
+      }
     }
   };
 
@@ -53,7 +77,9 @@ export const ProjectSelector: React.FC = () => {
       // Strip extension to use as project id/name
       const name = file.name.replace(/\.plc$/i, '');
       // webkitRelativePath is empty for single file pick; use file.name as path
-      const path = (file as any).path || file.name;
+      const path = typeof (file as File & { path?: unknown }).path === 'string'
+        ? (file as File & { path: string }).path
+        : file.name;
       setCurrentProject(name, path, content);
       message.success(`${t('projectSelector.switched')}: ${name}`);
       setVisible(false);
@@ -106,6 +132,7 @@ export const ProjectSelector: React.FC = () => {
         okText={t('common.confirm')}
         cancelText={t('common.cancel')}
         okButtonProps={{ disabled: !selectedProject }}
+        confirmLoading={isSwitching}
       >
         <Space direction="vertical" style={{ width: '100%' }} size="middle">
           {/* Local file picker */}
@@ -126,7 +153,7 @@ export const ProjectSelector: React.FC = () => {
 
           <Divider style={{ margin: '4px 0' }}>
             <Text type="secondary" style={{ fontSize: 11 }}>
-              {t('projectSelector.orFromServer')}
+              {t('projectSelector.templateLibrary')}
             </Text>
           </Divider>
 
@@ -134,6 +161,9 @@ export const ProjectSelector: React.FC = () => {
           <div>
             <Text type="secondary" style={{ fontSize: 12 }}>
               {t('projectSelector.current')}: <Text strong>{currentProject || t('idde.noProjectSelected')}</Text>
+            </Text>
+            <Text type="secondary" style={{ display: 'block', fontSize: 11, marginTop: 4 }}>
+              {t('projectSelector.templateCount', { count: projects.length })}
             </Text>
             <Select
               style={{ width: '100%', marginTop: 8 }}
@@ -147,13 +177,28 @@ export const ProjectSelector: React.FC = () => {
                 (option?.label as string)?.toLowerCase().includes(input.toLowerCase())
               }
             >
-              {projects.map((project) => (
-                <Option key={project.id} value={project.id} label={project.name}>
-                  {project.name}
-                  <Text type="secondary" style={{ fontSize: 11, marginLeft: 8 }}>
-                    {project.path}
-                  </Text>
-                </Option>
+              {Object.entries(projectsByCategory).map(([category, categoryProjects]) => (
+                <OptGroup key={category} label={category}>
+                  {categoryProjects.map((project) => (
+                    <Option
+                      key={project.id}
+                      value={project.id}
+                      label={`${project.name} ${project.path} ${project.summary ?? ''}`}
+                    >
+                      <div style={{ display: 'grid', gap: 2 }}>
+                        <Space size={6}>
+                          <Text strong>{project.name}</Text>
+                          <Text type="secondary" style={{ fontSize: 11 }}>
+                            {project.type}
+                          </Text>
+                        </Space>
+                        <Text type="secondary" style={{ fontSize: 11 }}>
+                          {project.summary || project.path}
+                        </Text>
+                      </div>
+                    </Option>
+                  ))}
+                </OptGroup>
               ))}
             </Select>
           </div>

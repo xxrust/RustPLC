@@ -838,7 +838,7 @@ fn resolved_device_ports(device: &DeviceDeclaration) -> Vec<GatePort> {
 }
 
 fn load_controller_profile_ports(profile_id: &str) -> Vec<GatePort> {
-    let path = Path::new(CONTROLLER_PROFILES_DIR).join(format!("{profile_id}.toml"));
+    let path = controller_profiles_dir().join(format!("{profile_id}.toml"));
     let Ok(content) = fs::read_to_string(path) else {
         return Vec::new();
     };
@@ -855,6 +855,10 @@ fn load_controller_profile_ports(profile_id: &str) -> Vec<GatePort> {
         .iter()
         .filter_map(controller_profile_port_to_gate_port)
         .collect()
+}
+
+fn controller_profiles_dir() -> std::path::PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join(CONTROLLER_PROFILES_DIR)
 }
 
 fn controller_profile_port_to_gate_port(port: &crate::device_library::PortDef) -> Option<GatePort> {

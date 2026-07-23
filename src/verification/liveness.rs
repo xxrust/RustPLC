@@ -118,6 +118,7 @@ pub fn verify_liveness(
     let step_line_map = collect_step_line_map(program);
     let step_wait_profiles = collect_step_wait_profiles(program, state_machine);
     check_wait_timeout_or_allow(program, &mut diagnostics);
+    check_pending_action_timeout_or_allow(program, &step_wait_profiles, &mut diagnostics);
     check_concurrent_wait_deadlocks(program, &step_wait_profiles, &mut diagnostics);
     check_unreachable_on_complete(program, &mut diagnostics);
     check_non_terminal_zero_out_degree(program, state_machine, &step_line_map, &mut diagnostics);
@@ -133,6 +134,37 @@ pub fn verify_liveness(
         Ok(())
     } else {
         Err(diagnostics)
+    }
+}
+
+fn check_pending_action_timeout_or_allow(
+    program: &PlcProgram,
+    profiles: &HashMap<(String, String), StepWaitProfile>,
+    diagnostics: &mut Vec<LivenessDiagnostic>,
+) {
+    for task in &program.tasks.tasks {
+        for step in &task.steps {
+            let key = state_key(&task.name, &step.name);
+            let Some(profile) = profiles.get(&key) else {
+                continue;
+            };
+            if profile.wait_semantic() != WaitSemantic::PendingAction
+                || !profile.is_unbounded_wait()
+            {
+                continue;
+            }
+            diagnostics.push(LivenessDiagnostic {
+                line: step.line.max(1),
+                reason: format!(
+                    "task {}.{} contains a pending device action without timeout or allow_indefinite_wait",
+                    task.name, step.name
+                ),
+                physical_analysis: "the runtime handler may return Pending forever, so the step has no proven completion path"
+                    .to_string(),
+                suggestion: "add an explicit step timeout route, or declare allow_indefinite_wait only for an intentional operator-controlled hold"
+                    .to_string(),
+            });
+        }
     }
 }
 

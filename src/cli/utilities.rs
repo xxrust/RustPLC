@@ -1,3 +1,6 @@
+mod documentation;
+mod keyence;
+
 use crate::cli_support::common::{
     CliOutputMode, DispatchResult, display_path_relative_to_cwd, write_json_pretty,
 };
@@ -42,6 +45,13 @@ pub(super) fn try_dispatch(
     command: &str,
     remaining: &[String],
 ) -> Option<DispatchResult> {
+    if let Some(result) = documentation::try_dispatch(program, command, remaining) {
+        return Some(result);
+    }
+    if let Some(result) = keyence::try_dispatch(program, command, remaining) {
+        return Some(result);
+    }
+
     let (error_prefix, result) = match command {
         "geometry-export" => (
             Some("[GEOM-000]"),
@@ -201,15 +211,8 @@ fn build_process_operation_model_for_loaded_source(
     loaded: &rust_plc::source_bundle::LoadedPlcSource,
 ) -> Result<ProcessOperationModel, String> {
     let parsed = parse_loaded_plc_with_required_purpose(loaded)?;
-    let devices_dir = Path::new("devices");
-    let device_library =
-        rust_plc::device_library::DeviceLibrary::load(devices_dir).map_err(|errors| {
-            errors
-                .into_iter()
-                .map(|err| err.to_string())
-                .collect::<Vec<_>>()
-                .join("\n")
-        })?;
+    let device_library = crate::cli_support::plc_pipeline::load_default_device_library()
+        .map_err(|errors| errors.join("\n"))?;
     let expanded = preprocess_program_with_library(
         &parsed,
         if device_library.is_empty() {

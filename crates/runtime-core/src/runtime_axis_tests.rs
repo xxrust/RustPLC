@@ -1007,20 +1007,23 @@
         let mut rt = Runtime::new(&program).expect("runtime init");
         let mut on_event = |_| {};
         let mut on_log = |_| {};
-        let mut on_extern_call = |_function: &'static str,
+        let mut on_extern_call = |_function: &str,
                                   _args: &[f32],
                                   _results: &mut [f32]|
          -> Result<usize, ()> { Err(()) };
-        let mut map_extern_error_code = |_function: &'static str, _error: &()| 0.0;
+        let mut map_extern_error_code = |_function: &str, _error: &()| 0.0;
         let mut on_axis_motion =
             |_command: AxisMotionCommand| Ok(AxisMotionResult::safety_fault(55));
-        let mut on_process_device = |command: ProcessDeviceActionCommand| {
+        fn missing_process_device<'a>(
+            command: ProcessDeviceActionCommand<'a>,
+        ) -> Result<ProcessDeviceActionResult, RuntimeError<'a>> {
             Err(RuntimeError::ProcessDeviceActionRequiresHandler {
                 family: command.family,
                 action: command.action,
                 target: command.target,
             })
-        };
+        }
+        let mut on_process_device = missing_process_device;
         let mut applied_targets = std::vec::Vec::new();
 
         let err = rt.tick_with_trace_and_logs_impl(

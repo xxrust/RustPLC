@@ -297,9 +297,24 @@ transfer_point load_to_press {
     site: press_infeed
     handshake: st01_to_st02
 }
+
+controller_sync st01_st02_clock {
+    controllers: [plc_load, plc_press]
+    max_skew: 5ms
+    heartbeat: 100ms
+}
 ```
 
-These declarations are not placeholder documentation. They are the front-door contract for device ownership, cross-station task writes, handshake signal reuse, timeout target validity, and transfer-point consistency.
+These declarations are not placeholder documentation. They are the front-door contract for device ownership, cross-station task writes, handshake signal reuse, timeout target validity, transfer-point consistency, and cross-controller timing synchronization.
+
+`controller_sync` belongs to the topology contract, not to a task step. It states that the named PLC controllers participate in one timing domain and gives the verifier two concrete bounds:
+
+- `max_skew`: the maximum allowed clock or scan-phase skew between controllers.
+- `heartbeat`: the proof interval for detecting loss of synchronization.
+
+The parser lowers this declaration into AST, semantic validation checks controller references and timing bounds, IR stores it in `TopologyGraph.station_protocol.controller_syncs`, and verification report summary counts it under `verification.station_protocol.checked_rules`.
+
+For multi-controller projects, missing station protocol ownership emits `STP-001`; missing `controller_sync` timing contracts emits `STP-002`; partial controller coverage emits `STP-003`.
 
 ## 13. Scaffold Direction
 

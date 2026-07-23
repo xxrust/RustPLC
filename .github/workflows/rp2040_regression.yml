@@ -6,6 +6,34 @@ on:
   pull_request:
 
 jobs:
+  dependency-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+      - name: Reject unsound or yanked Rust dependencies
+        run: cargo audit --deny unsound --deny yanked
+
+  web-ui-audit:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web-ui
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web-ui/package-lock.json
+      - run: npm ci
+      - name: Reject vulnerable frontend dependencies
+        run: npm audit --registry=https://registry.npmjs.org
+      - name: Build web UI
+        run: npm run build
+
   script-contracts:
     runs-on: ubuntu-latest
     steps:
@@ -47,7 +75,7 @@ jobs:
           {
             rustc --version
             cargo --version
-            CARGO_TERM_COLOR=never cargo test --workspace --quiet
+            CARGO_TERM_COLOR=never cargo test --workspace --all-targets --quiet
           } 2>&1 | tee /tmp/rustplc-workspace-test.log
           status=${PIPESTATUS[0]}
           set -e

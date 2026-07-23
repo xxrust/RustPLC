@@ -1,5 +1,6 @@
 use crate::error::{PlcError, SourceLocation};
 use serde::Deserialize;
+use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -12,6 +13,14 @@ pub struct LoadedPlcSource {
     pub requested_path: PathBuf,
     pub source: String,
     pub source_map: SourceBundleMap,
+    pub dependencies: Vec<LoadedSourceDependency>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LoadedSourceDependency {
+    pub role: String,
+    pub path: PathBuf,
+    pub sha256: String,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -137,10 +146,12 @@ pub fn load_plc_source(path: &Path) -> Result<LoadedPlcSource, String> {
     } else {
         let source = fs::read_to_string(path)
             .map_err(|err| format!("Failed to read PLC file {}: {err}", path.display()))?;
+        let dependencies = vec![source_dependency("source", path, source.as_bytes())];
         Ok(LoadedPlcSource {
             requested_path: path.to_path_buf(),
             source_map: SourceBundleMap::plain(path, &source),
             source,
+            dependencies,
         })
     }
 }
@@ -156,12 +167,13 @@ pub fn remap_plc_error(error: PlcError, source_map: &SourceBundleMap) -> PlcErro
 fn load_bundle_source(path: &Path) -> Result<LoadedPlcSource, String> {
     let manifest_text = fs::read_to_string(path)
         .map_err(|err| format!("Failed to read PLC bundle {}: {err}", path.display()))?;
+    let manifest_dependency = source_dependency("bundle_manifest", path, manifest_text.as_bytes());
     let manifest: SourceBundleManifest = toml::from_str(&manifest_text)
         .map_err(|err| format!("Failed to parse PLC bundle {}: {err}", path.display()))?;
 
     match manifest.schema_version {
-        1 => load_bundle_v1(path, manifest),
-        2 => load_bundle_v2(path, manifest),
+        1 => load_bundle_v1(path, manifest, manifest_dependency),
+        2 => load_bundle_v2(path, manifest, manifest_dependency),
         other => Err(format!(
             "Unsupported PLC bundle schema_version {} in {} (expected 1 or 2)",
             other,
@@ -170,7 +182,11 @@ fn load_bundle_source(path: &Path) -> Result<LoadedPlcSource, String> {
     }
 }
 
-fn load_bundle_v1(path: &Path, manifest: SourceBundleManifest) -> Result<LoadedPlcSource, String> {
+fn load_bundle_v1(
+    path: &Path,
+    manifest: SourceBundleManifest,
+    manifest_dependency: LoadedSourceDependency,
+) -> Result<LoadedPlcSource, String> {
     let unsupported = manifest
         .extra
         .keys()
@@ -193,6 +209,7 @@ fn load_bundle_v1(path: &Path, manifest: SourceBundleManifest) -> Result<LoadedP
     let bundle_dir = path.parent().unwrap_or_else(|| Path::new("."));
     let mut assembled_lines = Vec::<String>::new();
     let mut source_map = SourceBundleMap::default();
+    let mut dependencies = vec![manifest_dependency];
 
     for (section_name, section) in [
         ("topology", manifest.topology.unwrap_or_default()),
@@ -210,6 +227,11 @@ fn load_bundle_v1(path: &Path, manifest: SourceBundleManifest) -> Result<LoadedP
                     path.display()
                 )
             })?;
+            dependencies.push(source_dependency(
+                &format!("bundle_fragment:{section_name}"),
+                &fragment_path,
+                fragment_text.as_bytes(),
+            ));
 
             assembled_lines.push(format!(
                 "# bundle fragment: {}",
@@ -246,10 +268,15 @@ fn load_bundle_v1(path: &Path, manifest: SourceBundleManifest) -> Result<LoadedP
         requested_path: path.to_path_buf(),
         source,
         source_map,
+        dependencies,
     })
 }
 
-fn load_bundle_v2(path: &Path, manifest: SourceBundleManifest) -> Result<LoadedPlcSource, String> {
+fn load_bundle_v2(
+    path: &Path,
+    manifest: SourceBundleManifest,
+    manifest_dependency: LoadedSourceDependency,
+) -> Result<LoadedPlcSource, String> {
     let phases = manifest
         .phases
         .ok_or_else(|| format!("PLC bundle v2 {} requires a [phases] table", path.display()))?;
@@ -333,6 +360,7 @@ fn load_bundle_v2(path: &Path, manifest: SourceBundleManifest) -> Result<LoadedP
 
     let mut assembled_lines = Vec::<String>::new();
     let mut source_map = SourceBundleMap::default();
+    let mut dependencies = vec![manifest_dependency];
 
     for (section_name, fragments) in [
         ("topology", topology_fragments),
@@ -349,6 +377,11 @@ fn load_bundle_v2(path: &Path, manifest: SourceBundleManifest) -> Result<LoadedP
                     path.display()
                 )
             })?;
+            dependencies.push(source_dependency(
+                &format!("bundle_fragment:{section_name}"),
+                &fragment_path,
+                fragment_text.as_bytes(),
+            ));
 
             assembled_lines.push(format!(
                 "# bundle fragment: {}",
@@ -385,6 +418,7 @@ fn load_bundle_v2(path: &Path, manifest: SourceBundleManifest) -> Result<LoadedP
         requested_path: path.to_path_buf(),
         source,
         source_map,
+        dependencies,
     })
 }
 
@@ -421,6 +455,16 @@ fn count_source_lines(source: &str) -> usize {
 
 fn absolutize_display_path(path: &Path) -> PathBuf {
     fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+}
+
+fn source_dependency(role: &str, path: &Path, bytes: &[u8]) -> LoadedSourceDependency {
+    let mut hasher = Sha256::new();
+    hasher.update(bytes);
+    LoadedSourceDependency {
+        role: role.to_string(),
+        path: absolutize_display_path(path),
+        sha256: hex::encode(hasher.finalize()),
+    }
 }
 
 #[cfg(test)]

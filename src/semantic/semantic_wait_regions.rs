@@ -128,7 +128,8 @@ fn collect_threshold_values_from_statements(
     }
 }
 
-pub fn build_topology_from_ast(topology: &TopologySection) -> Result<TopologyGraph, Vec<PlcError>> {
+pub(crate) fn build_topology_from_ast(topology: &TopologySection) -> Result<TopologyGraph, Vec<PlcError>> {
+    validate_unique_source_device_names(topology)?;
     let mut topology_graph = TopologyGraph::new();
     let mut device_nodes = HashMap::<String, DeviceNode>::new();
     let mut errors = Vec::new();
@@ -260,6 +261,7 @@ pub fn build_topology_from_ast(topology: &TopologySection) -> Result<TopologyGra
     }
 
     topology_graph.pid_loops = pid_loops;
+    topology_graph.station_protocol = extract_station_protocol_model(topology);
     topology_graph.variables = variable_defs;
     topology_graph.cam_tables = cam_table_defs;
     topology_graph.cam_couplings = cam_couplings;

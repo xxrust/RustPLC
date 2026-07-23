@@ -273,6 +273,35 @@ task unload_part:
         action: log "empty-slot"
 "#;
 
+const PLC_WORKPIECE_VERIFY_UNMOUNT_TYPE_MISMATCH: &str = r#"
+[topology]
+
+workpiece rod: workpiece_type {
+    ingress_sites: [plate.slot[*]]
+}
+
+workpiece cell: workpiece_type {
+    ingress_sites: [plate.slot[*]]
+    normal_terminal_states: [finished]
+    normal_egress_sites: [outfeed]
+}
+
+carrier plate: workpiece_carrier { slots: 1 }
+location outfeed: workpiece_location { capacity: 1 }
+
+[constraints]
+
+[tasks]
+
+task unload_part:
+    step mount:
+        effect: mount rod on plate.slot[0]
+    step unload:
+        effect: unmount cell from plate.slot[0] to outfeed
+    step done:
+        action: log "type-mismatch"
+"#;
+
 const PLC_WORKPIECE_VERIFY_MOUNTED_CONSISTENCY: &str = r#"
 [topology]
 
@@ -730,7 +759,9 @@ fn read_example_source(file_name: &str) -> String {
         .unwrap_or_else(|err| panic!("failed to read example {file_name}: {err}"))
 }
 
-fn collect_runtime_actions(program: &runtime_core::Program<'static>) -> Vec<runtime_core::Action> {
+fn collect_runtime_actions<'a>(
+    program: &'a runtime_core::Program<'a>,
+) -> Vec<runtime_core::Action<'a>> {
     program
         .tasks
         .iter()
@@ -760,9 +791,10 @@ fn workpiece_carrier_slot_transfer_builds_ir_and_verifies() {
     verify_all(&program, &topology, &constraints, &state_machine)
         .expect("carrier slot transfer fixture should pass verification");
 
-    let runtime_program =
+    let compiled_runtime_program =
         state_machine_to_runtime_program(&topology, &constraints, &state_machine, 10)
             .expect("runtime bridge should lower carrier slot endpoints");
+    let runtime_program = compiled_runtime_program.program();
     let slot_sites = runtime_program
         .workpiece_sites
         .iter()
@@ -782,7 +814,7 @@ fn workpiece_carrier_slot_transfer_builds_ir_and_verifies() {
         ]
     );
     assert!(
-        collect_runtime_actions(&runtime_program)
+        collect_runtime_actions(runtime_program)
             .iter()
             .any(|action| {
                 matches!(
@@ -805,12 +837,13 @@ fn runtime_executes_workpiece_carrier_slot_transfer_example_end_to_end() {
     let constraints = build_constraint_set(&program).expect("constraints should build");
     let state_machine = build_state_machine(&program).expect("state machine should build");
 
-    let runtime_program =
+    let compiled_runtime_program =
         state_machine_to_runtime_program(&topology, &constraints, &state_machine, 10)
             .expect("runtime bridge should lower carrier slot example");
+    let runtime_program = compiled_runtime_program.program();
 
     let mut io = MemIo::new();
-    let mut runtime = Runtime::new(&runtime_program).expect("runtime should initialize");
+    let mut runtime = Runtime::new(runtime_program).expect("runtime should initialize");
     runtime
         .tick(&mut io)
         .expect("carrier slot example should execute");
@@ -874,10 +907,11 @@ fn runtime_bridge_lowers_mount_unmount_and_transform_actions() {
     let constraints = build_constraint_set(&program).expect("constraints should build");
     let state_machine = build_state_machine(&program).expect("state machine should build");
 
-    let runtime_program =
+    let compiled_runtime_program =
         state_machine_to_runtime_program(&topology, &constraints, &state_machine, 10)
             .expect("runtime bridge should lower phase2 carrier actions");
-    let actions = collect_runtime_actions(&runtime_program);
+    let runtime_program = compiled_runtime_program.program();
+    let actions = collect_runtime_actions(runtime_program);
     assert!(actions.iter().any(|action| matches!(
         action,
         Action::WorkpieceMount {
@@ -912,12 +946,13 @@ fn runtime_executes_mount_unmount_and_transform_actions_end_to_end() {
     let constraints = build_constraint_set(&program).expect("constraints should build");
     let state_machine = build_state_machine(&program).expect("state machine should build");
 
-    let runtime_program =
+    let compiled_runtime_program =
         state_machine_to_runtime_program(&topology, &constraints, &state_machine, 10)
             .expect("runtime bridge should lower phase2 carrier actions");
+    let runtime_program = compiled_runtime_program.program();
 
     let mut io = MemIo::new();
-    let mut runtime = Runtime::new(&runtime_program).expect("runtime should initialize");
+    let mut runtime = Runtime::new(runtime_program).expect("runtime should initialize");
     runtime
         .tick(&mut io)
         .expect("mount/transform/unmount flow should execute");
@@ -943,9 +978,10 @@ fn runtime_bridge_lowers_split_effect_into_runtime_action() {
     let constraints = build_constraint_set(&program).expect("constraints should build");
     let state_machine = build_state_machine(&program).expect("state machine should build");
 
-    let runtime_program =
+    let compiled_runtime_program =
         state_machine_to_runtime_program(&topology, &constraints, &state_machine, 10)
             .expect("runtime bridge should lower split actions");
+    let runtime_program = compiled_runtime_program.program();
 
     assert!(runtime_program.tasks.iter().any(|task| {
         task.steps.iter().any(|step| {
@@ -977,12 +1013,13 @@ fn runtime_executes_split_action_end_to_end() {
     let constraints = build_constraint_set(&program).expect("constraints should build");
     let state_machine = build_state_machine(&program).expect("state machine should build");
 
-    let runtime_program =
+    let compiled_runtime_program =
         state_machine_to_runtime_program(&topology, &constraints, &state_machine, 10)
             .expect("runtime bridge should lower split actions");
+    let runtime_program = compiled_runtime_program.program();
 
     let mut io = MemIo::new();
-    let mut runtime = Runtime::new(&runtime_program).expect("runtime should initialize");
+    let mut runtime = Runtime::new(runtime_program).expect("runtime should initialize");
     runtime.tick(&mut io).expect("split flow should execute");
 
     assert_eq!(runtime.workpiece_tokens().active_tokens(), 4);
@@ -1007,12 +1044,13 @@ fn runtime_bridge_lowers_merge_effect_into_runtime_action() {
     let constraints = build_constraint_set(&program).expect("constraints should build");
     let state_machine = build_state_machine(&program).expect("state machine should build");
 
-    let runtime_program =
+    let compiled_runtime_program =
         state_machine_to_runtime_program(&topology, &constraints, &state_machine, 10)
             .expect("runtime bridge should lower merge effects");
+    let runtime_program = compiled_runtime_program.program();
 
     assert!(
-        collect_runtime_actions(&runtime_program)
+        collect_runtime_actions(runtime_program)
             .iter()
             .any(|action| {
                 matches!(
@@ -1039,12 +1077,13 @@ fn runtime_executes_merge_action_end_to_end() {
     let constraints = build_constraint_set(&program).expect("constraints should build");
     let state_machine = build_state_machine(&program).expect("state machine should build");
 
-    let runtime_program =
+    let compiled_runtime_program =
         state_machine_to_runtime_program(&topology, &constraints, &state_machine, 10)
             .expect("runtime bridge should lower merge actions");
+    let runtime_program = compiled_runtime_program.program();
 
     let mut io = MemIo::new();
-    let mut runtime = Runtime::new(&runtime_program).expect("runtime should initialize");
+    let mut runtime = Runtime::new(runtime_program).expect("runtime should initialize");
     runtime
         .tick(&mut io)
         .expect("split/merge flow should execute");
@@ -1113,10 +1152,11 @@ fn runtime_bridge_lowers_workpiece_split_merge_example_into_runtime_actions() {
     let constraints = build_constraint_set(&program).expect("constraints should build");
     let state_machine = build_state_machine(&program).expect("state machine should build");
 
-    let runtime_program =
+    let compiled_runtime_program =
         state_machine_to_runtime_program(&topology, &constraints, &state_machine, 10)
             .expect("runtime bridge should lower split/merge example");
-    let actions = collect_runtime_actions(&runtime_program);
+    let runtime_program = compiled_runtime_program.program();
+    let actions = collect_runtime_actions(runtime_program);
 
     assert!(actions.iter().any(|action| {
         matches!(
@@ -1655,6 +1695,52 @@ fn verify_all_rejects_unmount_from_empty_slot() {
                 .reason
                 .contains("before any mounted workpiece is available")
             && error.reason.contains("plate.slot[0]")
+    }));
+}
+
+#[test]
+fn verify_all_rejects_unmount_type_mismatch() {
+    let program =
+        parse_plc(PLC_WORKPIECE_VERIFY_UNMOUNT_TYPE_MISMATCH).expect("fixture should parse");
+    let topology = build_topology_graph(&program).expect("topology should build");
+    let constraints = build_constraint_set(&program).expect("constraints should build");
+    let state_machine = build_state_machine(&program).expect("state machine should build");
+
+    let errors =
+        verify_all(&program, &topology, &constraints, &state_machine).expect_err("must fail");
+    assert!(errors.iter().any(|error| {
+        error.checker == "safety"
+            && error.reason.contains("declares workpiece type 'cell'")
+            && error.reason.contains("has type 'rod'")
+    }));
+}
+
+#[test]
+fn bridge_and_verification_reject_oversized_carrier_layout_before_expansion() {
+    let program = parse_plc(PLC_WORKPIECE_MOUNT_UNMOUNT).expect("fixture should parse");
+    let topology = build_topology_graph(&program).expect("topology should build");
+    let mut constraints = build_constraint_set(&program).expect("constraints should build");
+    constraints.workpiece_carriers[0].layout = rust_plc::ir::WorkpieceCarrierLayoutDef::Grid {
+        rows: u32::MAX,
+        cols: u32::MAX,
+    };
+    let state_machine = build_state_machine(&program).expect("state machine should build");
+
+    let bridge_error =
+        state_machine_to_runtime_program(&topology, &constraints, &state_machine, 10)
+            .expect_err("bridge must reject oversized carrier before allocating slot names");
+    assert!(matches!(
+        bridge_error,
+        BridgeError::WorkpieceCarrierSlotLimitExceeded { .. }
+    ));
+
+    let errors = verify_all(&program, &topology, &constraints, &state_machine)
+        .expect_err("verification must apply the same carrier slot bound");
+    assert!(errors.iter().any(|error| {
+        error.checker == "safety"
+            && error
+                .reason
+                .contains("exceeding runtime/verification limit 4096")
     }));
 }
 

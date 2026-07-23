@@ -1,12 +1,18 @@
 #[cfg(test)]
 mod tests {
     use super::{
-        SafetyConfig, SafetyModel, SafetyProofLevel, SafetyRuleStatusKind, analog_state_for_value,
-        initial_concrete_state, verify_safety, verify_safety_with_config,
+        SafetyConfig, SafetyModel, SafetyProofLevel, SafetyRuleStatusKind,
+        WorkpieceEndpointRegistry, analog_state_for_value, initial_concrete_state, verify_safety,
+        verify_safety_with_config,
     };
-    use crate::ir::{SafetyExpr, SafetyRelation, SafetyRule, StateExpr};
+    use crate::ir::{
+        ConstraintSet, SafetyExpr, SafetyRelation, SafetyRule, StateExpr, WorkpieceSiteDef,
+        WorkpieceSiteKind,
+    };
     use crate::parser::parse_plc;
-    use crate::semantic::{build_constraint_set, build_state_machine};
+    use crate::semantic::{
+        build_constraint_set, build_state_machine_allow_raw_io_for_test as build_state_machine,
+    };
 
     #[test]
     fn proves_sequential_cylinder_sequence_without_parallel_conflict() {
@@ -1434,8 +1440,9 @@ task set_b:
         let constraints = build_constraint_set(&program).expect("约束应能构建");
         let state_machine = build_state_machine(&program).expect("状态机应能构建");
 
-        verify_safety(&program, &constraints, &state_machine)
-            .expect("runtime 已支持的函数 guard 应进入 safety 求值，避免 unsupported guard 继续放大假路径");
+        verify_safety(&program, &constraints, &state_machine).expect(
+            "runtime 已支持的函数 guard 应进入 safety 求值，避免 unsupported guard 继续放大假路径",
+        );
     }
 
     #[test]
@@ -1577,5 +1584,71 @@ task main:
                 .contains_key(&("irrelevant_output".to_string(), "self".to_string())),
             "仅被普通 action 使用、但不参与 safety/resource claim 的设备不应被跟踪"
         );
+    }
+
+    #[test]
+    fn retains_cross_task_variable_writers_in_safety_slice() {
+        let source = r#"
+[topology]
+variable gate: bool = false
+device out_a: digital_output
+device out_b: digital_output
+
+[constraints]
+safety: out_a.on conflicts_with out_b.on
+
+[tasks]
+task writer:
+    step seed:
+        action: compute gate = true
+    step halt:
+
+task left:
+    step choose:
+        if: gate == true goto left.set else: goto left.done
+    step set:
+        action: set out_a on
+    step done:
+        action: log "left done"
+
+task right:
+    step set:
+        action: set out_b on
+    step halt:
+"#;
+
+        let program = parse_plc(source).expect("cross-task variable fixture should parse");
+        let constraints = build_constraint_set(&program).expect("constraints should build");
+        let state_machine = build_state_machine(&program).expect("state machine should build");
+        let model = SafetyModel::from_inputs(&program, &constraints, &state_machine);
+        assert!(
+            model.active_task_names.iter().any(|task| task == "writer"),
+            "variable writer must remain active: {:?}",
+            model.active_task_names
+        );
+
+        let diagnostics = verify_safety(&program, &constraints, &state_machine)
+            .expect_err("safety must retain the variable writer and find the reachable conflict");
+        assert!(
+            diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.constraint.contains("out_a.on")),
+            "expected the cross-task writer to make out_a.on reachable"
+        );
+    }
+
+    #[test]
+    fn workpiece_endpoint_registry_preserves_capacity_above_u16_range() {
+        let constraints = ConstraintSet {
+            workpiece_sites: vec![WorkpieceSiteDef {
+                name: "large_buffer".to_string(),
+                kind: WorkpieceSiteKind::WorkpieceLocation,
+                capacity: 70_000,
+            }],
+            ..ConstraintSet::default()
+        };
+
+        let registry = WorkpieceEndpointRegistry::from_constraints(&constraints);
+        assert_eq!(registry.capacities, vec![70_000]);
     }
 }
