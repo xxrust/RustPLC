@@ -88,8 +88,17 @@ pub(crate) fn workspace_output_root(workspace_root: &Path) -> Result<PathBuf, St
 }
 
 pub(crate) fn artifact_href(workspace_root: &Path, path: &Path) -> String {
+    let workspace_root = workspace_root
+        .canonicalize()
+        .unwrap_or_else(|_| workspace_root.to_path_buf());
+    if let Ok(rel) = path.strip_prefix(&workspace_root) {
+        let rel = rel.to_string_lossy().replace('\\', "/");
+        if rel.starts_with("delivery-projects/") {
+            return format!("/artifacts/{rel}");
+        }
+    }
     let output_root =
-        workspace_output_root(workspace_root).unwrap_or_else(|_| workspace_root.join("out"));
+        workspace_output_root(&workspace_root).unwrap_or_else(|_| workspace_root.join("out"));
     let rel = path
         .strip_prefix(output_root)
         .map(|part| part.to_string_lossy().replace('\\', "/"));
@@ -112,13 +121,20 @@ pub(crate) fn resolve_artifact_reference(
     if !is_safe_relative_path(rel) {
         return None;
     }
-    let lexical = workspace_root.join("out").join(rel);
+    let (allowed_root, lexical) = if rel.starts_with("delivery-projects/") {
+        let canonical_workspace = workspace_root.canonicalize().ok()?;
+        let allowed_root = canonical_workspace.join("delivery-projects");
+        (allowed_root, canonical_workspace.join(rel))
+    } else {
+        let allowed_root = workspace_root.join("out");
+        (allowed_root.clone(), allowed_root.join(rel))
+    };
     if !lexical.exists() {
         return Some(lexical);
     }
-    let out_root = workspace_output_root(workspace_root).ok()?;
+    let allowed_root = allowed_root.canonicalize().ok()?;
     let path = lexical.canonicalize().ok()?;
-    path.starts_with(&out_root).then_some(path)
+    path.starts_with(&allowed_root).then_some(path)
 }
 
 fn resolve_internal_artifact_path(workspace_root: &Path, raw: &str) -> Option<PathBuf> {
@@ -129,7 +145,12 @@ fn resolve_internal_artifact_path(workspace_root: &Path, raw: &str) -> Option<Pa
         workspace_root.join(path).canonicalize().ok()?
     };
     let out_root = workspace_output_root(workspace_root).ok()?;
-    path.starts_with(&out_root).then_some(path)
+    let delivery_root = workspace_root.join("delivery-projects").canonicalize().ok();
+    (path.starts_with(&out_root)
+        || delivery_root
+            .as_ref()
+            .is_some_and(|root| path.starts_with(root)))
+    .then_some(path)
 }
 
 pub(crate) fn read_text_file_limited(path: &Path, max_bytes: u64) -> Result<String, String> {

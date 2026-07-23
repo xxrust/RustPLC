@@ -18,6 +18,7 @@ use axum::extract::{Path, Query, State};
 use axum::http::{header, Request, StatusCode};
 use axum::response::Json;
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::PathBuf;
@@ -156,6 +157,46 @@ async fn mutating_routes_require_configured_bearer_token() {
 }
 
 #[tokio::test]
+async fn artifact_routes_require_configured_bearer_token() {
+    let workspace_root = temp_workspace_root("artifact-auth-route");
+    let artifact = workspace_root.join("out/report.json");
+    fs::create_dir_all(artifact.parent().expect("artifact parent"))
+        .expect("artifact parent should exist");
+    fs::write(&artifact, "{}").expect("artifact should be written");
+    let state = test_state_with_security(
+        workspace_root,
+        std::collections::BTreeMap::new(),
+        Some("test-secret"),
+        2,
+    );
+    let app = build_app(state);
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/artifacts/report.json")
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await
+        .expect("route response");
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/artifacts/report.json")
+                .header(header::AUTHORIZATION, "Bearer test-secret")
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await
+        .expect("route response");
+    assert_eq!(response.status(), StatusCode::OK);
+}
+
+#[tokio::test]
 async fn human_hold_signing_requires_session_role_commit_and_current_evidence() {
     let workspace_root = temp_workspace_root("hold-signing");
     let project_root = workspace_root
@@ -239,8 +280,13 @@ async fn human_hold_signing_requires_session_role_commit_and_current_evidence() 
         .expect("signature context route should respond");
     assert_eq!(signature_context.status(), StatusCode::OK);
     let signature_context = response_json(signature_context).await;
+    assert_eq!(
+        signature_context["attestation_standard"],
+        "internal_engineering_v1"
+    );
     let sign_body = json!({
         "hold_type": "wiring_review",
+        "attestation_standard": "internal_engineering_v1",
         "source_commit": "deadbeef",
         "evidence_digests": signature_context["current_evidence_digests"],
         "decision": "approve",
@@ -478,6 +524,36 @@ fn artifact_references_reject_escape_and_absolute_paths() {
     assert!(resolve_artifact_reference(&workspace_root, "/artifacts/../secret").is_none());
     assert!(resolve_artifact_reference(&workspace_root, "/artifacts/%2e%2e/secret").is_none());
     assert!(resolve_artifact_reference(&workspace_root, r"C:\secret").is_none());
+}
+
+#[test]
+fn artifact_references_allow_delivery_project_evidence_only() {
+    let workspace_root = temp_workspace_root("artifact-reference-delivery-project");
+    let evidence = workspace_root.join("delivery-projects/demo/runs/run-1/anomalies.json");
+    fs::create_dir_all(evidence.parent().expect("evidence parent"))
+        .expect("create evidence parent");
+    fs::write(&evidence, "{}").expect("write evidence");
+    let resolved = resolve_artifact_reference(
+        &workspace_root,
+        "/artifacts/delivery-projects/demo/runs/run-1/anomalies.json",
+    )
+    .expect("delivery evidence should resolve");
+    assert_eq!(
+        resolved,
+        evidence.canonicalize().expect("canonical evidence")
+    );
+
+    fs::write(workspace_root.join("secret.txt"), "secret").expect("write workspace file");
+    let unrelated = resolve_artifact_reference(&workspace_root, "/artifacts/secret.txt")
+        .expect("output artifact path should remain lexical");
+    assert!(unrelated.ends_with("out/secret.txt"));
+    assert_ne!(
+        unrelated,
+        workspace_root
+            .join("secret.txt")
+            .canonicalize()
+            .expect("workspace file")
+    );
 }
 
 #[test]
@@ -1866,6 +1942,46 @@ fn write_delivery_project_fixture(workspace_root: &std::path::Path) {
     )
     .expect("verification report should be written");
     fs::write(
+        project_root.join("out/agent-runs/run-1/compile/geometry.json"),
+        serde_json::to_vec_pretty(&json!({
+            "schema_version": 1,
+            "artifact_kind": "semantic_twin_geometry",
+            "source_path": "plc/main.bundle.toml",
+            "summary": {
+                "task_count": 1,
+                "step_count": 1,
+                "transition_count": 1,
+                "device_count": 1,
+                "resource_count": 0,
+                "timing_rule_count": 0,
+                "causality_chain_count": 0,
+                "observed_transition_count": 0,
+                "intent_mismatch_count": 0
+            },
+            "lanes": [{ "id": "task", "kind": "task", "label": "Task", "position": 0 }],
+            "nodes": [{
+                "id": "step:start",
+                "kind": "step",
+                "label": "start",
+                "lane_id": "task",
+                "views": ["constellation", "evidence"],
+                "evidence_status": "verified"
+            }],
+            "edges": [{
+                "id": "transition:start",
+                "kind": "transition",
+                "from": "step:start",
+                "to": "step:start",
+                "label": "complete",
+                "views": ["constellation", "evidence"],
+                "evidence_status": "derived"
+            }],
+            "overlays": {}
+        }))
+        .expect("geometry should serialize"),
+    )
+    .expect("geometry should be written");
+    fs::write(
         project_root.join("out/agent-runs/run-1/project-check/project_check_report.json"),
         serde_json::to_vec_pretty(&json!({
             "schema_version": 1,
@@ -1892,7 +2008,19 @@ fn write_delivery_project_fixture(workspace_root: &std::path::Path) {
                 "signal_type": "digital",
                 "safe_state": null,
                 "status": "human_action_required"
-            }]
+            }],
+            "diagnostics": [{
+                "code": "WIR-004",
+                "kind": "direction_mismatch",
+                "point_id": "plc_main.X0",
+                "severity": "error",
+                "message": "Fixture wiring direction mismatch"
+            }],
+            "validation_summary": {
+                "status": "fail",
+                "error_count": 1,
+                "checked_rules": ["direction_mismatch"]
+            }
         }))
         .expect("wiring should serialize"),
     )
@@ -1914,6 +2042,107 @@ fn write_delivery_project_fixture(workspace_root: &std::path::Path) {
         .expect("hold contract should serialize"),
     )
     .expect("hold contract should be written");
+}
+
+fn normalized_fixture_sha256(path: &std::path::Path) -> String {
+    let text = fs::read_to_string(path).expect("fixture should be readable");
+    let normalized = text.replace("\r\n", "\n").replace('\r', "\n");
+    let digest = Sha256::digest(normalized.as_bytes());
+    digest.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+fn write_delivery_provenance_v2(
+    workspace_root: &std::path::Path,
+    attribution_kind: &str,
+    include_agent_binding: bool,
+    prove_source_authoring: bool,
+) {
+    let run_root = workspace_root.join("delivery-projects/demo-line/out/agent-runs/run-1");
+    let input_manifest = run_root.join("input-manifest.json");
+    let (attributed_artifact, attributed_path, task_id) = if prove_source_authoring {
+        (
+            workspace_root.join("delivery-projects/demo-line/plc/main.bundle.toml"),
+            "delivery-projects/demo-line/plc/main.bundle.toml",
+            "generate_source",
+        )
+    } else {
+        (
+            run_root.join("compile/verification_report.json"),
+            "delivery-projects/demo-line/out/agent-runs/run-1/compile/verification_report.json",
+            "compile_verify",
+        )
+    };
+    let mut record = json!({
+        "path": attributed_path,
+        "before_sha256": if prove_source_authoring { json!("0".repeat(64)) } else { Value::Null },
+        "after_sha256": normalized_fixture_sha256(&attributed_artifact),
+        "attribution_kind": attribution_kind,
+        "basis": "test-owned deterministic output"
+    });
+    if include_agent_binding {
+        record["agent_id"] = json!("agent.materializer");
+        record["task_id"] = json!(task_id);
+        record["event_id"] = json!("EVT-001");
+    } else {
+        record["event_id"] = json!("");
+    }
+    fs::write(
+        run_root.join("agent-events.json"),
+        serde_json::to_vec_pretty(&json!({
+            "schema_version": 1,
+            "records": [{ "event_id": "EVT-001", "task": task_id }]
+        }))
+        .expect("agent events should serialize"),
+    )
+    .expect("agent events should be written");
+    fs::write(
+        run_root.join("provenance.json"),
+        serde_json::to_vec_pretty(&json!({
+            "schema_version": 2,
+            "project_id": "line.demo",
+            "run_id": "run-1",
+            "source_commit": "0123456789abcdef",
+            "git_base_commit": "0123456789abcdef",
+            "dirty_worktree_at_start": true,
+            "started_at_utc": "2026-07-24T00:00:00Z",
+            "completed_at_utc": "2026-07-24T00:00:01Z",
+            "provenance_scope": if prove_source_authoring { "source_generation" } else { "delivery_fixture_materialization" },
+            "execution_unattended_verdict": "proven",
+            "source_authoring_verdict": if prove_source_authoring { "proven" } else { "not_proven" },
+            "unattended_verdict": if prove_source_authoring { "proven" } else { "not_proven" },
+            "event_stream": "delivery-projects/demo-line/out/agent-runs/run-1/agent-events.json",
+            "input_manifest": {
+                "artifact_ref": "delivery-projects/demo-line/out/agent-runs/run-1/input-manifest.json",
+                "digest": {
+                    "algorithm": "sha256",
+                    "value": normalized_fixture_sha256(&input_manifest),
+                    "normalization": "utf8_lf"
+                },
+                "source_commit": "0123456789abcdef",
+                "freshness": { "status": "input_snapshot", "basis": "test snapshot" }
+            },
+            "models": [{ "role": "materializer", "model": "deterministic_harness" }],
+            "agents": [{ "agent_id": "agent.materializer", "model": "deterministic_harness", "role": "materializer" }],
+            "task_definitions": [{
+                "task_id": task_id,
+                "agent_id": "agent.materializer",
+                "task_kind": if prove_source_authoring { "source_generation" } else { "validation" }
+            }],
+            "skills": [{ "name": "agent-harness-project-standard", "version": "v1" }],
+            "tool_versions": [{ "name": "rust_plc", "version": "0.1.0" }],
+            "file_attribution": {
+                "policy_version": "rustplc-file-attribution-v1",
+                "human_intervention_detected": attribution_kind == "human_intervention_detected",
+                "records": [record],
+                "evidence_envelopes": [
+                    { "path": "delivery-projects/demo-line/out/agent-runs/run-1/provenance.json", "reason": "self envelope" },
+                    { "path": "delivery-projects/demo-line/delivery-project.json", "reason": "external binding" }
+                ]
+            }
+        }))
+        .expect("provenance should serialize"),
+    )
+    .expect("provenance should be written");
 }
 
 fn delivery_state_with_user(workspace_root: PathBuf, role: UserRole) -> Arc<AppState> {
@@ -1972,6 +2201,7 @@ async fn sign_delivery_hold(app: &axum::Router, token: &str, hold_id: &str) -> V
                 .body(Body::from(
                     json!({
                         "hold_type": hold_id,
+                        "attestation_standard": "internal_engineering_v1",
                         "source_commit": "0123456789abcdef",
                         "evidence_digests": context["current_evidence_digests"],
                         "decision": "approve",
@@ -2044,6 +2274,7 @@ async fn delivery_routes_aggregate_manifest_runs_and_evidence() {
         "/api/delivery-projects/line.demo/wiring",
         "/api/delivery-projects/line.demo/verification",
         "/api/delivery-projects/line.demo/evidence",
+        "/api/delivery-projects/line.demo/geometry",
         "/api/workspace/problems",
         "/api/workspace/tests",
     ];
@@ -2063,6 +2294,38 @@ async fn delivery_routes_aggregate_manifest_runs_and_evidence() {
         assert_eq!(payload["schema_version"], json!(1), "endpoint {endpoint}");
     }
 
+    let geometry_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/delivery-projects/line.demo/geometry")
+                .body(Body::empty())
+                .expect("geometry request should build"),
+        )
+        .await
+        .expect("geometry response");
+    assert_eq!(geometry_response.status(), StatusCode::OK);
+    let geometry = response_json(geometry_response).await;
+    assert_eq!(geometry["artifact_kind"], "semantic_twin_geometry");
+    assert_eq!(geometry["nodes"][0]["evidence_status"], "verified");
+    assert_eq!(geometry["edges"][0]["evidence_status"], "derived");
+    assert_eq!(geometry["project_id"], "line.demo");
+
+    let wiring_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/delivery-projects/line.demo/wiring")
+                .body(Body::empty())
+                .expect("wiring request should build"),
+        )
+        .await
+        .expect("wiring response");
+    assert_eq!(wiring_response.status(), StatusCode::OK);
+    let wiring = response_json(wiring_response).await;
+    assert_eq!(wiring["diagnostics"][0]["code"], "WIR-004");
+    assert_eq!(wiring["validation_summaries"][0]["error_count"], 1);
+
     let resolved = resolve_delivery_project_root(&workspace_root, "line.demo")
         .expect("project root should resolve");
     assert_eq!(
@@ -2080,6 +2343,153 @@ async fn delivery_routes_aggregate_manifest_runs_and_evidence() {
     assert!(digests
         .values()
         .all(|digest| digest.len() == 64 && digest.chars().all(|ch| ch.is_ascii_hexdigit())));
+}
+
+#[tokio::test]
+async fn delivery_run_recomputes_unattended_attribution_from_file_evidence() {
+    let workspace_root = temp_workspace_root("delivery-attribution-proven");
+    write_delivery_project_fixture(&workspace_root);
+    write_delivery_provenance_v2(&workspace_root, "agent_generated", true, false);
+    let app = build_app(test_state(workspace_root.clone(), BTreeMap::new()));
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/delivery-projects/line.demo/runs/run-1")
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await
+        .expect("run route should respond");
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload = response_json(response).await;
+    assert_eq!(payload["unattended_verdict"], "not_proven");
+    assert_eq!(
+        payload["attribution"]["execution_unattended_verdict"],
+        "proven"
+    );
+    assert_eq!(
+        payload["attribution"]["source_authoring_verdict"],
+        "not_proven"
+    );
+    assert!(payload["attribution"]["validation_issues"]
+        .as_array()
+        .is_some_and(|issues| issues
+            .iter()
+            .any(|issue| issue == "source_authoring_provenance_missing")));
+    assert_eq!(
+        payload["attribution"]["records"][0]["attribution_kind"],
+        "agent_generated"
+    );
+    assert_eq!(payload["attribution"]["evidence"][0]["kind"], "provenance");
+    assert_eq!(payload["git"]["dirty_worktree"], true);
+    assert!(!payload["attribution"]["validation_issues"]
+        .as_array()
+        .is_some_and(|issues| issues.iter().any(|issue| issue
+            .as_str()
+            .is_some_and(|issue| issue.ends_with("event_unknown")))));
+
+    fs::write(
+        workspace_root.join(
+            "delivery-projects/demo-line/out/agent-runs/run-1/compile/verification_report.json",
+        ),
+        "{\"changed_after_run\":true}\n",
+    )
+    .expect("post-run edit should be written");
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/delivery-projects/line.demo/runs/run-1")
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await
+        .expect("run route should respond after post-run edit");
+    let payload = response_json(response).await;
+    assert_eq!(payload["unattended_verdict"], "not_proven");
+    assert_eq!(
+        payload["attribution"]["execution_unattended_verdict"],
+        "proven"
+    );
+    assert_eq!(
+        payload["attribution"]["records"][0]["attribution_kind"],
+        "post_run_human_change"
+    );
+    assert_eq!(payload["attribution"]["post_run_human_change_count"], 1);
+}
+
+#[tokio::test]
+async fn delivery_run_requires_agent_bound_source_authoring_for_overall_proven_verdict() {
+    let workspace_root = temp_workspace_root("delivery-source-authoring-proven");
+    write_delivery_project_fixture(&workspace_root);
+    write_delivery_provenance_v2(&workspace_root, "agent_modified", true, true);
+    let app = build_app(test_state(workspace_root, BTreeMap::new()));
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/delivery-projects/line.demo/runs/run-1")
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await
+        .expect("run route should respond");
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload = response_json(response).await;
+    assert_eq!(payload["unattended_verdict"], "proven");
+    assert_eq!(
+        payload["attribution"]["execution_unattended_verdict"],
+        "proven"
+    );
+    assert_eq!(payload["attribution"]["source_authoring_verdict"], "proven");
+    assert_eq!(payload["attribution"]["source_authoring_record_count"], 1);
+    assert_eq!(payload["attribution"]["validation_issues"], json!([]));
+}
+
+#[tokio::test]
+async fn delivery_run_rejects_missing_agent_binding_and_reports_human_intervention() {
+    let workspace_root = temp_workspace_root("delivery-attribution-falsifiable");
+    write_delivery_project_fixture(&workspace_root);
+    write_delivery_provenance_v2(&workspace_root, "agent_generated", false, false);
+    let app = build_app(test_state(workspace_root.clone(), BTreeMap::new()));
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/delivery-projects/line.demo/runs/run-1")
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await
+        .expect("run route should respond");
+    let payload = response_json(response).await;
+    assert_eq!(payload["unattended_verdict"], "not_proven");
+    assert!(payload["attribution"]["validation_issues"]
+        .as_array()
+        .is_some_and(|issues| issues
+            .iter()
+            .any(|issue| issue == "file_attribution_0_agent_binding_missing")));
+    assert!(!payload["attribution"]["validation_issues"]
+        .as_array()
+        .is_some_and(|issues| issues
+            .iter()
+            .any(|issue| issue == "file_attribution_0_event_unknown")));
+
+    write_delivery_provenance_v2(&workspace_root, "human_intervention_detected", false, false);
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/delivery-projects/line.demo/runs/run-1")
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await
+        .expect("run route should respond after human intervention record");
+    let payload = response_json(response).await;
+    assert_eq!(payload["unattended_verdict"], "human_intervention_detected");
+    assert_eq!(payload["attribution"]["human_intervention_detected"], true);
 }
 
 #[tokio::test]
@@ -2523,8 +2933,26 @@ async fn workspace_tests_share_local_ci_schema_and_report_git_dirty_state() {
     assert!(problems["problems"].as_array().is_some_and(|records| {
         records.iter().any(|record| {
             record["project_id"] == "line.demo"
-                && record["deep_link"]["object"]["kind"] == "problem"
+                && record["deep_link"]["object"]["kind"] == "delivery_gap"
                 && record["source_ref"].as_str().is_some()
+                && record["artifact_ref"].as_str().is_some()
+        })
+    }));
+    assert!(problems["problems"].as_array().is_some_and(|records| {
+        records.iter().all(|record| {
+            !matches!(record["severity"].as_str(), Some("warning" | "blocked"))
+                || (record["source_ref"]
+                    .as_str()
+                    .is_some_and(|value| !value.is_empty())
+                    && record["artifact_ref"]
+                        .as_str()
+                        .is_some_and(|value| !value.is_empty())
+                    && record["semantic_object"]["kind"]
+                        .as_str()
+                        .is_some_and(|value| !value.is_empty())
+                    && record["semantic_object"]["id"]
+                        .as_str()
+                        .is_some_and(|value| !value.is_empty()))
         })
     }));
 

@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import type { WorkbenchTab, WorkbenchView } from '../types/workbench';
+import type { EvidenceState, WorkbenchTab, WorkbenchView } from '../types/workbench';
 
 export type ActivityId =
   | 'projects'
@@ -20,8 +20,7 @@ const defaultTab: WorkbenchTab = {
   pinned: true,
 };
 
-interface WorkbenchState {
-  selectedProjectId: string | null;
+interface ProjectWorkbenchSession {
   selectedRunId: string | null;
   activeActivity: ActivityId;
   tabs: WorkbenchTab[];
@@ -37,6 +36,92 @@ interface WorkbenchState {
   inspectorCollapsed: boolean;
   bottomPanelCollapsed: boolean;
   bottomPanel: BottomPanelId;
+  evidenceFilter: 'all' | EvidenceState;
+}
+
+const createDefaultSession = (): ProjectWorkbenchSession => ({
+  selectedRunId: null,
+  activeActivity: 'projects',
+  tabs: [{ ...defaultTab }],
+  activeTabId: defaultTab.id,
+  secondaryActiveTabId: null,
+  activeGroup: 'primary',
+  splitEnabled: false,
+  primarySidebarWidth: 260,
+  inspectorWidth: 300,
+  bottomPanelHeight: 218,
+  splitRatio: 0.5,
+  primarySidebarCollapsed: false,
+  inspectorCollapsed: false,
+  bottomPanelCollapsed: false,
+  bottomPanel: 'problems',
+  evidenceFilter: 'all',
+});
+
+function captureSession(state: ProjectWorkbenchSession): ProjectWorkbenchSession {
+  return {
+    selectedRunId: state.selectedRunId,
+    activeActivity: state.activeActivity,
+    tabs: state.tabs.map((tab) => ({ ...tab })),
+    activeTabId: state.activeTabId,
+    secondaryActiveTabId: state.secondaryActiveTabId,
+    activeGroup: state.activeGroup,
+    splitEnabled: state.splitEnabled,
+    primarySidebarWidth: state.primarySidebarWidth,
+    inspectorWidth: state.inspectorWidth,
+    bottomPanelHeight: state.bottomPanelHeight,
+    splitRatio: state.splitRatio,
+    primarySidebarCollapsed: state.primarySidebarCollapsed,
+    inspectorCollapsed: state.inspectorCollapsed,
+    bottomPanelCollapsed: state.bottomPanelCollapsed,
+    bottomPanel: state.bottomPanel,
+    evidenceFilter: state.evidenceFilter,
+  };
+}
+
+function normalizeSession(value: unknown): ProjectWorkbenchSession {
+  const fallback = createDefaultSession();
+  if (!value || typeof value !== 'object') return fallback;
+  const candidate = value as Partial<ProjectWorkbenchSession>;
+  const tabs = Array.isArray(candidate.tabs) && candidate.tabs.length > 0
+    ? candidate.tabs.map((tab) => ({ ...tab }))
+    : fallback.tabs;
+  const primaryTabs = tabs.filter((tab) => (tab.group ?? 'primary') === 'primary');
+  const secondaryTabs = tabs.filter((tab) => tab.group === 'secondary');
+  return {
+    ...fallback,
+    ...candidate,
+    tabs,
+    activeTabId: tabs.some((tab) => tab.id === candidate.activeTabId)
+      ? candidate.activeTabId!
+      : primaryTabs[0]?.id ?? tabs[0].id,
+    secondaryActiveTabId: secondaryTabs.some((tab) => tab.id === candidate.secondaryActiveTabId)
+      ? candidate.secondaryActiveTabId!
+      : secondaryTabs[0]?.id ?? null,
+    splitEnabled: secondaryTabs.length > 0 && Boolean(candidate.splitEnabled),
+  };
+}
+
+interface WorkbenchState {
+  selectedProjectId: string | null;
+  projectSessions: Record<string, ProjectWorkbenchSession>;
+  selectedRunId: string | null;
+  activeActivity: ActivityId;
+  tabs: WorkbenchTab[];
+  activeTabId: string;
+  secondaryActiveTabId: string | null;
+  activeGroup: 'primary' | 'secondary';
+  splitEnabled: boolean;
+  primarySidebarWidth: number;
+  inspectorWidth: number;
+  bottomPanelHeight: number;
+  splitRatio: number;
+  primarySidebarCollapsed: boolean;
+  inspectorCollapsed: boolean;
+  bottomPanelCollapsed: boolean;
+  bottomPanel: BottomPanelId;
+  searchQuery: string;
+  evidenceFilter: 'all' | EvidenceState;
   setSelectedProject: (projectId: string | null) => void;
   setSelectedRun: (runId: string | null) => void;
   setActiveActivity: (activity: ActivityId) => void;
@@ -54,29 +139,31 @@ interface WorkbenchState {
   toggleInspector: () => void;
   toggleBottomPanel: () => void;
   setBottomPanel: (panel: BottomPanelId) => void;
+  setSearchQuery: (query: string) => void;
+  setEvidenceFilter: (filter: 'all' | EvidenceState) => void;
 }
 
 export const useWorkbenchStore = create<WorkbenchState>()(
   persist(
-    (set) => ({
+    (set) => {
+      const defaultSession = createDefaultSession();
+      return {
       selectedProjectId: null,
-      selectedRunId: null,
-      activeActivity: 'projects',
-      tabs: [defaultTab],
-      activeTabId: defaultTab.id,
-      secondaryActiveTabId: null,
-      activeGroup: 'primary',
-      splitEnabled: false,
-      primarySidebarWidth: 260,
-      inspectorWidth: 300,
-      bottomPanelHeight: 218,
-      splitRatio: 0.5,
-      primarySidebarCollapsed: false,
-      inspectorCollapsed: false,
-      bottomPanelCollapsed: false,
-      bottomPanel: 'problems',
+      projectSessions: {},
+      ...defaultSession,
+      searchQuery: '',
       setSelectedProject: (selectedProjectId) =>
-        set({ selectedProjectId, selectedRunId: null }),
+        set((state) => {
+          if (state.selectedProjectId === selectedProjectId) return {};
+          const projectSessions = { ...state.projectSessions };
+          if (state.selectedProjectId) {
+            projectSessions[state.selectedProjectId] = captureSession(state);
+          }
+          const nextSession = selectedProjectId
+            ? normalizeSession(projectSessions[selectedProjectId])
+            : createDefaultSession();
+          return { selectedProjectId, projectSessions, ...nextSession };
+        }),
       setSelectedRun: (selectedRunId) => set({ selectedRunId }),
       setActiveActivity: (activeActivity) =>
         set({ activeActivity, primarySidebarCollapsed: false }),
@@ -183,11 +270,27 @@ export const useWorkbenchStore = create<WorkbenchState>()(
       toggleBottomPanel: () =>
         set((state) => ({ bottomPanelCollapsed: !state.bottomPanelCollapsed })),
       setBottomPanel: (bottomPanel) => set({ bottomPanel, bottomPanelCollapsed: false }),
-    }),
+      setSearchQuery: (searchQuery) => set({ searchQuery }),
+      setEvidenceFilter: (evidenceFilter) => set({ evidenceFilter }),
+    };
+    },
     {
       name: 'rustplc-workbench-layout',
+      version: 2,
+      migrate: (persistedState) => {
+        if (!persistedState || typeof persistedState !== 'object') return persistedState as WorkbenchState;
+        const previous = persistedState as Partial<WorkbenchState>;
+        const projectSessions = { ...(previous.projectSessions ?? {}) };
+        if (previous.selectedProjectId) {
+          projectSessions[previous.selectedProjectId] = normalizeSession(previous);
+        }
+        return { ...previous, projectSessions } as WorkbenchState;
+      },
       partialize: (state) => ({
         selectedProjectId: state.selectedProjectId,
+        projectSessions: state.selectedProjectId
+          ? { ...state.projectSessions, [state.selectedProjectId]: captureSession(state) }
+          : state.projectSessions,
         selectedRunId: state.selectedRunId,
         activeActivity: state.activeActivity,
         tabs: state.tabs,
@@ -203,6 +306,8 @@ export const useWorkbenchStore = create<WorkbenchState>()(
         inspectorCollapsed: state.inspectorCollapsed,
         bottomPanelCollapsed: state.bottomPanelCollapsed,
         bottomPanel: state.bottomPanel,
+        searchQuery: state.searchQuery,
+        evidenceFilter: state.evidenceFilter,
       }),
     }
   )

@@ -22,6 +22,12 @@ use time::OffsetDateTime;
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
+pub(crate) const INTERNAL_ENGINEERING_ATTESTATION_V1: &str = "internal_engineering_v1";
+
+fn default_attestation_standard() -> String {
+    INTERNAL_ENGINEERING_ATTESTATION_V1.to_string()
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum SignatureDecision {
@@ -32,6 +38,8 @@ pub(crate) enum SignatureDecision {
 #[derive(Debug, Clone, Deserialize)]
 pub(crate) struct SignHoldRequest {
     pub(crate) hold_type: String,
+    #[serde(default = "default_attestation_standard")]
+    pub(crate) attestation_standard: String,
     pub(crate) source_commit: String,
     pub(crate) evidence_digests: BTreeMap<String, String>,
     pub(crate) decision: SignatureDecision,
@@ -46,6 +54,8 @@ pub(crate) struct HoldSignature {
     pub(crate) project_id: String,
     pub(crate) hold_id: String,
     pub(crate) hold_type: String,
+    #[serde(default = "default_attestation_standard")]
+    pub(crate) attestation_standard: String,
     pub(crate) user: AuthUser,
     pub(crate) source_commit: String,
     pub(crate) evidence_digests: BTreeMap<String, String>,
@@ -68,6 +78,7 @@ pub(crate) enum SignatureError {
     InvalidProjectId,
     InvalidHoldId,
     InvalidHoldType,
+    UnsupportedAttestationStandard,
     MissingSourceCommit,
     MissingEvidence,
     EvidenceChanged,
@@ -112,6 +123,9 @@ impl SignatureStore {
         validate_identifier(project_id).map_err(|_| SignatureError::InvalidProjectId)?;
         validate_identifier(hold_id).map_err(|_| SignatureError::InvalidHoldId)?;
         validate_hold_type(&request.hold_type)?;
+        if request.attestation_standard != INTERNAL_ENGINEERING_ATTESTATION_V1 {
+            return Err(SignatureError::UnsupportedAttestationStandard);
+        }
         if request.source_commit.trim().is_empty() {
             return Err(SignatureError::MissingSourceCommit);
         }
@@ -137,6 +151,7 @@ impl SignatureStore {
             project_id: project_id.to_string(),
             hold_id: hold_id.to_string(),
             hold_type: request.hold_type,
+            attestation_standard: request.attestation_standard,
             user,
             source_commit: request.source_commit,
             evidence_digests: request.evidence_digests,
@@ -211,6 +226,8 @@ async fn list_signatures(
     Ok(Json(json!({
         "schema_version": 1,
         "project_id": project_id,
+        "attestation_standard": INTERNAL_ENGINEERING_ATTESTATION_V1,
+        "attestation_scope": "Attributable internal engineering decision. No regulatory electronic-signature compliance claim is made without a separately named standard.",
         "source_commit": contract.source_commit,
         "digest_algorithm": "sha256",
         "digest_normalization": "raw_bytes",
@@ -398,6 +415,7 @@ fn map_signature_error(error: SignatureError) -> (StatusCode, Json<Value>) {
         SignatureError::InvalidProjectId
         | SignatureError::InvalidHoldId
         | SignatureError::InvalidHoldType
+        | SignatureError::UnsupportedAttestationStandard
         | SignatureError::MissingSourceCommit
         | SignatureError::MissingEvidence => api_error(
             StatusCode::BAD_REQUEST,
@@ -487,6 +505,7 @@ mod tests {
                 project_id: "station.demo".to_string(),
                 hold_id: hold_id.to_string(),
                 hold_type: hold_id.to_string(),
+                attestation_standard: INTERNAL_ENGINEERING_ATTESTATION_V1.to_string(),
                 user: user(UserRole::Admin),
                 source_commit: "deadbeef".to_string(),
                 evidence_digests: digests("abc"),
@@ -511,6 +530,7 @@ mod tests {
                 user(UserRole::SafetyReviewer),
                 SignHoldRequest {
                     hold_type: "safety_review".to_string(),
+                    attestation_standard: INTERNAL_ENGINEERING_ATTESTATION_V1.to_string(),
                     source_commit: "deadbeef".to_string(),
                     evidence_digests: current.clone(),
                     decision: SignatureDecision::Approve,
@@ -541,6 +561,7 @@ mod tests {
                 user(UserRole::ReleaseApprover),
                 SignHoldRequest {
                     hold_type: "release_approval".to_string(),
+                    attestation_standard: INTERNAL_ENGINEERING_ATTESTATION_V1.to_string(),
                     source_commit: "deadbeef".to_string(),
                     evidence_digests: original.clone(),
                     decision: SignatureDecision::Approve,
@@ -560,6 +581,7 @@ mod tests {
                     user(UserRole::ReleaseApprover),
                     SignHoldRequest {
                         hold_type: "release_approval".to_string(),
+                        attestation_standard: INTERNAL_ENGINEERING_ATTESTATION_V1.to_string(),
                         source_commit: "deadbeef".to_string(),
                         evidence_digests: original,
                         decision: SignatureDecision::Approve,
@@ -590,6 +612,7 @@ mod tests {
                 user(UserRole::Engineer),
                 SignHoldRequest {
                     hold_type: "release_approval".to_string(),
+                    attestation_standard: INTERNAL_ENGINEERING_ATTESTATION_V1.to_string(),
                     source_commit: "deadbeef".to_string(),
                     evidence_digests: current.clone(),
                     decision: SignatureDecision::Approve,
@@ -600,6 +623,31 @@ mod tests {
             .await
             .expect_err("role must not sign release approval");
         assert_eq!(error, SignatureError::ForbiddenRole);
+    }
+
+    #[tokio::test]
+    async fn unsupported_signature_standard_is_rejected() {
+        let root = temp_root("standard");
+        let store = SignatureStore::new(&root);
+        let current = digests("abc");
+        let error = store
+            .sign(
+                "station.demo",
+                "safety-gate",
+                user(UserRole::SafetyReviewer),
+                SignHoldRequest {
+                    hold_type: "safety_review".to_string(),
+                    attestation_standard: "unspecified_regulatory_standard".to_string(),
+                    source_commit: "deadbeef".to_string(),
+                    evidence_digests: current.clone(),
+                    decision: SignatureDecision::Approve,
+                    comment: None,
+                },
+                &current,
+            )
+            .await
+            .expect_err("unimplemented standards must not be accepted");
+        assert_eq!(error, SignatureError::UnsupportedAttestationStandard);
     }
 
     #[test]

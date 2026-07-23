@@ -569,6 +569,7 @@ fn build_app(state: Arc<AppState>) -> Router {
         .route("/trace/{id}", get(get_trace))
         .route("/trace/{id}/range", get(get_trace_range))
         .route("/trace/{id}/keypoints", get(get_keypoints))
+        .route("/artifacts/{*path}", get(get_artifact))
         .route("/diagnosis/{id}", get(get_diagnosis))
         .route("/timing/{id}", get(get_timing))
         .route("/alarms", get(get_alarms))

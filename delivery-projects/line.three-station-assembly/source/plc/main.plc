@@ -10,6 +10,24 @@ device plc_main: plc {
     model_ref: openplc_softplc
 }
 
+controller_io plc_main {
+    input push_extended: X0 { purpose: "Push cylinder extended feedback" }
+    input push_retracted: X1 { purpose: "Push cylinder retracted feedback" }
+    input press_extended: X2 { purpose: "Press cylinder extended feedback" }
+    input press_retracted: X3 { purpose: "Press cylinder retracted feedback" }
+    input quality_ok: X4 { purpose: "Quality accepted feedback" }
+    input quality_ng: X5 { purpose: "Quality rejected feedback" }
+    input eject_extended: X6 { purpose: "Eject cylinder extended feedback" }
+    input eject_retracted: X7 { purpose: "Eject cylinder retracted feedback" }
+    input reject_extended: X8 { purpose: "Reject cylinder extended feedback" }
+    input reject_retracted: X9 { purpose: "Reject cylinder retracted feedback" }
+    input start_command: X11 { purpose: "Operator start command" }
+    output push_valve: Y0 { purpose: "Push valve command", safe_state: off }
+    output press_valve: Y1 { purpose: "Press valve command", safe_state: off }
+    output eject_valve: Y2 { purpose: "Eject valve command", safe_state: off }
+    output reject_valve: Y3 { purpose: "Reject valve command", safe_state: off }
+}
+
 # ===== 操作员接口 =====
 
 device start_button: sensor {

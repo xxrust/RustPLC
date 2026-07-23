@@ -2,7 +2,7 @@
 
 ## Status
 
-Implemented and self-tested on 2026-07-24. The desktop workbench, delivery registry, evidence APIs, physical point checks, human holds, and three-project corpus harness are operational. The remaining gaps are recorded in the self-test report: clean-checkout proof, file-level unattended attribution, regulatory signature requirements, complete WCAG evidence, and the enhanced command-palette `field:value` browser assertion.
+Core workbench operational and self-tested on 2026-07-24. The desktop shell, exact three-project registry, evidence APIs, physical point checks, human holds, project-scoped compiler evidence, and corpus harness are operational. Full product completion remains open because file-level unattended source-authoring attribution, regulatory signature requirements, and a complete WCAG 2.1 AA audit are not yet proven. Clean-checkout proof is completed only after the final committed revision passes the clean-checkout corpus runner.
 
 ## 1. Introduction
 
@@ -204,7 +204,7 @@ Compiler maturity is exposed through the project workspace:
 - [x] Each status links to a compiler artifact, test, CI run, diagnostic, or explicit blocker.
 - [x] Stage status updates when the source commit or artifact digest changes.
 - [x] Cross-stage semantic drift appears in the Problems panel.
-- [ ] Project search supports filtering by compiler stage, diagnostic code, evidence state, and source commit.
+- [x] Project search supports filtering by compiler stage, diagnostic code, evidence state, and source commit.
 - [x] Typecheck and lint pass.
 - [x] Verify project-scoped compiler evidence in browser.
 
@@ -232,7 +232,7 @@ Compiler maturity is exposed through the project workspace:
 - [x] Geometry nodes and transitions expose authored, derived, verified, observed, warning, and blocked evidence.
 - [x] Simulation, no-board, HIL, and board traces retain their evidence-source type.
 - [x] A verification pass never marks an unobserved physical check as complete.
-- [ ] Every warning and blocker links to the source, semantic object, and artifact that produced it.
+- [ ] Every warning and blocker links to the source, semantic object, and artifact that produced it. Missing references remain a reportable compiler-evidence gap.
 - [x] Typecheck and lint pass.
 - [x] Verify formal and observed evidence separation in browser.
 
@@ -292,7 +292,7 @@ Compiler maturity is exposed through the project workspace:
 - [ ] Core workflows are keyboard accessible and meet WCAG 2.1 AA.
 - [x] The 1440x900 and 1920x1080 layouts contain no overlapping or character-by-character wrapped labels.
 - [x] Typecheck and lint pass.
-- [ ] Complete the enhanced browser assertion for command-palette `field:value` filtering; the core palette open/execute flow is verified.
+- [x] Complete the browser assertion for command-palette `field:value` filtering across project, stage, diagnostic, evidence, commit, and status fields.
 
 ## 7. Functional Requirements
 

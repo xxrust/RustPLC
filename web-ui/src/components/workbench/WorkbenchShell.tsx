@@ -23,7 +23,7 @@ import AgentRunTimelineView from '../../pages/workbench/AgentRunTimelineView';
 import VerificationEvidenceView from '../../pages/workbench/VerificationEvidenceView';
 import ArtifactSourceView from './ArtifactSourceView';
 import WiringPointChecksView from './WiringPointChecksView';
-import TopologyCanvas from '../canvas/TopologyCanvas';
+import GeometryPreview from '../geometry/GeometryPreview';
 import RunPage from '../../pages/RunPage';
 import ReplayPage from '../../pages/ReplayPage';
 import AuditPage from '../../pages/AuditPage';
@@ -31,15 +31,19 @@ import { deliveryProjectApi } from '../../services/api';
 import { useAppStore } from '../../stores/appStore';
 import { useWorkbenchStore } from '../../stores/workbenchStore';
 import type {
+  EvidenceState,
   HoldSignatureContext,
   HoldProjectionItem,
   HumanHold,
   PointCheckProjectionPoint,
   RecordPointObservationRequest,
   SignHoldRequest,
+  WiringDiagnostic,
   WorkbenchTab,
   WorkspaceProblem,
+  WorkspaceProblemsProjection,
   WorkspaceTest,
+  WorkspaceTestsProjection,
 } from '../../types/workbench';
 import './workbench.css';
 
@@ -56,6 +60,10 @@ const WorkbenchShell: React.FC = () => {
 
   const projectsQuery = useQuery({ queryKey: ['delivery-projects'], queryFn: deliveryProjectApi.listProjects });
   const projects = useMemo(() => projectsQuery.data ?? [], [projectsQuery.data]);
+  const projectById = useMemo(
+    () => new Map(projects.map((item) => [item.project_id, item])),
+    [projects],
+  );
 
   useEffect(() => {
     if (projects.length === 0) return;
@@ -77,6 +85,7 @@ const WorkbenchShell: React.FC = () => {
   const releaseProjectionQuery = useQuery({ queryKey: ['delivery-release-projection', projectId], queryFn: () => deliveryProjectApi.getReleaseProjection(projectId!), enabled: Boolean(projectId) });
   const verificationQuery = useQuery({ queryKey: ['delivery-verification', projectId], queryFn: () => deliveryProjectApi.getVerification(projectId!), enabled: Boolean(projectId) });
   const evidenceQuery = useQuery({ queryKey: ['delivery-evidence', projectId], queryFn: () => deliveryProjectApi.getEvidence(projectId!), enabled: Boolean(projectId) });
+  const geometryQuery = useQuery({ queryKey: ['delivery-geometry', projectId], queryFn: () => deliveryProjectApi.getGeometry(projectId!), enabled: Boolean(projectId) });
   const signaturesQuery = useQuery({
     queryKey: ['delivery-signatures', projectId],
     queryFn: () => deliveryProjectApi.getSignatures(projectId!),
@@ -139,19 +148,37 @@ const WorkbenchShell: React.FC = () => {
   }, [holdProjectionQuery.data, projectQuery.data, releaseProjectionQuery.data?.status]);
   const projectedWiring = useMemo<PointCheckProjectionPoint[]>(() => {
     const points = physicalEvidenceQuery.data?.point_checks.points;
-    if (points) return points;
-    return (wiringQuery.data ?? []).map((authored) => ({
+    const authoredPoints = wiringQuery.data?.points ?? [];
+    if (points) {
+      const authoredById = new Map(authoredPoints.map((authored) => [authored.point_id, authored]));
+      return points.map((point) => ({
+        ...point,
+        authored: {
+          ...authoredById.get(point.point_id),
+          ...point.authored,
+        },
+      }));
+    }
+    return authoredPoints.map((authored) => ({
       point_id: authored.point_id,
       authored,
       status: authored.point_check_status ?? 'pending',
       evidence_state: authored.point_check_status === 'observed' ? 'observed' : 'authored',
       responsibility_state: 'human_action_required',
     }));
-  }, [physicalEvidenceQuery.data?.point_checks.points, wiringQuery.data]);
+  }, [physicalEvidenceQuery.data?.point_checks.points, wiringQuery.data?.points]);
   const verification = useMemo(() => verificationQuery.data ?? [], [verificationQuery.data]);
   const evidence = useMemo(() => evidenceQuery.data ?? [], [evidenceQuery.data]);
-  const problems = useMemo(() => problemsQuery.data ?? [], [problemsQuery.data]);
-  const tests = useMemo(() => testsQuery.data ?? [], [testsQuery.data]);
+  const problemsProjection = useMemo<WorkspaceProblemsProjection>(
+    () => problemsQuery.data ?? { count: 0, partial: false, problems: [] },
+    [problemsQuery.data],
+  );
+  const testsProjection = useMemo<WorkspaceTestsProjection>(
+    () => testsQuery.data ?? { count: 0, partial: false, sources: [], tests: [] },
+    [testsQuery.data],
+  );
+  const problems = problemsProjection.problems;
+  const tests = testsProjection.tests;
   const primaryTabs = workbench.tabs.filter((tab) => (tab.group ?? 'primary') === 'primary');
   const secondaryTabs = workbench.tabs.filter((tab) => tab.group === 'secondary');
   const primaryActiveTab = primaryTabs.find((tab) => tab.id === workbench.activeTabId) ?? primaryTabs[0];
@@ -179,7 +206,7 @@ const WorkbenchShell: React.FC = () => {
 
   const openProblem = useCallback((problem: WorkspaceProblem) => {
     if (problem.project_id) workbench.setSelectedProject(problem.project_id);
-    const sourceRef = problem.source_ref?.replace(/\\/g, '/');
+    const sourceRef = (problem.artifact_ref ?? problem.source_ref)?.replace(/\\/g, '/');
     if (sourceRef) {
       openArtifact(sourceRef, problem.code ?? resourceLabel(sourceRef), problem.line, problem.column);
       return;
@@ -212,6 +239,11 @@ const WorkbenchShell: React.FC = () => {
     openProblem(problem);
   }, [focusBottomPanel, openProblem, problems]);
 
+  const openPalette = useCallback((query = '') => {
+    workbench.setSearchQuery(query);
+    setPaletteOpen(true);
+  }, [workbench]);
+
   const commands = useMemo<WorkbenchCommand[]>(() => {
     const viewCommands: Array<[string, string, Parameters<typeof workbench.openView>[0], string?]> = [
       ['open-overview', 'Open Project Overview', 'overview'],
@@ -229,6 +261,11 @@ const WorkbenchShell: React.FC = () => {
       label,
       category: 'View',
       detail: resource,
+      search: {
+        project: [project?.project_id, project?.name],
+        commit: project?.source_commit,
+        category: 'view',
+      },
       execute: () => workbench.openView(view, label.replace(/^Open /, ''), resource),
     }));
     base.push(
@@ -246,31 +283,71 @@ const WorkbenchShell: React.FC = () => {
       label: `Open ${item.name ?? item.project_id}`,
       category: 'Project',
       detail: item.delivery_layer,
-      searchText: `project:${item.project_id} layer:${item.delivery_layer} status:${item.status ?? 'unknown'}`,
+      search: {
+        project: [item.project_id, item.name],
+        layer: item.delivery_layer,
+        status: item.status ?? 'unknown',
+        evidence: item.status ?? 'unknown',
+        commit: item.source_commit,
+        category: 'project',
+      },
       execute: () => workbench.setSelectedProject(item.project_id),
     }));
-    problems.forEach((problem) => base.push({
-      id: `problem-${problem.id}`,
-      label: problem.code ?? problem.message,
-      category: 'Diagnostic',
-      detail: problem.source_ref ?? problem.stage,
-      searchText: `diagnostic:${problem.code ?? problem.id} stage:${problem.stage ?? 'unknown'} status:${problem.severity} project:${problem.project_id ?? 'unknown'} ${problem.message}`,
-      execute: () => openProblem(problem),
-    }));
-    tests.forEach((test) => base.push({
-      id: `test-${test.id}`,
-      label: test.name,
-      category: 'Test',
-      detail: test.artifact_ref ?? test.suite,
-      searchText: `test:${test.id} suite:${test.suite ?? 'unknown'} status:${test.status} project:${test.project_id ?? 'unknown'}`,
-      execute: () => openTest(test),
-    }));
+    problems.forEach((problem, index) => {
+      const owner = problem.project_id ? projectById.get(problem.project_id) : undefined;
+      base.push({
+        id: `problem-${problem.project_id ?? 'workspace'}-${problem.id}-${problem.stage ?? 'unknown'}-${index}`,
+        label: problem.code ?? problem.message,
+        category: 'Diagnostic',
+        detail: problem.source_ref ?? problem.artifact_ref ?? problem.stage,
+        searchText: problem.message,
+        search: {
+          diagnostic: [problem.code, problem.id],
+          stage: problem.stage ?? 'unknown',
+          status: problem.severity,
+          evidence: problem.severity,
+          project: [problem.project_id, owner?.name],
+          commit: problem.source_commit ?? owner?.source_commit,
+          category: 'diagnostic',
+        },
+        execute: () => openProblem(problem),
+      });
+    });
+    tests.forEach((test, index) => {
+      const owner = test.project_id ? projectById.get(test.project_id) : undefined;
+      base.push({
+        id: `test-${test.project_id ?? 'workspace'}-${test.id}-${test.suite ?? 'unknown'}-${index}`,
+        label: test.name,
+        category: 'Test',
+        detail: test.artifact_ref ?? test.suite,
+        search: {
+          test: test.id,
+          suite: test.suite ?? 'unknown',
+          status: test.status,
+          evidence: test.status,
+          project: [test.project_id, owner?.name],
+          commit: owner?.source_commit,
+          category: 'test',
+        },
+        execute: () => openTest(test),
+      });
+    });
     verification.forEach((stage) => base.push({
       id: `verification-${stage.stage}`,
       label: `${stage.stage} verification evidence`,
       category: 'Verification',
       detail: stage.artifact_ref ?? stage.diagnostic_code,
-      searchText: `stage:${stage.stage} status:${stage.status} diagnostic:${stage.diagnostic_code ?? 'none'} producer:${stage.producer ?? 'unknown'}`,
+      searchText: stage.message,
+      search: {
+        project: [project?.project_id, project?.name],
+        stage: stage.stage,
+        status: stage.status,
+        evidence: stage.status,
+        diagnostic: stage.diagnostic_code ?? 'none',
+        producer: stage.producer ?? 'unknown',
+        commit: stage.source_commit ?? project?.source_commit,
+        category: 'verification',
+      },
       execute: () => stage.artifact_ref
         ? openArtifact(stage.artifact_ref, `${stage.stage} evidence`)
         : workbench.openView('verification', `${stage.stage} evidence`, stage.stage),
@@ -280,7 +357,15 @@ const WorkbenchShell: React.FC = () => {
       label: item.label,
       category: 'Evidence',
       detail: item.artifact_ref ?? item.producer,
-      searchText: `evidence:${item.evidence_id} status:${item.evidence_state} responsibility:${item.responsibility_state ?? 'unknown'} producer:${item.producer ?? 'unknown'}`,
+      search: {
+        project: [project?.project_id, project?.name],
+        evidence: [item.evidence_state, item.evidence_id],
+        status: item.evidence_state,
+        responsibility: item.responsibility_state ?? 'unknown',
+        producer: item.producer ?? 'unknown',
+        commit: item.source_commit ?? project?.source_commit,
+        category: 'evidence',
+      },
       execute: () => item.artifact_ref
         ? openArtifact(item.artifact_ref, item.label)
         : workbench.openView('verification', item.label, item.evidence_id),
@@ -290,19 +375,28 @@ const WorkbenchShell: React.FC = () => {
       label: `Open agent run ${item.run_id}`,
       category: 'Agent Run',
       detail: item.unattended_verdict ?? item.status,
-      searchText: `run:${item.run_id} status:${item.status ?? 'unknown'} verdict:${item.unattended_verdict ?? 'unknown'} model:${item.model ?? 'unknown'}`,
+      search: {
+        project: [project?.project_id, project?.name],
+        run: item.run_id,
+        status: item.status ?? 'unknown',
+        evidence: item.status ?? 'unknown',
+        verdict: item.unattended_verdict ?? 'unknown',
+        model: item.model ?? 'unknown',
+        commit: item.source_commit ?? project?.source_commit,
+        category: 'agent run',
+      },
       execute: () => {
         workbench.setSelectedRun(item.run_id);
         workbench.openView('agent-run', `Agent Run ${item.run_id}`, item.run_id);
       },
     }));
     return base;
-  }, [evidence, focusBottomPanel, openArtifact, openProblem, openTest, problems, project?.source_entry, projects, runs, tests, verification, workbench]);
+  }, [evidence, focusBottomPanel, openArtifact, openProblem, openTest, problems, project, projectById, projects, runs, tests, verification, workbench]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       const commandKey = event.ctrlKey || event.metaKey;
-      if (commandKey && event.key.toLowerCase() === 'k') { event.preventDefault(); setPaletteOpen(true); return; }
+      if (commandKey && event.key.toLowerCase() === 'k') { event.preventDefault(); openPalette(); return; }
       if (commandKey && event.key.toLowerCase() === 'b') { event.preventDefault(); workbench.togglePrimarySidebar(); return; }
       if (commandKey && event.key.toLowerCase() === 'j') { event.preventDefault(); workbench.toggleBottomPanel(); return; }
       if (commandKey && event.key === '\\') { event.preventDefault(); workbench.splitActiveTab(); return; }
@@ -311,7 +405,7 @@ const WorkbenchShell: React.FC = () => {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [openNextProblem, workbench]);
+  }, [openNextProblem, openPalette, workbench]);
 
   const renderEditor = (tab?: WorkbenchTab) => (
     <EditorContent
@@ -320,15 +414,20 @@ const WorkbenchShell: React.FC = () => {
       run={runQuery.data ?? runs.find((run) => run.run_id === selectedRunId)}
       runs={runs}
       wiring={projectedWiring}
+      wiringDiagnostics={wiringQuery.data?.diagnostics ?? []}
       pointCheckSummary={physicalEvidenceQuery.data?.point_checks.summary}
       recordingPointId={pointObservationMutation.isPending ? pointObservationMutation.variables?.pointId : undefined}
       pointObservationError={pointObservationError}
       verification={verification}
       evidence={evidence}
+      geometry={geometryQuery.data}
+      geometryLoading={geometryQuery.isLoading}
+      evidenceFilter={workbench.evidenceFilter}
       signatureContext={signaturesQuery.data}
       signingHoldId={signMutation.isPending ? signMutation.variables?.holdId : undefined}
       onSign={async (holdId, request) => { await signMutation.mutateAsync({ holdId, request }); }}
       onRecordPoint={async (pointId, request, photo) => { await pointObservationMutation.mutateAsync({ pointId, request, photo }); }}
+      onEvidenceFilterChange={workbench.setEvidenceFilter}
       loading={projectLoading}
       error={projectError}
       onRetry={refreshProject}
@@ -347,7 +446,7 @@ const WorkbenchShell: React.FC = () => {
     <div className="wb-shell">
       <header className="wb-titlebar">
         <div className="wb-titlebar__identity"><strong>RustPLC</strong><span>Autonomous Delivery Workbench</span></div>
-        <button className="wb-command-center" type="button" title="Open command palette" onClick={() => setPaletteOpen(true)}><MacCommandOutlined /><span>{project?.name ?? project?.project_id ?? 'Select a delivery project'}</span><kbd>Ctrl K</kbd></button>
+        <button className="wb-command-center" type="button" title="Open command palette" onClick={() => openPalette()}><MacCommandOutlined /><span>{project?.name ?? project?.project_id ?? 'Select a delivery project'}</span><kbd>Ctrl K</kbd></button>
         <div className="wb-titlebar__actions"><button type="button" title="Workspace notifications"><BellOutlined /><span className="wb-visually-hidden">Notifications</span></button><button type="button" title="Split active editor" onClick={workbench.splitActiveTab}><LayoutOutlined /><span className="wb-visually-hidden">Split active editor</span></button></div>
       </header>
 
@@ -362,7 +461,7 @@ const WorkbenchShell: React.FC = () => {
               selectedProjectId={projectId}
               project={project}
               runs={runs}
-              wiring={wiringQuery.data ?? []}
+              wiring={wiringQuery.data?.points ?? []}
               verification={verification}
               evidence={evidence}
               loading={projectsQuery.isLoading}
@@ -371,6 +470,9 @@ const WorkbenchShell: React.FC = () => {
               onSelectProject={workbench.setSelectedProject}
               onSelectRun={workbench.setSelectedRun}
               onOpenView={workbench.openView}
+              searchQuery={workbench.searchQuery}
+              onSearchQueryChange={workbench.setSearchQuery}
+              onSubmitSearch={openPalette}
             />
             <WorkbenchSeparator className="wb-resizer--pane-right" orientation="vertical" label="Resize Explorer" valueNow={workbench.primarySidebarWidth} valueMin={190} valueMax={420} onDelta={(x) => workbench.setPrimarySidebarWidth(workbench.primarySidebarWidth + x)} onKeyStep={(step) => workbench.setPrimarySidebarWidth(workbench.primarySidebarWidth + step * 10)} />
           </div>
@@ -399,10 +501,10 @@ const WorkbenchShell: React.FC = () => {
             {!workbench.bottomPanelCollapsed ? (
               <>
                 <WorkbenchSeparator className="wb-resizer--bottom" orientation="horizontal" label="Resize bottom panel" valueNow={workbench.bottomPanelHeight} valueMin={120} valueMax={460} onDelta={(_, y) => workbench.setBottomPanelHeight(workbench.bottomPanelHeight - y)} onKeyStep={(step) => workbench.setBottomPanelHeight(workbench.bottomPanelHeight + step * 10)} />
-                <BottomPanel active={workbench.bottomPanel} problems={problems} tests={tests} verification={verification} evidence={evidence} onChange={workbench.setBottomPanel} onCollapse={workbench.toggleBottomPanel} onNavigateProblem={openProblem} onNavigateTest={openTest} />
+                <BottomPanel active={workbench.bottomPanel} problems={problemsProjection} tests={testsProjection} problemsRequestError={queryErrorMessage(problemsQuery.error)} testsRequestError={queryErrorMessage(testsQuery.error)} verification={verification} evidence={evidence} projects={projects} onChange={workbench.setBottomPanel} onCollapse={workbench.toggleBottomPanel} onNavigateProblem={openProblem} onNavigateTest={openTest} onRetryProblems={() => { void problemsQuery.refetch(); }} onRetryTests={() => { void testsQuery.refetch(); }} />
               </>
             ) : (
-              <button className="wb-bottom-restore" type="button" onClick={workbench.toggleBottomPanel}>Problems {problems.length} · Tests {tests.length} · Verification {verification.length}</button>
+              <button className="wb-bottom-restore" type="button" onClick={workbench.toggleBottomPanel}>Problems {problemsProjection.count} · Tests {testsProjection.count} · Verification {verification.length}</button>
             )}
           </div>
         </main>
@@ -425,7 +527,15 @@ const WorkbenchShell: React.FC = () => {
         <span>HIL {evidence.some((item) => item.evidence_state === 'observed') ? 'evidence present' : 'unobserved'}</span>
         <span className="wb-statusbar__right">Holds {project?.human_holds?.filter((hold) => hold.status !== 'confirmed').length ?? 0} open</span>
       </footer>
-      {paletteOpen && <CommandPalette open commands={commands} onClose={() => setPaletteOpen(false)} />}
+      {paletteOpen && (
+        <CommandPalette
+          open
+          commands={commands}
+          initialQuery={workbench.searchQuery}
+          onQueryChange={workbench.setSearchQuery}
+          onClose={() => setPaletteOpen(false)}
+        />
+      )}
     </div>
   );
 };
@@ -433,6 +543,12 @@ const WorkbenchShell: React.FC = () => {
 function resourceLabel(resource: string) {
   const normalized = resource.replace(/\\/g, '/');
   return normalized.split('/').filter(Boolean).at(-1) ?? normalized;
+}
+
+function queryErrorMessage(error: unknown): string | undefined {
+  if (!error) return undefined;
+  if (error instanceof Error) return error.message;
+  return 'The workspace projection request failed.';
 }
 
 function normalizeHoldProjection(hold: HoldProjectionItem): HumanHold {
@@ -468,10 +584,18 @@ interface EditorGroupProps {
 
 const EditorGroup: React.FC<EditorGroupProps> = ({ group, tabs, activeTab, startControl, endControl, children, onActivate, onClose, onMove, onDrop }) => {
   const otherGroup = group === 'primary' ? 'secondary' : 'primary';
-  const focusAdjacent = (currentId: string, direction: -1 | 1) => {
+  const focusTab = (targetIndex: number, tabList: HTMLElement | null) => {
+    const next = tabs[targetIndex];
+    if (!next) return;
+    onActivate(next.id, group);
+    window.setTimeout(() => {
+      const tabButtons = Array.from(tabList?.querySelectorAll<HTMLButtonElement>('[role="tab"]') ?? []);
+      tabButtons[targetIndex]?.focus();
+    }, 0);
+  };
+  const focusAdjacent = (currentId: string, direction: -1 | 1, tabList: HTMLElement | null) => {
     const index = tabs.findIndex((tab) => tab.id === currentId);
-    const next = tabs[(index + direction + tabs.length) % tabs.length];
-    if (next) onActivate(next.id, group);
+    focusTab((index + direction + tabs.length) % tabs.length, tabList);
   };
   return (
     <section className={`wb-editor-group is-${group}`} aria-label={`${group} editor group`} onDragOver={(event) => event.preventDefault()} onDrop={(event) => {
@@ -486,9 +610,12 @@ const EditorGroup: React.FC<EditorGroupProps> = ({ group, tabs, activeTab, start
               event.dataTransfer.effectAllowed = 'move';
               event.dataTransfer.setData('application/x-rustplc-workbench-tab', tab.id);
             }}>
-              <button type="button" role="tab" aria-selected={tab.id === activeTab?.id} tabIndex={tab.id === activeTab?.id ? 0 : -1} title={tab.resource_id ?? tab.label} onClick={() => onActivate(tab.id, group)} onKeyDown={(event) => {
-                if (event.key === 'ArrowLeft') { event.preventDefault(); focusAdjacent(tab.id, -1); }
-                if (event.key === 'ArrowRight') { event.preventDefault(); focusAdjacent(tab.id, 1); }
+              <button type="button" role="tab" data-tab-id={tab.id} aria-selected={tab.id === activeTab?.id} tabIndex={tab.id === activeTab?.id ? 0 : -1} title={tab.resource_id ?? tab.label} onClick={() => onActivate(tab.id, group)} onKeyDown={(event) => {
+                const tabList = event.currentTarget.closest<HTMLElement>('[role="tablist"]');
+                if (event.key === 'ArrowLeft') { event.preventDefault(); focusAdjacent(tab.id, -1, tabList); }
+                if (event.key === 'ArrowRight') { event.preventDefault(); focusAdjacent(tab.id, 1, tabList); }
+                if (event.key === 'Home') { event.preventDefault(); focusTab(0, tabList); }
+                if (event.key === 'End') { event.preventDefault(); focusTab(tabs.length - 1, tabList); }
                 if (event.key === 'Delete' && !tab.pinned) { event.preventDefault(); onClose(tab.id); }
               }}><span>{tab.label}</span></button>
               {!tab.pinned && <button className="wb-tab-action" type="button" aria-label={`Move ${tab.label} to ${otherGroup} editor group`} title={`Move to ${otherGroup} group`} onClick={() => onMove(tab.id, otherGroup)}>{group === 'primary' ? <RightOutlined /> : <LeftOutlined />}</button>}
@@ -555,21 +682,26 @@ interface EditorContentProps {
   run: ReturnType<typeof deliveryProjectApi.getRun> extends Promise<infer T> ? T | undefined : never;
   runs: Awaited<ReturnType<typeof deliveryProjectApi.listRuns>>;
   wiring: PointCheckProjectionPoint[];
+  wiringDiagnostics: WiringDiagnostic[];
   pointCheckSummary?: Awaited<ReturnType<typeof deliveryProjectApi.getPhysicalEvidence>>['point_checks']['summary'];
   recordingPointId?: string;
   pointObservationError?: string;
   verification: Awaited<ReturnType<typeof deliveryProjectApi.getVerification>>;
   evidence: Awaited<ReturnType<typeof deliveryProjectApi.getEvidence>>;
+  geometry?: Awaited<ReturnType<typeof deliveryProjectApi.getGeometry>>;
+  geometryLoading: boolean;
+  evidenceFilter: 'all' | EvidenceState;
   signatureContext?: HoldSignatureContext;
   signingHoldId?: string;
   onSign: (holdId: string, request: SignHoldRequest) => Promise<void>;
   onRecordPoint: (pointId: string, request: RecordPointObservationRequest, photo?: File) => Promise<void>;
+  onEvidenceFilterChange: (filter: 'all' | EvidenceState) => void;
   loading: boolean;
   error: boolean;
   onRetry: () => void;
 }
 
-const EditorContent: React.FC<EditorContentProps> = ({ tab, project, run, runs, wiring, pointCheckSummary, recordingPointId, pointObservationError, verification, evidence, signatureContext, signingHoldId, onSign, onRecordPoint, loading, error, onRetry }) => {
+const EditorContent: React.FC<EditorContentProps> = ({ tab, project, run, runs, wiring, wiringDiagnostics, pointCheckSummary, recordingPointId, pointObservationError, verification, evidence, geometry, geometryLoading, evidenceFilter, signatureContext, signingHoldId, onSign, onRecordPoint, onEvidenceFilterChange, loading, error, onRetry }) => {
   const content = useMemo(() => {
     if (loading) return <div className="wb-editor-skeleton"><span /><span /><span /><span /></div>;
     if (error) return <WorkbenchState kind="error" title="Project evidence unavailable" detail="The selected delivery project could not be loaded from the API." onRetry={onRetry} />;
@@ -577,16 +709,16 @@ const EditorContent: React.FC<EditorContentProps> = ({ tab, project, run, runs, 
     switch (tab?.view ?? 'overview') {
       case 'overview': return <ProjectOverviewView project={project} runs={runs} verification={verification} evidence={evidence} signatureContext={signatureContext} signingHoldId={signingHoldId} onSign={onSign} />;
       case 'agent-run': return <AgentRunTimelineView run={run} />;
-      case 'wiring': return <WiringPointChecksView points={wiring} summary={pointCheckSummary} recordingPointId={recordingPointId} recordError={pointObservationError} onRecord={onRecordPoint} />;
-      case 'verification': return <VerificationEvidenceView stages={verification} evidence={evidence} />;
+      case 'wiring': return <WiringPointChecksView points={wiring} diagnostics={wiringDiagnostics} summary={pointCheckSummary} recordingPointId={recordingPointId} recordError={pointObservationError} onRecord={onRecordPoint} />;
+      case 'verification': return <VerificationEvidenceView stages={verification} evidence={evidence} filter={evidenceFilter} onFilterChange={onEvidenceFilterChange} />;
       case 'source': return <ArtifactSourceView resourceId={tab?.resource_id} />;
-      case 'topology': return <div className="wb-canvas-surface"><TopologyCanvas readOnly /></div>;
+      case 'topology': return <div className="wb-geometry-surface"><GeometryPreview artifact={geometry} loading={geometryLoading} runMode="delivery_project" /></div>;
       case 'run': return <div className="wb-legacy-view"><RunPage /></div>;
       case 'replay': return <div className="wb-legacy-view"><ReplayPage /></div>;
       case 'audit': return <div className="wb-legacy-view"><AuditPage /></div>;
       default: return null;
     }
-  }, [loading, error, project, tab, runs, verification, evidence, signatureContext, signingHoldId, onSign, onRecordPoint, run, wiring, pointCheckSummary, recordingPointId, pointObservationError, onRetry]);
+  }, [loading, error, project, tab, runs, verification, evidence, geometry, geometryLoading, evidenceFilter, signatureContext, signingHoldId, onSign, onRecordPoint, onEvidenceFilterChange, run, wiring, wiringDiagnostics, pointCheckSummary, recordingPointId, pointObservationError, onRetry]);
   return content;
 };
 

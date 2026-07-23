@@ -5,6 +5,10 @@ device plc_main: plc {
     model_ref: openplc_softplc
 }
 
+controller_io plc_main {
+    output axis_enable: Y0 { purpose: "Axis drive enable command", safe_state: off }
+}
+
 device axis_x: stepper_motor {
     purpose: "Blocking relative-move baseline axis"
     model_ref: stepper_generic

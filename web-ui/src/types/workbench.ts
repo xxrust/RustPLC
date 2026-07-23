@@ -73,6 +73,7 @@ export interface HoldSignature {
   project_id: string;
   hold_id: string;
   hold_type: string;
+  attestation_standard: 'internal_engineering_v1';
   user: AuthenticatedUser;
   source_commit: string;
   evidence_digests: Record<string, string>;
@@ -89,6 +90,8 @@ export interface HoldSignatureView extends HoldSignature {
 export interface HoldSignatureContext {
   schema_version: number;
   project_id: string;
+  attestation_standard: 'internal_engineering_v1';
+  attestation_scope: string;
   source_commit: string;
   current_evidence_digests: Record<string, string>;
   signatures: HoldSignatureView[];
@@ -96,6 +99,7 @@ export interface HoldSignatureContext {
 
 export interface SignHoldRequest {
   hold_type: string;
+  attestation_standard: 'internal_engineering_v1';
   source_commit: string;
   evidence_digests: Record<string, string>;
   decision: 'approve' | 'reject';
@@ -112,6 +116,7 @@ export interface AgentRunEvent {
   result?: string;
   status?: EvidenceState | 'running' | 'complete' | 'failed';
   artifact_ref?: string;
+  artifact_refs?: string[];
 }
 
 export interface AgentAnomaly {
@@ -120,10 +125,36 @@ export interface AgentAnomaly {
   summary: string;
   root_cause?: string;
   correction?: string;
+  verification_result?: string;
   affected_files?: string[];
   status?: EvidenceState;
   retry_count?: number;
   long_search_or_trial_and_error?: boolean;
+}
+
+export interface AgentFileAttribution {
+  path: string;
+  before_sha256?: string | null;
+  after_sha256?: string;
+  current_sha256?: string;
+  recorded_attribution_kind?: string;
+  attribution_kind: string;
+  agent_id?: string;
+  task_id?: string;
+  event_id?: string;
+  current_state?: string;
+}
+
+export interface AgentRunAttribution {
+  provenance_scope?: string;
+  unattended_verdict: 'proven' | 'not_proven' | 'human_intervention_detected' | string;
+  execution_unattended_verdict?: string;
+  source_authoring_verdict?: string;
+  source_authoring_record_count?: number;
+  reason?: string;
+  human_intervention_detected?: boolean;
+  validation_issues?: string[];
+  records: AgentFileAttribution[];
 }
 
 export interface AgentRun {
@@ -135,6 +166,7 @@ export interface AgentRun {
   model?: string;
   unattended_verdict?: string;
   input_manifest_digest?: string;
+  attribution?: AgentRunAttribution;
   events?: AgentRunEvent[];
   anomalies?: AgentAnomaly[];
   corrections?: AgentAnomaly[];
@@ -154,6 +186,19 @@ export interface WiringPoint {
   compiler_status?: EvidenceState;
   point_check_status?: EvidenceState | 'pending';
   note?: string;
+}
+
+export interface WiringDiagnostic {
+  code: string;
+  kind: string;
+  point_id?: string;
+  severity?: 'error' | 'warning' | 'blocked';
+  message: string;
+}
+
+export interface WiringProjection {
+  points: WiringPoint[];
+  diagnostics: WiringDiagnostic[];
 }
 
 export type PointObservationStatus = 'pass' | 'fail' | 'blocked';
@@ -295,6 +340,9 @@ export interface VerificationStage {
   producer?: string;
   source_commit?: string;
   artifact_ref?: string;
+  evidence_source_type?: string;
+  semantic_object?: { kind?: string; id?: string };
+  deep_link?: Record<string, unknown>;
   diagnostic_code?: string;
   message?: string;
   updated_at?: string;
@@ -309,6 +357,9 @@ export interface EvidenceRecord {
   timestamp?: string;
   source_commit?: string;
   artifact_ref?: string;
+  evidence_source_type?: string;
+  semantic_object?: { kind?: string; id?: string };
+  deep_link?: Record<string, unknown>;
   digest?: string;
   stale?: boolean;
   blocker_reason?: string;
@@ -322,19 +373,96 @@ export interface WorkspaceProblem {
   code?: string;
   message: string;
   source_ref?: string;
+  source_commit?: string;
+  artifact_ref?: string;
+  semantic_object?: {
+    kind?: string;
+    id?: string;
+  };
+  deep_link?: Record<string, unknown>;
   line?: number;
   column?: number;
+}
+
+export interface WorkspaceProblemsProjection {
+  schema_version?: number;
+  count: number;
+  partial: boolean;
+  problems: WorkspaceProblem[];
 }
 
 export interface WorkspaceTest {
   id: string;
   project_id?: string;
   suite?: string;
+  execution_source?: string;
+  test_scope?: 'library' | 'integration' | 'canonical_example' | 'delivery_project' | string;
   name: string;
   status: 'pass' | 'fail' | 'blocked' | 'skipped' | 'running';
   duration_ms?: number;
   artifact_ref?: string;
 }
+
+export interface WorkspaceTestFreshnessBinding {
+  name?: string;
+  state?: string;
+  artifact?: string | null;
+  expected_sha256?: string | null;
+  actual_sha256?: string | null;
+}
+
+export interface WorkspaceTestRunFreshness {
+  run_id?: string;
+  freshness?: {
+    state?: string;
+    bindings?: WorkspaceTestFreshnessBinding[];
+  };
+}
+
+export interface WorkspaceTestFreshness {
+  state?: string;
+  error_code?: string;
+  reason?: string;
+  runs?: WorkspaceTestRunFreshness[];
+}
+
+export interface WorkspaceTestSource {
+  project_id?: string;
+  execution_source: string;
+  status: string;
+  test_count: number;
+  freshness?: WorkspaceTestFreshness;
+}
+
+export interface WorkspaceTestsProjection {
+  schema_version?: number;
+  count: number;
+  partial: boolean;
+  boundary?: string;
+  sources: WorkspaceTestSource[];
+  tests: WorkspaceTest[];
+}
+
+export type WorkbenchSearchField =
+  | 'project'
+  | 'layer'
+  | 'stage'
+  | 'diagnostic'
+  | 'evidence'
+  | 'commit'
+  | 'status'
+  | 'responsibility'
+  | 'producer'
+  | 'run'
+  | 'test'
+  | 'suite'
+  | 'verdict'
+  | 'model'
+  | 'category';
+
+export type WorkbenchSearchIndex = Partial<
+  Record<WorkbenchSearchField, string | Array<string | undefined> | undefined>
+>;
 
 export type WorkbenchView =
   | 'overview'

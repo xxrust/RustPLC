@@ -27,10 +27,13 @@ pub(crate) async fn authorize_mutations(
     request: Request<Body>,
     next: Next,
 ) -> Response {
+    let path = request.uri().path();
     let requires_auth = !matches!(
         *request.method(),
         Method::GET | Method::HEAD | Method::OPTIONS
-    ) || request.uri().path().starts_with("/ws/collab/");
+    ) || path.starts_with("/ws/collab/")
+        || path.starts_with("/api/artifacts/")
+        || path.starts_with("/artifacts/");
     if request.uri().path() == "/api/auth/login" {
         return next.run(request).await;
     }

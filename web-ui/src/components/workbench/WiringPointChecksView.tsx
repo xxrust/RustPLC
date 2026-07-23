@@ -12,8 +12,10 @@ import type {
   PointCheckProjectionPoint,
   PointObservationStatus,
   RecordPointObservationRequest,
+  WiringDiagnostic,
 } from '../../types/workbench';
 import { StatusPill, WorkbenchState } from './WorkbenchPrimitives';
+import { useDialogFocus } from './useDialogFocus';
 import { formatTime } from './workbenchUtils';
 
 interface WiringPointChecksViewProps {
@@ -21,10 +23,11 @@ interface WiringPointChecksViewProps {
   summary?: PointCheckProjection['summary'];
   recordingPointId?: string;
   recordError?: string;
+  diagnostics?: WiringDiagnostic[];
   onRecord: (pointId: string, request: RecordPointObservationRequest, photo?: File) => Promise<void>;
 }
 
-const WiringPointChecksView: React.FC<WiringPointChecksViewProps> = ({ points, summary, recordingPointId, recordError, onRecord }) => {
+const WiringPointChecksView: React.FC<WiringPointChecksViewProps> = ({ points, summary, recordingPointId, recordError, diagnostics = [], onRecord }) => {
   const currentUser = useAppStore((state) => state.currentUser);
   const [query, setQuery] = useState('');
   const [selectedPoint, setSelectedPoint] = useState<PointCheckProjectionPoint>();
@@ -36,6 +39,9 @@ const WiringPointChecksView: React.FC<WiringPointChecksViewProps> = ({ points, s
   const [note, setNote] = useState('');
   const [photo, setPhoto] = useState<File>();
   const [localError, setLocalError] = useState('');
+  const { dialogRef, onDialogKeyDown } = useDialogFocus<HTMLFormElement>(Boolean(selectedPoint), () => {
+    if (recordingPointId !== selectedPoint?.point_id) setSelectedPoint(undefined);
+  });
 
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -116,12 +122,25 @@ const WiringPointChecksView: React.FC<WiringPointChecksViewProps> = ({ points, s
           </label>
         </div>
       </header>
+      {diagnostics.length > 0 && (
+        <section className="wb-wiring-diagnostics" aria-label="Wiring validation diagnostics">
+          <div className="wb-section-heading"><h2>Wiring blockers</h2><span>{diagnostics.length} diagnostics</span></div>
+          {diagnostics.map((diagnostic, index) => (
+            <div className="wb-wiring-diagnostic" key={`${diagnostic.code}:${diagnostic.point_id ?? index}`}>
+              <StatusPill status={diagnostic.severity === 'warning' ? 'warning' : 'blocked'} label={diagnostic.code} />
+              <strong>{diagnostic.kind.replaceAll('_', ' ')}</strong>
+              <code>{diagnostic.point_id ?? 'project wiring'}</code>
+              <span>{diagnostic.message}</span>
+            </div>
+          ))}
+        </section>
+      )}
       {points.length === 0 ? (
         <WorkbenchState kind="empty" title="No point-check projection" detail="The project API has not returned the authored wiring map and its physical evidence projection." />
       ) : (
         <div className="wb-table-scroll">
           <table className="wb-data-table wb-wiring-table">
-            <thead><tr><th>Controller / Channel</th><th>Semantic alias</th><th>Direction</th><th>Device terminal</th><th>Signal</th><th>Safe state</th><th>Wire ID</th><th>Compiler</th><th>Point check</th><th>Latest observation</th><th><span className="wb-visually-hidden">Actions</span></th></tr></thead>
+            <thead><tr><th>Controller / Channel</th><th>Semantic alias</th><th>Direction</th><th>Device terminal</th><th>Signal</th><th>Safe state</th><th>Wire ID</th><th>Evidence source</th><th>Compiler</th><th>Point check</th><th>Latest observation</th><th><span className="wb-visually-hidden">Actions</span></th></tr></thead>
             <tbody>
               {filtered.map((point) => {
                 const authored = point.authored;
@@ -133,8 +152,9 @@ const WiringPointChecksView: React.FC<WiringPointChecksViewProps> = ({ points, s
                     <td>{authored.direction ?? 'Unknown'}</td>
                     <td>{authored.device_terminal ?? 'Unbound'}</td>
                     <td>{authored.signal_type ?? 'Unknown'}</td>
-                    <td>{authored.safe_state ?? 'Missing'}</td>
+                    <td>{authored.direction === 'input' ? 'n/a' : authored.safe_state ?? 'Missing'}</td>
                     <td className="wb-mono">{authored.wire_id ?? 'Not assigned'}</td>
+                    <td className="wb-mono" title={authored.evidence_source}>{authored.evidence_source ?? 'Not recorded'}</td>
                     <td><StatusPill status={authored.compiler_status} /></td>
                     <td><StatusPill status={point.status === 'pending' ? 'missing' : point.status} label={point.status} /></td>
                     <td>{latest ? <span className="wb-latest-observation"><strong>{latest.user.name}</strong><small>{formatTime(latest.observed_at)} / {latest.status}</small></span> : <span className="wb-muted-copy">Not observed</span>}</td>
@@ -149,10 +169,10 @@ const WiringPointChecksView: React.FC<WiringPointChecksViewProps> = ({ points, s
 
       {selectedPoint && (
         <div className="wb-dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closeObservation(); }}>
-          <form className="wb-point-dialog" role="dialog" aria-modal="true" aria-labelledby="point-observation-title" onSubmit={(event) => void submitObservation(event)}>
+          <form ref={dialogRef} className="wb-point-dialog" role="dialog" aria-modal="true" aria-labelledby="point-observation-title" tabIndex={-1} onKeyDown={onDialogKeyDown} onSubmit={(event) => void submitObservation(event)}>
             <header>
               <div><h2 id="point-observation-title">Record point observation</h2><p>{selectedPoint.authored.alias ?? selectedPoint.point_id} / {selectedPoint.authored.channel ?? selectedPoint.point_id}</p></div>
-              <button type="button" aria-label="Close point observation dialog" onClick={closeObservation} disabled={isRecording}><CloseOutlined /></button>
+              <button type="button" aria-label="Close point observation dialog" data-dialog-autofocus onClick={closeObservation} disabled={isRecording}><CloseOutlined /></button>
             </header>
 
             <div className="wb-point-accountability">

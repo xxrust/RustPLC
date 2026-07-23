@@ -599,7 +599,7 @@ const PlcEditorPage: React.FC = () => {
             {t('plcEditor.title')}
           </Title>
           <Text style={{ color: '#a0a0a0', fontSize: 12 }}>
-            {currentProject ? `${t('dashboard.currentProject')}: ${currentProject}` : t('common.noneSelected')}
+            {currentProject ? `${t('common.currentProject')}: ${currentProject}` : t('common.noneSelected')}
             {dirty ? ` · ${t('topBar.unsavedChanges')}` : ''}
             {` · ${realtimeConnected ? t('plcEditor.analysisRealtime') : t('plcEditor.analysisHttpFallback')}`}
           </Text>

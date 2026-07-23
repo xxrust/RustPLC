@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo } from 'react';
 import type { EvidenceRecord, EvidenceState, VerificationStage } from '../../types/workbench';
 import { StatusPill, WorkbenchState } from '../../components/workbench/WorkbenchPrimitives';
 import { formatTime, shortCommit } from '../../components/workbench/workbenchUtils';
@@ -8,8 +8,9 @@ const filters: Array<'all' | EvidenceState> = ['all', 'verified', 'observed', 'w
 const VerificationEvidenceView: React.FC<{
   stages: VerificationStage[];
   evidence: EvidenceRecord[];
-}> = ({ stages, evidence }) => {
-  const [filter, setFilter] = useState<'all' | EvidenceState>('all');
+  filter: 'all' | EvidenceState;
+  onFilterChange: (filter: 'all' | EvidenceState) => void;
+}> = ({ stages, evidence, filter, onFilterChange }) => {
   const filtered = useMemo(
     () => evidence.filter((item) => filter === 'all' || item.evidence_state === filter),
     [evidence, filter]
@@ -21,7 +22,7 @@ const VerificationEvidenceView: React.FC<{
         <div><h1>Verification and Evidence</h1><p>Formal proof, runtime observation, and human responsibility are reported as separate axes.</p></div>
         <div className="wb-segmented" role="group" aria-label="Evidence state filter">
           {filters.map((item) => (
-            <button key={item} type="button" aria-pressed={filter === item} onClick={() => setFilter(item)}>{item}</button>
+            <button key={item} type="button" aria-pressed={filter === item} onClick={() => onFilterChange(item)}>{item}</button>
           ))}
         </div>
       </header>
@@ -30,10 +31,10 @@ const VerificationEvidenceView: React.FC<{
         <section className="wb-stage-list" aria-label="Compiler stages">
           <div className="wb-section-heading"><h2>Compiler stages</h2><span>{stages.length} indexed</span></div>
           {stages.length > 0 ? stages.map((stage) => (
-            <button className="wb-stage-row" type="button" key={stage.stage}>
+            <button className="wb-stage-row" type="button" key={stage.stage} onClick={() => openArtifact(stage.artifact_ref)} disabled={!stage.artifact_ref}>
               <div><strong>{stage.stage}</strong><span>{stage.message ?? stage.producer ?? 'Artifact-backed result'}</span></div>
               <StatusPill status={stage.status} />
-              <code>{stage.diagnostic_code ?? shortCommit(stage.source_commit)}</code>
+              <code>{stage.diagnostic_code ?? stage.evidence_source_type ?? shortCommit(stage.source_commit)}</code>
             </button>
           )) : (
             <WorkbenchState kind="empty" title="No verification stages" detail="Compiler-owned stage artifacts will appear here when indexed by the delivery-project API." />
@@ -54,10 +55,12 @@ const VerificationEvidenceView: React.FC<{
               </div>
               <dl>
                 <div><dt>Producer</dt><dd>{item.producer ?? 'Unknown'}</dd></div>
+                <div><dt>Source type</dt><dd>{item.evidence_source_type ?? 'Artifact'}</dd></div>
                 <div><dt>Responsibility</dt><dd>{item.responsibility_state ?? 'Unassigned'}</dd></div>
                 <div><dt>Revision</dt><dd className="wb-mono">{shortCommit(item.source_commit)}</dd></div>
                 <div><dt>Timestamp</dt><dd>{formatTime(item.timestamp)}</dd></div>
               </dl>
+              {item.artifact_ref && <button className="wb-link-button" type="button" onClick={() => openArtifact(item.artifact_ref)}>Open artifact</button>}
             </article>
           ))}
         </section>
@@ -65,5 +68,11 @@ const VerificationEvidenceView: React.FC<{
     </div>
   );
 };
+
+function openArtifact(path?: string): void {
+  if (!path) return;
+  const normalized = path.replace(/\\/g, '/').replace(/^\/?api\/artifacts\//, '').replace(/^\/?artifacts\//, '').replace(/^\//, '');
+  window.open(`/api/artifacts/${normalized.split('/').map(encodeURIComponent).join('/')}`, '_blank', 'noopener,noreferrer');
+}
 
 export default VerificationEvidenceView;

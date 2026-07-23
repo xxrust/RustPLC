@@ -62,6 +62,10 @@ pub(crate) fn routes() -> Router<Arc<AppState>> {
             "/delivery-projects/{id}/evidence",
             get(get_delivery_evidence),
         )
+        .route(
+            "/delivery-projects/{id}/geometry",
+            get(get_delivery_geometry),
+        )
         .route("/workspace/problems", get(get_workspace_problems))
         .route("/workspace/tests", get(get_workspace_tests))
 }
@@ -323,6 +327,19 @@ async fn get_delivery_wiring(
         .flatten()
         .map(normalized_wiring_point)
         .collect::<Vec<_>>();
+    let diagnostics = documents
+        .iter()
+        .filter_map(|entry| entry.get("document"))
+        .filter_map(|document| document.get("diagnostics").and_then(Value::as_array))
+        .flatten()
+        .cloned()
+        .collect::<Vec<_>>();
+    let validation_summaries = documents
+        .iter()
+        .filter_map(|entry| entry.get("document"))
+        .filter_map(|document| document.get("validation_summary"))
+        .cloned()
+        .collect::<Vec<_>>();
     let point_check_projection = crate::physical_evidence::point_check_projection(
         &state.workspace_root,
         &project.project_id,
@@ -370,9 +387,78 @@ async fn get_delivery_wiring(
         "project_id": project.project_id,
         "status": status,
         "points": points,
+        "diagnostics": diagnostics,
+        "validation_summaries": validation_summaries,
         "point_check_projection": point_check_projection,
         "documents": documents,
         "boundary": "Wiring rows are returned from authored or generated wiring artifacts; the server does not derive PLC I/O semantics."
+    })))
+}
+
+async fn get_delivery_geometry(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    let catalog = load_catalog(&state.workspace_root);
+    let project = find_project(&catalog, &id)?;
+    if let Some(run_root) = collect_run_roots(project).into_iter().next() {
+        let candidates = [
+            run_root.join("compile/geometry.json"),
+            run_root.join("geometry.json"),
+        ];
+        for path in candidates {
+            if !path.is_file() || !is_within_workspace(project, &path) {
+                continue;
+            }
+            let mut document = read_structured_document(&path).map_err(|error| {
+                internal_error(format!("geometry artifact is unreadable: {error}"))
+            })?;
+            let valid = document.get("artifact_kind").and_then(Value::as_str)
+                == Some("semantic_twin_geometry")
+                && document.get("nodes").and_then(Value::as_array).is_some()
+                && document.get("edges").and_then(Value::as_array).is_some();
+            if !valid {
+                return Err(internal_error(
+                    "geometry artifact does not satisfy the semantic-twin contract".to_string(),
+                ));
+            }
+            if let Some(object) = document.as_object_mut() {
+                object.insert(
+                    "project_id".to_string(),
+                    Value::String(project.project_id.clone()),
+                );
+                object.insert(
+                    "run_id".to_string(),
+                    Value::String(run_identifier(project, &run_root)),
+                );
+                object.insert(
+                    "artifact_ref".to_string(),
+                    Value::String(workspace_rel(&project.workspace_root, &path)),
+                );
+                object.insert(
+                    "source_commit".to_string(),
+                    project
+                        .source_commit
+                        .clone()
+                        .map(Value::String)
+                        .unwrap_or(Value::Null),
+                );
+            }
+            return Ok(Json(document));
+        }
+    }
+    Ok(Json(json!({
+        "schema_version": 1,
+        "artifact_kind": "semantic_twin_geometry",
+        "status": "missing",
+        "project_id": project.project_id,
+        "reason": "No compiler-generated semantic geometry artifact exists for the latest delivery runs.",
+        "blocker": {
+            "code": "DELIVERY_GEOMETRY_ARTIFACT_MISSING",
+            "stage": "geometry_export",
+            "source_ref": project.source_entry,
+            "source_commit": project.source_commit,
+        }
     })))
 }
 
@@ -642,7 +728,7 @@ fn load_catalog(workspace_root: &StdPath) -> DeliveryCatalog {
     ];
     let mut manifest_paths = Vec::new();
     let mut visited = 0usize;
-    for relative in ["delivery-projects", "projects", "out"] {
+    for relative in ["delivery-projects"] {
         let root = workspace_root.join(relative);
         if root.is_dir() {
             discover_named_files(&root, 0, &names, &mut visited, &mut manifest_paths);
@@ -952,6 +1038,7 @@ fn run_summary(project: &DeliveryProject, run_root: &StdPath) -> Value {
     let project_check = documents.get("project_check");
     let provenance = documents.get("provenance");
     let input_manifest = documents.get("input_manifest");
+    let attribution = run_attribution_projection(project, run_root, &documents);
     let (reported, status_source) = result
         .and_then(|value| {
             value
@@ -1007,12 +1094,9 @@ fn run_summary(project: &DeliveryProject, run_root: &StdPath) -> Value {
         "model": provenance
             .and_then(|value| value.pointer("/models/0/model"))
             .cloned(),
-        "unattended_verdict": provenance
-            .and_then(|value| value.get("unattended_verdict"))
-            .cloned(),
-        "unattended_reason": provenance
-            .and_then(|value| value.get("unattended_reason"))
-            .cloned(),
+        "unattended_verdict": attribution.get("unattended_verdict").cloned(),
+        "unattended_reason": attribution.get("reason").cloned(),
+        "attribution": attribution,
         "input_manifest_digest": input_manifest
             .and_then(|value| value.pointer("/digest/value"))
             .cloned(),
@@ -1044,6 +1128,7 @@ fn run_documents(project: &DeliveryProject, run_root: &StdPath) -> Map<String, V
         ("anomalies", run_root.join("anomalies.json")),
         ("corrections", run_root.join("corrections.json")),
         ("compiler_stages", run_root.join("compiler-stages.json")),
+        ("agent_events", run_root.join("agent-events.json")),
         (
             "project_check",
             run_root.join("project-check/project_check_report.json"),
@@ -1114,7 +1199,7 @@ fn run_freshness(
         result.pointer("/inputs/manifest").and_then(Value::as_str),
     ) {
         let path = resolve_declared_path(project, path_raw);
-        let actual = path.as_deref().and_then(sha256_file);
+        let actual = path.as_deref().and_then(normalized_sha256_file);
         let state = match actual.as_deref() {
             Some(value) if value.eq_ignore_ascii_case(expected) => "current",
             Some(_) => "stale",
@@ -1144,6 +1229,397 @@ fn run_freshness(
         "current"
     };
     json!({ "state": state, "bindings": bindings })
+}
+
+fn run_attribution_projection(
+    project: &DeliveryProject,
+    run_root: &StdPath,
+    documents: &Map<String, Value>,
+) -> Value {
+    let provenance_path = run_root.join("provenance.json");
+    let input_manifest_path = run_root.join("input-manifest.json");
+    let Some(provenance) = documents.get("provenance") else {
+        return json!({
+            "schema_version": 1,
+            "provenance_scope": "not_recorded",
+            "unattended_verdict": "not_proven",
+            "execution_unattended_verdict": "not_proven",
+            "source_authoring_verdict": "not_proven",
+            "reason": "No run provenance document is available.",
+            "human_intervention_detected": false,
+            "records": [],
+            "validation_issues": ["provenance_missing"],
+            "evidence": []
+        });
+    };
+
+    let mut issues = Vec::new();
+    if provenance
+        .get("schema_version")
+        .and_then(Value::as_u64)
+        .unwrap_or(1)
+        < 2
+    {
+        issues.push("legacy_provenance_schema".to_string());
+    }
+    for field in ["started_at_utc", "completed_at_utc", "git_base_commit"] {
+        if provenance.get(field).and_then(Value::as_str).is_none() {
+            issues.push(format!("missing_{field}"));
+        }
+    }
+    if provenance.get("git_base_commit").and_then(Value::as_str)
+        != provenance.get("source_commit").and_then(Value::as_str)
+    {
+        issues.push("git_base_commit_mismatch".to_string());
+    }
+    if !array_has_nonempty_field(provenance, "models", "model") {
+        issues.push("model_identity_not_recorded".to_string());
+    }
+    if !array_has_nonempty_field(provenance, "agents", "agent_id") {
+        issues.push("agent_identities_not_recorded".to_string());
+    }
+    if !array_has_nonempty_field(provenance, "task_definitions", "task_id") {
+        issues.push("task_definitions_not_recorded".to_string());
+    }
+    if !array_has_nonempty_field(provenance, "skills", "version") {
+        issues.push("skill_versions_not_recorded".to_string());
+    }
+    if !array_has_nonempty_field(provenance, "tool_versions", "version") {
+        issues.push("tool_versions_not_recorded".to_string());
+    }
+    let agent_ids = string_field_set(provenance, "agents", "agent_id");
+    let task_ids = string_field_set(provenance, "task_definitions", "task_id");
+    let source_authoring_task_ids = provenance
+        .get("task_definitions")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|task| {
+            matches!(
+                task.get("task_kind").and_then(Value::as_str),
+                Some("source_authoring" | "source_generation")
+            )
+        })
+        .filter_map(|task| task.get("task_id").and_then(Value::as_str))
+        .map(str::to_string)
+        .collect::<BTreeSet<_>>();
+    let event_ids = documents
+        .get("agent_events")
+        .map(|document| string_field_set(document, "records", "event_id"))
+        .unwrap_or_default();
+    if provenance
+        .get("agents")
+        .and_then(Value::as_array)
+        .is_some_and(|agents| {
+            agents.iter().any(|agent| {
+                agent
+                    .get("model")
+                    .and_then(Value::as_str)
+                    .is_none_or(str::is_empty)
+            })
+        })
+    {
+        issues.push("agent_model_binding_incomplete".to_string());
+    }
+    if provenance
+        .get("task_definitions")
+        .and_then(Value::as_array)
+        .is_some_and(|tasks| {
+            tasks.iter().any(|task| {
+                task.get("agent_id")
+                    .and_then(Value::as_str)
+                    .is_none_or(|agent_id| !agent_ids.contains(agent_id))
+            })
+        })
+    {
+        issues.push("task_agent_binding_incomplete".to_string());
+    }
+
+    let input_binding = provenance.get("input_manifest");
+    let recorded_input_digest = input_binding
+        .and_then(|value| value.pointer("/digest/value"))
+        .and_then(Value::as_str);
+    let actual_input_digest = normalized_sha256_file(&input_manifest_path);
+    if !input_manifest_path.is_file() {
+        issues.push("input_manifest_missing".to_string());
+    } else if recorded_input_digest.is_none() {
+        issues.push("input_manifest_digest_not_recorded".to_string());
+    } else if recorded_input_digest != actual_input_digest.as_deref() {
+        issues.push("input_manifest_digest_mismatch".to_string());
+    }
+    let bound_input_path = input_binding
+        .and_then(|value| value.get("artifact_ref"))
+        .and_then(Value::as_str)
+        .and_then(|path| resolve_declared_path(project, path));
+    if bound_input_path
+        .as_deref()
+        .is_none_or(|path| !same_path(path, &input_manifest_path))
+    {
+        issues.push("input_manifest_binding_mismatch".to_string());
+    }
+
+    let recorded_records = provenance
+        .pointer("/file_attribution/records")
+        .and_then(Value::as_array);
+    if recorded_records.is_none() {
+        issues.push("file_attribution_not_recorded".to_string());
+    } else if recorded_records.is_some_and(Vec::is_empty) {
+        issues.push("file_attribution_empty".to_string());
+    }
+    let mut records = Vec::new();
+    let mut attributed_paths = HashSet::new();
+    let mut human_intervention_detected = false;
+    let mut post_run_human_changes = 0_u64;
+    let mut source_authoring_record_count = 0_u64;
+    let source_root = project
+        .source_entry
+        .as_deref()
+        .and_then(|source| resolve_declared_path(project, source))
+        .and_then(|source| source.parent().map(StdPath::to_path_buf))
+        .and_then(|source| source.canonicalize().ok());
+    for (index, record) in recorded_records.into_iter().flatten().enumerate() {
+        let path_raw = record.get("path").and_then(Value::as_str);
+        let recorded_kind = record
+            .get("attribution_kind")
+            .and_then(Value::as_str)
+            .unwrap_or("unattributed_change");
+        let before_present = record.get("before_sha256").is_some();
+        let after_digest = record.get("after_sha256").and_then(Value::as_str);
+        if path_raw.is_none() {
+            issues.push(format!("file_attribution_{index}_path_missing"));
+        } else if path_raw.is_some_and(|path| !attributed_paths.insert(path.to_string())) {
+            issues.push(format!("file_attribution_{index}_path_duplicate"));
+        }
+        if !before_present {
+            issues.push(format!("file_attribution_{index}_before_digest_missing"));
+        }
+        if record
+            .get("before_sha256")
+            .and_then(Value::as_str)
+            .is_some_and(|digest| !is_sha256(digest))
+        {
+            issues.push(format!("file_attribution_{index}_before_digest_invalid"));
+        }
+        if !after_digest.is_some_and(is_sha256) {
+            issues.push(format!("file_attribution_{index}_after_digest_invalid"));
+        }
+        if !matches!(
+            recorded_kind,
+            "agent_generated"
+                | "agent_modified"
+                | "pre_existing_user_change"
+                | "human_intervention_detected"
+        ) {
+            issues.push(format!("file_attribution_{index}_kind_invalid"));
+        }
+        if recorded_kind == "agent_generated"
+            && record
+                .get("before_sha256")
+                .is_some_and(|value| !value.is_null())
+        {
+            issues.push(format!(
+                "file_attribution_{index}_generated_has_before_digest"
+            ));
+        }
+        if matches!(recorded_kind, "agent_modified" | "pre_existing_user_change")
+            && record
+                .get("before_sha256")
+                .and_then(Value::as_str)
+                .is_none()
+        {
+            issues.push(format!("file_attribution_{index}_prior_digest_missing"));
+        }
+        if matches!(recorded_kind, "agent_generated" | "agent_modified")
+            && (record.get("agent_id").and_then(Value::as_str).is_none()
+                || record.get("task_id").and_then(Value::as_str).is_none())
+        {
+            issues.push(format!("file_attribution_{index}_agent_binding_missing"));
+        }
+        if matches!(recorded_kind, "agent_generated" | "agent_modified") {
+            if record
+                .get("agent_id")
+                .and_then(Value::as_str)
+                .is_some_and(|agent_id| !agent_ids.contains(agent_id))
+            {
+                issues.push(format!("file_attribution_{index}_agent_unknown"));
+            }
+            if record
+                .get("task_id")
+                .and_then(Value::as_str)
+                .is_some_and(|task_id| !task_ids.contains(task_id))
+            {
+                issues.push(format!("file_attribution_{index}_task_unknown"));
+            }
+            if record
+                .get("event_id")
+                .and_then(Value::as_str)
+                .is_some_and(|event_id| !event_id.is_empty() && !event_ids.contains(event_id))
+            {
+                issues.push(format!("file_attribution_{index}_event_unknown"));
+            }
+        }
+        if matches!(
+            recorded_kind,
+            "human_intervention_detected" | "unattributed_change"
+        ) {
+            human_intervention_detected = true;
+        }
+        let resolved = path_raw.and_then(|path| resolve_declared_path(project, path));
+        if matches!(recorded_kind, "agent_generated" | "agent_modified")
+            && resolved.as_deref().is_some_and(|path| {
+                source_root
+                    .as_deref()
+                    .is_some_and(|source_root| path.starts_with(source_root))
+            })
+            && record
+                .get("task_id")
+                .and_then(Value::as_str)
+                .is_some_and(|task_id| source_authoring_task_ids.contains(task_id))
+        {
+            source_authoring_record_count += 1;
+        }
+        let current_digest = resolved.as_deref().and_then(normalized_sha256_file);
+        let current_state = match (after_digest, current_digest.as_deref()) {
+            (Some(expected), Some(actual)) if expected.eq_ignore_ascii_case(actual) => "current",
+            (Some(_), Some(_)) => "changed_after_run",
+            (Some(_), None) => "missing_after_run",
+            _ => "not_verifiable",
+        };
+        let projected_kind = if matches!(current_state, "changed_after_run" | "missing_after_run") {
+            post_run_human_changes += 1;
+            "post_run_human_change"
+        } else {
+            recorded_kind
+        };
+        records.push(json!({
+            "path": path_raw,
+            "before_sha256": record.get("before_sha256").cloned(),
+            "after_sha256": after_digest,
+            "current_sha256": current_digest,
+            "recorded_attribution_kind": recorded_kind,
+            "attribution_kind": projected_kind,
+            "agent_id": record.get("agent_id").cloned(),
+            "task_id": record.get("task_id").cloned(),
+            "event_id": record.get("event_id").cloned(),
+            "current_state": current_state,
+        }));
+    }
+
+    let execution_unattended_verdict = if human_intervention_detected {
+        "human_intervention_detected"
+    } else if issues.is_empty() {
+        "proven"
+    } else {
+        "not_proven"
+    };
+    let provenance_scope = provenance
+        .get("provenance_scope")
+        .and_then(Value::as_str)
+        .unwrap_or("not_recorded");
+    let source_scope_declared = matches!(
+        provenance_scope,
+        "source_generation" | "source_authoring_and_delivery_fixture_materialization"
+    );
+    let source_authoring_verdict = if source_scope_declared
+        && provenance
+            .get("source_authoring_verdict")
+            .and_then(Value::as_str)
+            == Some("proven")
+        && source_authoring_record_count > 0
+    {
+        "proven"
+    } else {
+        "not_proven"
+    };
+    if source_authoring_verdict != "proven" {
+        issues.push("source_authoring_provenance_missing".to_string());
+    }
+    let unattended_verdict = if human_intervention_detected {
+        "human_intervention_detected"
+    } else if execution_unattended_verdict == "proven" && source_authoring_verdict == "proven" {
+        "proven"
+    } else {
+        "not_proven"
+    };
+    let reason = match unattended_verdict {
+        "human_intervention_detected" => {
+            "At least one file changed during the run without an agent task attribution."
+        }
+        "proven" => "Source authoring and execution both have complete agent-bound provenance.",
+        _ if execution_unattended_verdict == "proven" => {
+            "Materialization execution is attributable, but source authoring provenance is not proven."
+        }
+        _ => "The recorded execution provenance is incomplete or failed an integrity check.",
+    };
+    let mut evidence = vec![json!({
+        "kind": "provenance",
+        "artifact": workspace_rel(&project.workspace_root, &provenance_path),
+        "sha256": normalized_sha256_file(&provenance_path)
+    })];
+    if input_manifest_path.is_file() {
+        evidence.push(json!({
+            "kind": "input_manifest",
+            "artifact": workspace_rel(&project.workspace_root, &input_manifest_path),
+            "sha256": actual_input_digest
+        }));
+    }
+    if let Some(event_stream) = provenance.get("event_stream").and_then(Value::as_str) {
+        evidence.push(json!({ "kind": "agent_event_stream", "artifact": event_stream }));
+    }
+    json!({
+        "schema_version": 1,
+        "provenance_scope": provenance_scope,
+        "unattended_verdict": unattended_verdict,
+        "execution_unattended_verdict": execution_unattended_verdict,
+        "source_authoring_verdict": source_authoring_verdict,
+        "source_authoring_record_count": source_authoring_record_count,
+        "reason": reason,
+        "human_intervention_detected": human_intervention_detected,
+        "post_run_human_change_count": post_run_human_changes,
+        "records": records,
+        "validation_issues": issues,
+        "evidence": evidence,
+        "recorded_verdict": provenance.get("unattended_verdict").cloned(),
+        "git_base_commit": provenance.get("git_base_commit").cloned(),
+        "models": provenance.get("models").cloned().unwrap_or_else(|| json!([])),
+        "agents": provenance.get("agents").cloned().unwrap_or_else(|| json!([])),
+        "task_definitions": provenance.get("task_definitions").cloned().unwrap_or_else(|| json!([])),
+        "skills": provenance.get("skills").cloned().unwrap_or_else(|| json!([])),
+        "tool_versions": provenance.get("tool_versions").cloned().unwrap_or_else(|| json!([])),
+        "input_manifest": input_binding.cloned(),
+        "evidence_envelopes": provenance.pointer("/file_attribution/evidence_envelopes").cloned().unwrap_or_else(|| json!([]))
+    })
+}
+
+fn array_has_nonempty_field(document: &Value, array: &str, field: &str) -> bool {
+    document
+        .get(array)
+        .and_then(Value::as_array)
+        .is_some_and(|entries| {
+            !entries.is_empty()
+                && entries.iter().all(|entry| {
+                    entry
+                        .get(field)
+                        .and_then(Value::as_str)
+                        .is_some_and(|value| !value.trim().is_empty())
+                })
+        })
+}
+
+fn string_field_set(document: &Value, array: &str, field: &str) -> BTreeSet<String> {
+    document
+        .get(array)
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|entry| entry.get(field).and_then(Value::as_str))
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+fn is_sha256(value: &str) -> bool {
+    value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
 fn declared_artifact_roots(project: &DeliveryProject, key: &str) -> Vec<PathBuf> {
@@ -1349,14 +1825,36 @@ fn normalized_verification_stage(
         .or_else(|| report_artifact.and_then(|artifact| artifact.get("href").cloned()))
         .or_else(|| report_artifact.and_then(|artifact| artifact.get("path").cloned()))
         .unwrap_or(Value::Null);
+    let source_commit = stage
+        .pointer("/evidence/source_commit")
+        .cloned()
+        .unwrap_or_else(|| {
+            project
+                .source_commit
+                .clone()
+                .map(Value::String)
+                .unwrap_or(Value::Null)
+        });
+    let evidence_source_type = verification_evidence_source_type(stage_name);
+    let deep_link = delivery_deep_link(
+        &project.project_id,
+        run_id.as_str(),
+        artifact_ref.as_str(),
+        Some("verification_stage"),
+        Some(stage_name),
+        source_commit.as_str(),
+    );
     json!({
         "stage": stage_name,
         "status": status,
         "reported_status": raw_status,
         "producer": "rust_plc compiler evidence",
         "run_id": run_id,
-        "source_commit": stage.pointer("/evidence/source_commit").cloned().unwrap_or_else(|| project.source_commit.clone().map(Value::String).unwrap_or(Value::Null)),
+        "source_commit": source_commit,
         "artifact_ref": artifact_ref,
+        "evidence_source_type": evidence_source_type,
+        "semantic_object": { "kind": "verification_stage", "id": stage_name },
+        "deep_link": deep_link,
         "diagnostic_code": diagnostic_code,
         "message": message
     })
@@ -1368,18 +1866,84 @@ fn normalized_evidence_record(project: &DeliveryProject, artifact: &Value) -> Op
         .file_name()
         .and_then(|value| value.to_str())
         .unwrap_or(path);
+    let evidence_source_type = artifact_evidence_source_type(path);
+    let run_id = path
+        .split("/runs/")
+        .nth(1)
+        .and_then(|suffix| suffix.split('/').next());
+    let artifact_ref = artifact
+        .get("href")
+        .filter(|value| !value.is_null())
+        .and_then(Value::as_str)
+        .unwrap_or(path);
+    let deep_link = artifact.get("deep_link").cloned().unwrap_or_else(|| {
+        delivery_deep_link(
+            &project.project_id,
+            run_id,
+            Some(artifact_ref),
+            Some("artifact"),
+            Some(path),
+            project.source_commit.as_deref(),
+        )
+    });
     Some(json!({
         "evidence_id": path,
         "label": label,
         "evidence_state": artifact.get("evidence_state").cloned().unwrap_or_else(|| Value::String("derived".to_string())),
-        "producer": "delivery project registry",
+        "producer": evidence_source_producer(evidence_source_type),
+        "run_id": run_id,
         "source_commit": project.source_commit,
-        "artifact_ref": artifact.get("href").filter(|value| !value.is_null()).cloned().unwrap_or_else(|| Value::String(path.to_string())),
+        "artifact_ref": artifact_ref,
+        "evidence_source_type": evidence_source_type,
+        "semantic_object": { "kind": "artifact", "id": path },
+        "deep_link": deep_link,
         "digest": artifact.get("sha256").cloned().unwrap_or(Value::Null),
         "digest_algorithm": "sha256",
         "digest_normalization": "raw_bytes",
         "stale": false
     }))
+}
+
+fn verification_evidence_source_type(stage: &str) -> &'static str {
+    let normalized = stage.to_ascii_lowercase();
+    if normalized.contains("runtime") || normalized.contains("simulation") {
+        "simulation"
+    } else if normalized.contains("codegen") {
+        "codegen"
+    } else {
+        "formal_verification"
+    }
+}
+
+fn artifact_evidence_source_type(path: &str) -> &'static str {
+    let normalized = path.to_ascii_lowercase();
+    if normalized.contains("/hil/") || normalized.contains("hil_") {
+        "hil"
+    } else if normalized.contains("board") && normalized.contains("trace") {
+        "board_trace"
+    } else if normalized.contains("no_board") {
+        "no_board"
+    } else if normalized.contains("scenario") || normalized.contains("simulation") {
+        "simulation"
+    } else if normalized.contains("verification") || normalized.contains("compiler-stage") {
+        "formal_verification"
+    } else if normalized.contains("wiring") || normalized.contains("point-check") {
+        "physical_check"
+    } else if normalized.contains("source/") {
+        "authored_source"
+    } else {
+        "artifact"
+    }
+}
+
+fn evidence_source_producer(source_type: &str) -> &'static str {
+    match source_type {
+        "formal_verification" | "codegen" => "rust_plc compiler",
+        "simulation" | "no_board" | "hil" | "board_trace" => "rust_plc execution harness",
+        "physical_check" => "commissioning evidence ledger",
+        "authored_source" => "delivery project source",
+        _ => "delivery project registry",
+    }
 }
 
 fn normalized_evidence_state(status: &str) -> &'static str {
@@ -1654,21 +2218,17 @@ fn project_problems(project: &DeliveryProject) -> Vec<Value> {
 }
 
 fn attach_problem_deep_link(catalog: &DeliveryCatalog, problem: &mut Value) {
-    let Some(project_id) = problem
+    let project_id = problem
         .get("project_id")
         .and_then(Value::as_str)
-        .map(str::to_string)
-    else {
-        return;
-    };
-    let Some(project) = catalog
-        .projects
-        .iter()
-        .find(|project| project.project_id == project_id)
-    else {
-        return;
-    };
-    let source_commit = project.source_commit.clone();
+        .map(str::to_string);
+    let project = project_id.as_deref().and_then(|project_id| {
+        catalog
+            .projects
+            .iter()
+            .find(|project| project.project_id == project_id)
+    });
+    let source_commit = project.and_then(|project| project.source_commit.clone());
     let run_id = problem
         .get("run_id")
         .and_then(Value::as_str)
@@ -1676,34 +2236,113 @@ fn attach_problem_deep_link(catalog: &DeliveryCatalog, problem: &mut Value) {
     let artifact = problem
         .get("artifact")
         .and_then(|value| {
-            value
-                .get("path")
-                .and_then(Value::as_str)
-                .or_else(|| value.get("artifact").and_then(Value::as_str))
+            value.as_str().or_else(|| {
+                value
+                    .get("path")
+                    .and_then(Value::as_str)
+                    .or_else(|| value.get("artifact").and_then(Value::as_str))
+            })
         })
         .map(str::to_string);
-    let object_id = problem
-        .get("code")
+    let source_ref = problem
+        .get("source_ref")
         .and_then(Value::as_str)
+        .map(str::to_string)
+        .or_else(|| {
+            project.and_then(|project| {
+                project
+                    .source_entry
+                    .as_deref()
+                    .and_then(|source| resolve_declared_path(project, source))
+                    .or_else(|| {
+                        project
+                            .system_contract
+                            .as_deref()
+                            .and_then(|source| resolve_declared_path(project, source))
+                    })
+                    .map(|path| workspace_rel(&project.workspace_root, &path))
+            })
+        })
+        .or_else(|| {
+            project.map(|project| workspace_rel(&project.workspace_root, &project.manifest_path))
+        })
+        .or_else(|| artifact.clone());
+    let object_id = problem
+        .get("semantic_object_id")
+        .and_then(Value::as_str)
+        .or_else(|| problem.get("code").and_then(Value::as_str))
         .or_else(|| problem.get("stage").and_then(Value::as_str))
-        .map(str::to_string);
-    if let Some(object) = problem.as_object_mut() {
-        if let Some(artifact) = artifact.as_ref() {
-            object
-                .entry("source_ref".to_string())
-                .or_insert_with(|| Value::String(artifact.clone()));
-        }
-        object.insert(
-            "deep_link".to_string(),
-            delivery_deep_link(
-                &project_id,
+        .unwrap_or("unclassified_problem")
+        .to_string();
+    let stage = problem.get("stage").and_then(Value::as_str);
+    let object_kind = problem
+        .get("semantic_object_kind")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .unwrap_or_else(|| {
+            if object_id.starts_with("GAP-") {
+                "delivery_gap"
+            } else if stage == Some("agent_run") {
+                "agent_anomaly"
+            } else if stage == Some("project_registry") {
+                "project_artifact"
+            } else if problem.get("code").and_then(Value::as_str).is_some() {
+                "compiler_diagnostic"
+            } else {
+                "compiler_stage"
+            }
+            .to_string()
+        });
+    let deep_link = project_id
+        .as_deref()
+        .map(|project_id| {
+            let mut deep_link = delivery_deep_link(
+                project_id,
                 run_id.as_deref(),
                 artifact.as_deref(),
-                Some("problem"),
-                object_id.as_deref(),
+                Some(&object_kind),
+                Some(&object_id),
                 source_commit.as_deref(),
-            ),
+            );
+            if let Some(object) = deep_link.as_object_mut() {
+                object.insert(
+                    "source".to_string(),
+                    json!({
+                        "artifact": source_ref.clone(),
+                        "commit": source_commit.clone(),
+                    }),
+                );
+            }
+            deep_link
+        })
+        .unwrap_or_else(|| {
+            json!({
+                "schema_version": 1,
+                "kind": "workspace_problem_deep_link",
+                "project_id": Value::Null,
+                "run_id": run_id.clone(),
+                "artifact": artifact.clone(),
+                "source_commit": Value::Null,
+                "source": { "artifact": source_ref.clone(), "commit": Value::Null },
+                "semantic_object": { "kind": object_kind.clone(), "id": object_id.clone() },
+                "object": { "kind": object_kind.clone(), "id": object_id.clone() },
+            })
+        });
+    if let Some(object) = problem.as_object_mut() {
+        if let Some(source_ref) = source_ref {
+            object.insert("source_ref".to_string(), Value::String(source_ref));
+        }
+        if let Some(artifact) = artifact {
+            object.insert("artifact_ref".to_string(), Value::String(artifact));
+        }
+        if let Some(source_commit) = source_commit {
+            object.insert("source_commit".to_string(), Value::String(source_commit));
+        }
+        object.insert(
+            "semantic_object".to_string(),
+            json!({ "kind": object_kind, "id": object_id }),
         );
+        object.insert("deep_link".to_string(), deep_link);
     }
 }
 
@@ -1783,10 +2422,12 @@ fn collect_test_records(
         }
         let artifact_ref = source_artifact.map(|path| workspace_rel(&project.workspace_root, path));
         let semantic_object_id = format!("{source}:{name}");
+        let test_scope = classify_test_scope(project, source, name);
         tests.push(json!({
             "project_id": project.project_id,
             "run_id": run_id,
             "execution_source": execution_source,
+            "test_scope": test_scope,
             "suite": source,
             "name": name,
             "reported_status": record.get("classification").cloned().or_else(|| record.get("status").cloned()),
@@ -1814,6 +2455,20 @@ fn collect_test_records(
                     .and_then(|path| artifact_descriptor(project, path, "derived"))
             }
         }));
+    }
+}
+
+fn classify_test_scope(project: &DeliveryProject, source: &str, name: &str) -> &'static str {
+    let source = source.to_ascii_lowercase();
+    let name = name.to_ascii_lowercase();
+    if project.delivery_layer == "module"
+        && (source.contains("scenario") || name.starts_with("scenario_validate"))
+    {
+        "canonical_example"
+    } else if name == "project_check" || name.starts_with("scenario_validate") {
+        "delivery_project"
+    } else {
+        "integration"
     }
 }
 
@@ -2104,6 +2759,13 @@ fn sha256_file(path: &StdPath) -> Option<String> {
     Some(digest.iter().map(|byte| format!("{byte:02x}")).collect())
 }
 
+fn normalized_sha256_file(path: &StdPath) -> Option<String> {
+    let text = fs::read_to_string(path).ok()?;
+    let normalized = text.replace("\r\n", "\n").replace('\r', "\n");
+    let digest = Sha256::digest(normalized.as_bytes());
+    Some(digest.iter().map(|byte| format!("{byte:02x}")).collect())
+}
+
 fn string_at(value: &Value, path: &[&str]) -> Option<String> {
     let mut current = value;
     for segment in path {
@@ -2200,7 +2862,12 @@ fn run_git_status(
             })
         })
         .or_else(|| {
-            provenance.and_then(|value| value.get("dirty_worktree").and_then(Value::as_bool))
+            provenance.and_then(|value| {
+                value
+                    .get("dirty_worktree_at_start")
+                    .and_then(Value::as_bool)
+                    .or_else(|| value.get("dirty_worktree").and_then(Value::as_bool))
+            })
         });
     let state = if recorded_commit.is_none() || recorded_dirty.is_none() {
         "not_recorded"
@@ -2213,7 +2880,8 @@ fn run_git_status(
         "dirty_worktree": recorded_dirty,
         "error_code": (state == "not_recorded").then_some("RUN_GIT_STATE_NOT_RECORDED"),
         "provenance": {
-            "result_fields": ["git_head", "dirty_worktree", "git.dirty", "workspace.dirty_worktree"]
+            "result_fields": ["git_head", "dirty_worktree", "git.dirty", "workspace.dirty_worktree"],
+            "provenance_fields": ["source_commit", "dirty_worktree_at_start", "dirty_worktree"]
         }
     })
 }
@@ -2249,6 +2917,13 @@ fn bad_request(message: impl Into<String>) -> ApiError {
 fn not_found(message: impl Into<String>) -> ApiError {
     (
         StatusCode::NOT_FOUND,
+        Json(json!({ "error": message.into() })),
+    )
+}
+
+fn internal_error(message: impl Into<String>) -> ApiError {
+    (
+        StatusCode::INTERNAL_SERVER_ERROR,
         Json(json!({ "error": message.into() })),
     )
 }

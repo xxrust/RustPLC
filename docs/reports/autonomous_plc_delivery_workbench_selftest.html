@@ -5,18 +5,17 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>RustPLC Autonomous PLC Delivery Workbench Self-test</title>
   <style>
-    :root { color-scheme: dark; --bg:#111318; --panel:#1b1f27; --panel2:#20242d; --line:#343a46; --text:#eef1f5; --muted:#aab2bf; --cyan:#38b8cf; --green:#55bf78; --amber:#e0a84f; --red:#ef6a70; }
+    :root { color-scheme:dark; --bg:#111318; --panel:#1b1f27; --panel2:#20242d; --line:#343a46; --text:#eef1f5; --muted:#aab2bf; --cyan:#38b8cf; --green:#55bf78; --amber:#e0a84f; --red:#ef6a70; }
     * { box-sizing:border-box; }
     body { margin:0; background:var(--bg); color:var(--text); font:14px/1.55 Inter,"Segoe UI",sans-serif; }
-    main { width:min(1240px,calc(100% - 40px)); margin:0 auto; padding:30px 0 56px; }
+    main { width:min(1240px,calc(100% - 40px)); margin:0 auto; padding:28px 0 56px; }
     h1 { margin:3px 0 8px; font-size:25px; letter-spacing:0; }
     h2 { margin:0 0 12px; font-size:17px; }
-    h3 { margin:20px 0 9px; font-size:14px; }
     p { color:var(--muted); }
     code,pre { font-family:"Cascadia Code",Consolas,monospace; }
     code { color:#c8d5e8; overflow-wrap:anywhere; }
     a { color:#72c7d8; }
-    .header { display:grid; grid-template-columns:minmax(0,1fr) 330px; gap:24px; align-items:start; padding-bottom:22px; border-bottom:1px solid var(--line); }
+    .header { display:grid; grid-template-columns:minmax(0,1fr) 350px; gap:24px; align-items:start; padding-bottom:22px; border-bottom:1px solid var(--line); }
     .brand { color:var(--cyan); font-weight:700; }
     .verdict { padding:12px 14px; border:1px solid var(--amber); background:#2b251b; }
     .tag { display:inline-block; padding:1px 6px; border:1px solid currentColor; border-radius:3px; font-size:11px; }
@@ -34,7 +33,7 @@
     .ascii-diagram { margin:0; padding:14px 16px; overflow:auto; border:1px solid var(--line); background:#15181f; color:#d5dbe5; white-space:pre; }
     ul { color:#cbd2dc; }
     .note { padding:10px 12px; border:1px solid var(--line); background:#171a21; color:var(--muted); }
-    @media (max-width:860px) { .header { grid-template-columns:1fr; } .metrics { grid-template-columns:1fr 1fr; } .metric:nth-child(4n) { border-right:1px solid var(--line); } .metric:nth-child(2n) { border-right:0; } main { width:min(100% - 24px,1240px); } }
+    @media (max-width:860px) { .header { grid-template-columns:1fr; } .metrics { grid-template-columns:1fr 1fr; } .metric:nth-child(4n) { border-right:1px solid var(--line); } .metric:nth-child(2n) { border-right:0; } main { width:min(100% - 24px,1240px); } table { display:block; overflow-x:auto; } }
   </style>
 </head>
 <body>
@@ -43,71 +42,92 @@
     <div>
       <span class="brand">RustPLC</span>
       <h1>Autonomous PLC Delivery Workbench Self-test</h1>
-      <p>三项目真实执行、Subagent 完整度、异常、修正、桌面工作台和人类安全边界。日期：2026-07-24。</p>
+      <p>三项目执行、Subagent 完整度、异常修正、桌面工作台与人类安全边界。日期：2026-07-24。</p>
     </div>
     <div class="verdict">
       <span class="tag warn">HARNESS PASS / DELIVERY 0-1-2</span>
-      <p>工作流和重复性门禁通过。真实项目为 0 pass、1 blocked、2 fail。command palette 的增强 field:value 浏览器断言仍未闭合。</p>
+      <p>工作台与重复性门禁通过。执行无人化已证明；源码自主创作和总体无人化仍为 not_proven。</p>
     </div>
   </header>
 
   <div class="metrics">
-    <div class="metric"><strong>59 / 59</strong><span>Web server tests</span></div>
-    <div class="metric"><strong>1205 / 1205</strong><span>Corpus checks</span></div>
-    <div class="metric"><strong>3</strong><span>Independent projects</span></div>
+    <div class="metric"><strong>65 / 65</strong><span>Web server tests</span></div>
+    <div class="metric"><strong>3481 / 0</strong><span>Corpus checks / errors</span></div>
+    <div class="metric"><strong>3</strong><span>Formal projects</span></div>
     <div class="metric"><strong>2</strong><span>Repeat runs</span></div>
-    <div class="metric"><strong>19</strong><span>Current-run events</span></div>
-    <div class="metric"><strong>15 / 14</strong><span>Machine anomalies / corrections</span></div>
+    <div class="metric"><strong>152 / 210</strong><span>Topology nodes / edges</span></div>
+    <div class="metric"><strong>16 / 0</strong><span>Wiring rows / diagnostics</span></div>
     <div class="metric"><strong>2</strong><span>Desktop viewports</span></div>
     <div class="metric"><strong>0 / 1 / 2</strong><span>Pass / blocked / fail</span></div>
   </div>
 
   <section>
     <h2>系统边界</h2>
-    <p>交付项目本身就是编译器进展接口。工作台在固定桌面壳中展示源码、编译阶段、验证报告、Problems、Tests、接线点检、人工 hold 和 release projection；系统没有独立 compiler monitor 页面。</p>
-    <pre class="ascii-diagram"><code>canonical delivery-projects/
+    <p>交付项目是编译器进展接口。项目树、编辑器、Problems、Tests、Search、检查器和状态栏共同展示实际交付证据；系统没有独立 compiler-monitor 页面。</p>
+    <pre class="ascii-diagram"><code>canonical delivery-projects/ (module / station / line)
         |
         v
-copy config + source + review -&gt; run-specific specimens/
+input manifest + agent provenance + immutable specimen
         |
         v
-build rust_plc -&gt; compile -&gt; Parser / AST / Semantic / IR
-        |                         |-&gt; Safety / Liveness
-        |                         |-&gt; Timing / Causality
-        |                         `-&gt; Runtime / Codegen evidence
-        v
-scenario-validate -&gt; project-check -&gt; validator
+DSL source -&gt; Parser -&gt; AST -&gt; Semantic -&gt; IR
+                                      |-&gt; Safety / Liveness
+                                      |-&gt; Timing / Causality
+                                      |-&gt; Runtime Bridge / Simulation
+                                      `-&gt; Codegen
         |
         v
-repeatability result -&gt; Workbench Explorer / Editor / Problems / Tests
+same-run artifacts -&gt; Problems / Tests / Search / Editor / Inspector
         |
         v
-wiring point check -&gt; human holds -&gt; release projection</code></pre>
+compiler-derived wiring -&gt; human point checks -&gt; holds -&gt; release</code></pre>
   </section>
 
   <section>
     <h2>三项目结果</h2>
     <table>
-      <thead><tr><th>项目</th><th>状态</th><th>本轮证据</th><th>直接 blocker</th></tr></thead>
+      <thead><tr><th>项目</th><th>状态</th><th>Validator</th><th>直接结论</th></tr></thead>
       <tbody>
-        <tr><td><code>module.axis_move_blocking_baseline</code></td><td class="warn">blocked</td><td>307 checks；compile、scenario、project-check 均通过</td><td>HIL、硬件 timing、接线点检和人工 hold 尚未完成</td></tr>
-        <tr><td><code>station.dual_slot_shuttle_press_cell</code></td><td class="fail">fail</td><td>553 checks；9/9 scenario 通过</td><td><code>OP-003</code>：<code>press_process.mark_carrier_pressed.op62</code> 的 transform-carrier admission/refinement 尚未完整建模</td></tr>
-        <tr><td><code>line.three_station_assembly</code></td><td class="fail">fail</td><td>345 checks；compile/verification 产物存在</td><td>normal/timeout scenario 与 project-check exit 1；<code>sensor_push_ext == true</code> 尚不被 scenario runtime 支持</td></tr>
+        <tr><td><code>module.axis_move_blocking_baseline</code></td><td class="warn">blocked</td><td>898 / 0</td><td>编译、scenario、project-check 通过；HIL、物理点检和人工 hold 待完成</td></tr>
+        <tr><td><code>station.dual_slot_shuttle_press_cell</code></td><td class="fail">fail</td><td>1587 / 0</td><td><code>OP-003</code> 暴露 transform-carrier admission/refinement 缺口</td></tr>
+        <tr><td><code>line.three_station_assembly</code></td><td class="fail">fail</td><td>885 / 0</td><td>scenario runtime 尚不能执行 <code>sensor_push_ext == true</code> 语义 guard</td></tr>
       </tbody>
     </table>
-    <p class="note">156000 与 157000 两轮 exit 0。第二轮 <code>repeatability=pass</code>，differences 0。input digest 覆盖 config、source、review；source digest 单独保留。<code>fresh_checkout=not_proven</code>。</p>
+    <p class="note"><code>20260724-210000</code> 与 <code>20260724-211000</code> 均为 harness pass。第二轮 repeatability pass，differences 0。交付 fail 保留为编译器能力证据。</p>
+  </section>
+
+  <section>
+    <h2>工作台覆盖</h2>
+    <table>
+      <thead><tr><th>能力</th><th>结果</th><th>证据</th></tr></thead>
+      <tbody>
+        <tr><td>固定桌面壳</td><td class="ok">PASS</td><td>Explorer、editor groups、Inspector、Bottom Panel、status bar</td></tr>
+        <tr><td>三项目 registry</td><td class="ok">PASS</td><td>API 与浏览器均为 projectCount=3</td></tr>
+        <tr><td>项目会话恢复</td><td class="warn">IMPLEMENTED / PARTIAL BROWSER PROOF</td><td>store 保存 tabs、run、split、panel、filter；浏览器直接验证 evidence filter 恢复</td></tr>
+        <tr><td>field:value 搜索</td><td class="ok">PASS</td><td>project、stage、diagnostic、evidence、commit、status</td></tr>
+        <tr><td>Problems / Tests</td><td class="warn">IMPLEMENTED</td><td>API/组件保留 partial、freshness、CI、request error、test_scope；浏览器验证 grouping 与 deep-link</td></tr>
+        <tr><td>Artifact 深链</td><td class="ok">PASS</td><td>Problems/Tests 可打开 delivery-project artifact</td></tr>
+        <tr><td>Topology</td><td class="ok">PASS</td><td>真实 geometry；键盘节点/边与文本证据状态</td></tr>
+        <tr><td>Wiring</td><td class="ok">PASS</td><td>三项目 15 / 1 / 16 rows；IR topology links 与物理观察按 point_id 合并</td></tr>
+        <tr><td>Provenance</td><td class="ok">PASS</td><td>execution proven；source authoring 与 overall not_proven</td></tr>
+        <tr><td>双视口</td><td class="ok">PASS</td><td>1440x900、1920x1080 无页面级 overflow</td></tr>
+      </tbody>
+    </table>
   </section>
 
   <section>
     <h2>Subagent 完整度</h2>
     <table>
-      <thead><tr><th>分工</th><th>完成内容</th><th>判断</th><th>主线程修正</th></tr></thead>
+      <thead><tr><th>角色</th><th>判断</th><th>主线程审计</th></tr></thead>
       <tbody>
-        <tr><td>Definition agent</td><td>固定 module/station/line 三项目和双状态轴</td><td class="ok">通过</td><td>v1 在实现后冻结并混合 harness/delivery；v2 重新冻结契约</td></tr>
-        <tr><td>Corpus execution agent</td><td>复制 specimen、重建 compiler、执行 materializer/validator/repeatability</td><td class="ok">通过</td><td>自审发现 config 未进入 digest；补 input-set digest 和 registry root</td></tr>
-        <tr><td>Backend agent</td><td>registry、auth、physical evidence、signature、release gate、deep-link</td><td class="ok">通过</td><td>中间态 borrow 编译错误由主线程编译探针发现；最终 59 tests</td></tr>
-        <tr><td>Frontend agent</td><td>IDE shell、Explorer、editor groups、Inspector、Bottom Panel、point check、artifact viewer</td><td class="warn">基本通过</td><td>补 API projection、correction ledger、signature、stale server 和 palette 负载限制</td></tr>
-        <tr><td>最终独立审计</td><td>真实服务、双 viewport、报告、PRD、状态边界</td><td class="warn">一项未闭合</td><td>command palette field:value 的 DOM 输入与过滤结果矛盾保持为残余风险</td></tr>
+        <tr><td>Definition agent</td><td class="ok">最终通过</td><td>v2 重新冻结三项目、独立性和 harness/delivery 双状态轴</td></tr>
+        <tr><td>Corpus execution agent</td><td class="ok">通过</td><td>补 input-set digest、RegistryRoot 与真实 current-run 执行</td></tr>
+        <tr><td>Provenance/backend agent</td><td class="ok">通过</td><td>修正 borrow、event attribution、artifact 深链与 registry 范围</td></tr>
+        <tr><td>Projection/session agent</td><td class="ok">通过</td><td>审计 store/API/component；浏览器覆盖 filter 恢复、grouping、deep-link</td></tr>
+        <tr><td>Search/accessibility agent</td><td class="warn">通过，过程试错较多</td><td>修正 React 时序、controlled input、selector、focus、session 假设</td></tr>
+        <tr><td>PRD completion audit</td><td class="ok">通过</td><td>阻止把 fixture materialization 写成无人源码创作证明</td></tr>
+        <tr><td>Desktop contract audit</td><td class="warn">通过，发现 2 个 P1</td><td>修正 wiring 合并并把浏览器断言扩展到三项目</td></tr>
+        <tr><td>Two-phase evidence audit</td><td class="warn">通过，阻止错误提交</td><td>发现 213000 过强声明、绝对路径和 clean runner stderr 风险</td></tr>
       </tbody>
     </table>
   </section>
@@ -115,28 +135,58 @@ wiring point check -&gt; human holds -&gt; release projection</code></pre>
   <section>
     <h2>异常与修正</h2>
     <table>
-      <thead><tr><th>ID</th><th>异常</th><th>修正与验证</th><th>状态</th></tr></thead>
+      <thead><tr><th>ID</th><th>异常</th><th>修正与验证</th></tr></thead>
       <tbody>
-        <tr><td>A-01</td><td><code>impeccable</code> 项目内脚本路径不存在</td><td>改用全局 skill 路径并记录 setup 路径漂移</td><td class="ok">corrected</td></tr>
-        <tr><td>A-02</td><td>Subagent 越权重定向 sibling，产生半完成共享工作区</td><td>恢复 definition/execution/backend/frontend 文件边界</td><td class="ok">corrected</td></tr>
-        <tr><td>A-03</td><td>Definition v1 迟冻结且混合 harness pass 与 release readiness</td><td>v2 分离 <code>harness_status</code>/<code>delivery_status</code></td><td class="ok">corrected</td></tr>
-        <tr><td>A-04</td><td>旧 validator 依赖 ignored <code>out/</code> 残留</td><td>项目本地输入 + run-specific output</td><td class="ok">corrected</td></tr>
-        <tr><td>A-05</td><td>旧 runner 只校验静态 JSON，却声称 full-flow repeatability</td><td>真正执行 build、materializer、scenario、project-check、validator</td><td class="ok">corrected</td></tr>
-        <tr><td>A-06</td><td>真实 exit 1 曾被写成 blocked/0 fail</td><td>保留 fail 和 compiler gap code</td><td class="ok">corrected</td></tr>
-        <tr><td>A-07</td><td>Canonical Agent run 有 7 次公开语法试错</td><td>记录 retry/long-search signal，作为 skill/prompt 缺口</td><td class="warn">recorded</td></tr>
-        <tr><td>A-08</td><td>PowerShell path、stderr、参数和插值多次失败</td><td>contained path、局部 ErrorActionPreference、稳定参数、<code>${field}</code></td><td class="ok">corrected</td></tr>
-        <tr><td>A-09</td><td>Backend 中间态 Rust borrow 错误</td><td>编译探针定位；59 tests 通过</td><td class="ok">corrected</td></tr>
-        <tr><td>A-10</td><td>浏览器连接旧服务，projection API 404</td><td>停止旧 PID、重建并启动最新 binary</td><td class="ok">corrected</td></tr>
-        <tr><td>A-11</td><td>Windows 旧 binary 锁住 Cargo 输出</td><td>停止已确认 PID 后重新 build</td><td class="ok">corrected</td></tr>
-        <tr><td>A-12</td><td>Validator 硬编码 canonical registry</td><td>接受仓库内显式 <code>RegistryRoot</code></td><td class="ok">corrected</td></tr>
-        <tr><td>A-13</td><td>稳定 digest 漏掉会改变 verdict 的 config</td><td>config/source/review 合并为 <code>input_set_sha256</code></td><td class="ok">corrected</td></tr>
-        <tr><td>A-14</td><td><code>$project:</code> 插值错误复发</td><td>使用 <code>${project}</code>，保留同类错误复发记录</td><td class="ok">corrected</td></tr>
-        <tr><td>A-15</td><td>Palette 对 869 条命令全量渲染</td><td>全量搜索仅渲染前 80 条并显示命中总数</td><td class="ok">build verified</td></tr>
-        <tr><td>A-16</td><td>Point-check 自测生成 synthetic observations/uploads</td><td>Note 明确标注 not physical acceptance，release 保持 blocked</td><td class="ok">contained</td></tr>
-        <tr><td>A-17</td><td>Palette field:value 中 DOM input 正确，结果仍是 241 个未过滤 option</td><td>已排除时序、逐键输入、onInput、cache、URL、服务重启；停止继续试错</td><td class="fail">open</td></tr>
-        <tr><td>A-18</td><td>首次 commit subject 被 PowerShell 引号转义污染</td><td>推送前检查 git log，并用单引号参数执行 git commit --amend</td><td class="ok">corrected</td></tr>
+        <tr><td>A-01</td><td>技能 context 脚本仓库路径不存在</td><td>使用安装目录脚本，成功加载 PRODUCT.md</td></tr>
+        <tr><td>A-02</td><td>Subagent 跨 sibling 重定向</td><td>冻结 definition/execution/backend/frontend 边界</td></tr>
+        <tr><td>A-03</td><td>Definition v1 迟冻结并混合两类状态</td><td>v2 固定三项目与双状态轴</td></tr>
+        <tr><td>A-04</td><td>旧 validator 依赖 ignored out</td><td>项目本地输入与 run-specific output</td></tr>
+        <tr><td>A-05</td><td>旧 runner 只检查静态 JSON</td><td>执行 build、materialize、scenario、project-check、validator</td></tr>
+        <tr><td>A-06</td><td>真实 exit 1 曾被投影为 blocked</td><td>保留 delivery fail 与 gap code</td></tr>
+        <tr><td>A-07</td><td>Canonical run 有 7 次语法试错</td><td>记录 retry/long-search，归因到 skill/prompt 缺口</td></tr>
+        <tr><td>A-08</td><td>PowerShell path、stderr、参数、插值反复失败</td><td>统一 contained path、native process 与显式插值契约</td></tr>
+        <tr><td>A-09</td><td>Backend 中间态 borrow 错误</td><td>编译探针定位，64 tests 最终通过</td></tr>
+        <tr><td>A-10</td><td>浏览器连接旧 binary</td><td>确认 PID、重建、重启最新服务</td></tr>
+        <tr><td>A-11</td><td>Windows binary 锁住 Cargo 输出</td><td>停止已确认进程后重建</td></tr>
+        <tr><td>A-12</td><td>Validator 硬编码 registry</td><td>增加显式仓库内 RegistryRoot</td></tr>
+        <tr><td>A-13</td><td>Digest 漏掉 config</td><td>散列 config/source/review input set</td></tr>
+        <tr><td>A-14</td><td>历史 retry 被投影为本轮事件</td><td>分离 current 与 historical retry</td></tr>
+        <tr><td>A-15</td><td>Palette 全量渲染 869 项</td><td>显示前 80 项与命中总数</td></tr>
+        <tr><td>A-16</td><td>Synthetic observation 容易被误读</td><td>标注非物理验收，release 保持 blocked</td></tr>
+        <tr><td>A-17</td><td>field:value 首轮输入到 Search Explorer</td><td>显式聚焦 palette dialog input，双视口通过</td></tr>
+        <tr><td>A-18</td><td>React status 尚未落定即提交</td><td>等待 controlled value 稳定</td></tr>
+        <tr><td>A-19</td><td>Textarea 保留旧受控值</td><td>native setter 加 input/change 事件</td></tr>
+        <tr><td>A-20</td><td>Photo selector 命中 icon span</td><td>使用 last-of-type 窄 selector，harness 复跑通过</td></tr>
+        <tr><td>A-21</td><td>全局 split 假设与 per-project session 冲突</td><td>按项目断言 layout 恢复</td></tr>
+        <tr><td>A-22</td><td>Delivery artifact 深链 404</td><td>扩展受控 artifact root 并补测试</td></tr>
+        <tr><td>A-23</td><td>Test scope 从名称推断</td><td>API 建模显式 test_scope</td></tr>
+        <tr><td>A-24</td><td>Registry 扫描 out 导致项目数漂移</td><td>只索引正式 delivery-project roots</td></tr>
+        <tr><td>A-25</td><td>并行只读命令被错误引号封装</td><td>改用 PowerShell 原生命令字符串；无文件变更</td></tr>
+        <tr><td>A-26</td><td>Materialization proven 被误当源码无人创作</td><td>拆分 execution/source-authoring/overall 三 verdict</td></tr>
+        <tr><td>A-27</td><td>Raw SHA 对比 normalized JSON digest 导致永久 stale</td><td>使用 normalized_sha256_file</td></tr>
+        <tr><td>A-28</td><td>Config wiring points 曾被当成权威源</td><td>从 current-run IR topology links 派生，config 仅作审计</td></tr>
+        <tr><td>A-29</td><td>Git dirty 漏读 dirty_worktree_at_start</td><td>补兼容读取并验证当前运行</td></tr>
+        <tr><td>A-30</td><td>前端压平 Problems/Tests projection</td><td>保留 partial、sources、CI、request error 元数据</td></tr>
+        <tr><td>A-31</td><td>Source root 推导位置错误</td><td>以 source_entry 父目录为锚点并补深链测试</td></tr>
+        <tr><td>A-32</td><td>PowerShell 自检包装器再次触发 $f: 插值错误</td><td>改用 ${f}:；三个 runner 均通过 parser</td></tr>
+        <tr><td>A-33</td><td>Canonical runs 基于 dirty worktree 和旧 base commit</td><td>改为实现 A、干净物化、证据 B 两阶段提交</td></tr>
+        <tr><td>A-34</td><td>成功命令 stderr 被包装成 NativeCommandError</td><td>Start-Process 独立重定向；213000 日志扫描干净</td></tr>
+        <tr><td>A-35</td><td>Delivery artifact GET 可匿名读取</td><td>纳入 Bearer/session 鉴权并补回归测试</td></tr>
+        <tr><td>A-36</td><td>Registry 兼容扫描 projects</td><td>固定只扫描 canonical delivery-projects</td></tr>
+        <tr><td>A-37</td><td>IR 只解析 topology 子串</td><td>完整解析 IR JSON 后读取 topology，三项目通过</td></tr>
+        <tr><td>A-38</td><td>213000 被错误声明为 stderr 完全干净</td><td>撤回旧结论；corpus runner 改用 Start-Process；230000 全日志无 wrapper</td></tr>
+        <tr><td>A-39</td><td>Agent event action 含本机绝对编译器路径</td><td>改用仓库相对 tool ref；230000 specimen 无盘符路径</td></tr>
+        <tr><td>A-40</td><td>Clean runner 仍使用 PowerShell 原生重定向</td><td>统一 Start-Process 独立捕获，最终 clean run 再验证</td></tr>
+        <tr><td>A-41</td><td>旧 Dashboard/MainLayout 与 Run Monitor 残留</td><td>删除死页面，运行入口改为 Run &amp; Gate</td></tr>
+        <tr><td>A-42</td><td>Wiring 显示 Unknown/Missing</td><td>按 point_id 合并编译器与物理投影；输入 safe state 显示 n/a</td></tr>
+        <tr><td>A-43</td><td>Station 深链验证被概括为三项目全链</td><td>逐项目检查 pipeline、holds、wiring 和 provenance</td></tr>
+        <tr><td>A-44</td><td>PRD 条件从句弱化 warning/blocker 深链验收</td><td>恢复未完成状态，缺失引用继续作为证据缺口</td></tr>
+        <tr><td>A-45</td><td>Commit A clean run 在 cold cargo build 后悬停</td><td>终止本轮自有进程，移除 Start-Process -Wait 并运行最小探针</td></tr>
+        <tr><td>A-46</td><td>Start-Process 对象返回 null ExitCode</td><td>改用 ProcessStartInfo、异步读流和真实 Process.ExitCode；231000 通过</td></tr>
+        <tr><td>A-47</td><td>clean-checkout 的 module/station 产物路径达到 261/263 字符，越过 Windows MAX_PATH</td><td>初步竞争条件判断被 subagent 的 254/261/263 路径证据纠正；内部 run id 缩为 cc，并增加 240 字符路径预算门禁</td></tr>
       </tbody>
     </table>
+    <p class="note">浏览器 harness 的集中试错说明旧提示缺少三条规则：等待 React 受控状态稳定、使用窄 selector、按项目恢复 session。修正后的 harness 已把这些规则固化为断言。</p>
   </section>
 
   <section>
@@ -145,26 +195,28 @@ wiring point check -&gt; human holds -&gt; release projection</code></pre>
       <thead><tr><th>Gate</th><th>结果</th><th>证据</th></tr></thead>
       <tbody>
         <tr><td><code>cargo fmt --all -- --check</code></td><td class="ok">PASS</td><td>Rust 格式通过</td></tr>
-        <tr><td><code>cargo test -p web-server</code></td><td class="ok">PASS</td><td>59 passed</td></tr>
-        <tr><td><code>npm run lint</code></td><td class="ok">PASS</td><td>ESLint 无错误</td></tr>
-        <tr><td><code>npm run build</code></td><td class="ok">PASS</td><td>Production build 通过；Monaco/Ant chunk warning 保留</td></tr>
-        <tr><td>Corpus 156/157</td><td class="ok">PASS</td><td>1205 checks、0 errors、repeatability pass</td></tr>
-        <tr><td>Browser core</td><td class="ok">PASS</td><td>双 viewport、3 项目、split/tab move、resize、Problems/Tests、signature、deep-link、无 page overflow</td></tr>
-        <tr><td>Physical evidence browser flow</td><td class="ok">PASS</td><td>Dialog、photo upload、append-only observation、projection refresh；状态保持 blocked</td></tr>
-        <tr><td>Palette field:value enhancement</td><td class="fail">NOT CLOSED</td><td>增强断言失败，未写成 PASS</td></tr>
+        <tr><td><code>cargo test -p web-server</code></td><td class="ok">PASS</td><td>65 / 65，包含 artifact GET 鉴权</td></tr>
+        <tr><td><code>npm --prefix web-ui run lint</code></td><td class="ok">PASS</td><td>ESLint 无错误</td></tr>
+        <tr><td><code>npm --prefix web-ui run build</code></td><td class="ok">PASS</td><td>Production build 通过，large chunk warning 保留</td></tr>
+        <tr><td>Corpus 210000/211000</td><td class="ok">PASS</td><td>3/3 projects，repeatability differences 0</td></tr>
+        <tr><td>Corpus 213000 hardening</td><td class="warn">SUPERSEDED</td><td>3481 checks / 0 errors，但 build stderr 含 PowerShell wrapper</td></tr>
+        <tr><td>Corpus 231000 diagnostic</td><td class="ok">PASS / DIRTY</td><td>3481 checks / 0 errors；全日志无 wrapper；event/provenance 无绝对路径</td></tr>
+        <tr><td>Browser 1440/1920</td><td class="ok">PASS</td><td>三项目逐项 pipeline、holds、wiring、provenance，另含 filters、session、topology、deep links</td></tr>
+        <tr><td>WIR-001 至 WIR-007</td><td class="ok">PASS</td><td>所有负向契约均有拒绝路径</td></tr>
+        <tr><td>Clean-checkout corpus</td><td class="warn">PENDING FINAL COMMIT</td><td>最终提交形成后执行，随后不再修改 tracked files</td></tr>
       </tbody>
     </table>
   </section>
 
   <section>
-    <h2>真实残余风险</h2>
+    <h2>残余风险</h2>
     <ul>
-      <li><code>unattended_verdict=not_proven</code>：缺少文件级前后 digest 归因链和持久模型标识。</li>
-      <li><code>fresh_checkout=not_proven</code>：未在 clean clone/clean worktree 中执行最终 runner。</li>
-      <li>Synthetic point observation 只证明 UI/API 路径，不替代接线、仪表测量、HIL 或安全签署。</li>
-      <li>电子签名是内部 engineering attestation，不声明满足特定法规。</li>
-      <li>远程/生产部署仍需组织身份、密码哈希和密钥管理。</li>
-      <li>Command palette field:value 过滤需要继续定位 Chrome 实际执行路径。</li>
+      <li><code>source_authoring_verdict=not_proven</code>。当前证明 fixture materialization 和执行无人化，没有证明源码最初自主创作。</li>
+      <li>完整 WCAG 2.1 AA 审计尚未执行；当前证据覆盖键盘、focus、状态文本和双视口。</li>
+      <li>电子签名属于内部 engineering attestation，未声明满足特定法规。</li>
+      <li>Synthetic point observation 不替代接线、仪表测量、HIL 和安全签署。</li>
+      <li>远程部署仍需组织身份、密码哈希、密钥管理和允许来源配置。</li>
+      <li>Monaco/Ant Design large chunk 仍是加载性能风险。</li>
     </ul>
   </section>
 
@@ -172,10 +224,9 @@ wiring point check -&gt; human holds -&gt; release projection</code></pre>
     <h2>主要工件</h2>
     <ul>
       <li><a href="../../tasks/prd-autonomous-plc-delivery-workbench.md">PRD</a></li>
-      <li><a href="delivery_corpus_selftest_definition.md">Corpus definition</a></li>
       <li><a href="autonomous_plc_delivery_workbench_selftest.md">Markdown companion</a></li>
       <li><code>scripts/run_delivery_project_corpus.ps1</code></li>
-      <li><code>scripts/materialize_delivery_project_fixture.ps1</code></li>
+      <li><code>scripts/run_clean_checkout_delivery_corpus.ps1</code></li>
       <li><code>scripts/verify_workbench_browser.mjs</code></li>
       <li><code>delivery-projects/</code></li>
       <li><code>web-ui/artifacts/workbench-*.png</code></li>

@@ -26,24 +26,148 @@ async function pressControlShortcut(page, key) {
   await page.keyboard.up('Control');
 }
 
-async function selectProject(page, projectName) {
-  await page.evaluate((name) => {
-    const button = [...document.querySelectorAll('.wb-project-switcher button')]
-      .find((item) => item.textContent?.includes(name));
-    if (!(button instanceof HTMLButtonElement)) throw new Error(`project missing: ${name}`);
+async function replaceInputValue(page, selector, value) {
+  await page.focus(selector);
+  await pressControlShortcut(page, 'a');
+  await page.keyboard.type(value, { delay: 12 });
+}
+
+async function setControlledValue(page, selector, value) {
+  await page.$eval(selector, (element, nextValue) => {
+    const prototype = element instanceof HTMLTextAreaElement
+      ? HTMLTextAreaElement.prototype
+      : HTMLInputElement.prototype;
+    const setter = Object.getOwnPropertyDescriptor(prototype, 'value')?.set;
+    if (!setter) throw new Error(`value setter unavailable for ${element.tagName}`);
+    setter.call(element, nextValue);
+    element.dispatchEvent(new Event('input', { bubbles: true }));
+    element.dispatchEvent(new Event('change', { bubbles: true }));
+  }, value);
+}
+
+async function setPaletteQuery(page, query) {
+  await page.evaluate(() => {
+    const palettes = [...document.querySelectorAll('.wb-command-palette')]
+      .filter((item) => item.getClientRects().length > 0);
+    const input = palettes.at(-1)?.querySelector('.wb-command-input input');
+    if (!(input instanceof HTMLInputElement)) throw new Error('visible command palette input missing');
+    input.focus();
+  });
+  await pressControlShortcut(page, 'a');
+  await page.keyboard.type(query, { delay: 12 });
+  await page.waitForFunction((expected) => {
+    const palettes = [...document.querySelectorAll('.wb-command-palette')]
+      .filter((item) => item.getClientRects().length > 0);
+    const active = palettes.at(-1);
+    const results = active?.querySelector('.wb-command-results');
+    const input = active?.querySelector('.wb-command-input input');
+    return input instanceof HTMLInputElement
+      && input.value === expected
+      && results?.getAttribute('data-query') === expected;
+  }, {}, query);
+}
+
+async function paletteResultState(page) {
+  return page.evaluate(() => ({
+    ...(() => {
+      const palettes = [...document.querySelectorAll('.wb-command-palette')]
+        .filter((item) => item.getClientRects().length > 0);
+      const results = palettes.at(-1)?.querySelector('.wb-command-results');
+      return {
+        visiblePaletteCount: palettes.length,
+        query: results?.getAttribute('data-query'),
+        filteredCount: Number(results?.getAttribute('data-filtered-count') ?? -1),
+        items: [...(results?.querySelectorAll('[role="option"]') ?? [])].map((item) => ({
+      id: item.getAttribute('data-command-id'),
+      text: item.textContent?.trim() ?? '',
+      project: item.getAttribute('data-search-project'),
+      stage: item.getAttribute('data-search-stage'),
+      diagnostic: item.getAttribute('data-search-diagnostic'),
+      evidence: item.getAttribute('data-search-evidence'),
+      commit: item.getAttribute('data-search-commit'),
+      status: item.getAttribute('data-search-status'),
+        })),
+      };
+    })(),
+  }));
+}
+
+async function selectProject(page, projectId) {
+  await page.evaluate((id) => {
+    const button = document.querySelector(`.wb-project-switcher button[data-project-id="${id}"]`);
+    if (!(button instanceof HTMLButtonElement)) throw new Error(`project missing: ${id}`);
     button.click();
-  }, projectName);
-  await page.waitForFunction((name) => document.querySelector('.wb-project-switcher button.is-selected')?.textContent?.includes(name), {}, projectName);
+  }, projectId);
+  await page.waitForFunction((id) => document.querySelector('.wb-project-switcher button.is-selected')?.getAttribute('data-project-id') === id, {}, projectId);
   await page.evaluate(() => {
     const overview = [...document.querySelectorAll('.wb-tree-leaf')]
       .find((item) => item.textContent?.includes('Project Overview'));
     if (overview instanceof HTMLButtonElement) overview.click();
   });
-  await page.waitForFunction((name) => document.querySelector('.wb-view-header h1')?.textContent?.includes(name), {}, projectName);
+  await page.waitForFunction((id) => document.querySelector('.wb-view-header p')?.textContent?.includes(id), {}, projectId);
   return page.evaluate(() => ({
     selected: document.querySelector('.wb-project-switcher button.is-selected')?.textContent?.trim(),
     heading: document.querySelector('.wb-view-header h1')?.textContent?.trim(),
   }));
+}
+
+async function auditProjectSurface(page, projectId) {
+  const selection = await selectProject(page, projectId);
+  await page.waitForFunction(() => document.querySelectorAll('.wb-pipeline-row').length >= 10);
+  await page.waitForFunction(() => document.querySelectorAll('.wb-hold-row').length === 5);
+  const apiEvidence = await page.evaluate(async (id) => {
+    const [projectResponse, wiringResponse, physicalResponse] = await Promise.all([
+      fetch(`/api/delivery-projects/${id}`),
+      fetch(`/api/delivery-projects/${id}/wiring`),
+      fetch(`/api/delivery-projects/${id}/physical-evidence`),
+    ]);
+    if (![projectResponse, wiringResponse, physicalResponse].every((response) => response.ok)) {
+      throw new Error(`project evidence request failed for ${id}`);
+    }
+    const [project, wiring, physical] = await Promise.all([
+      projectResponse.json(),
+      wiringResponse.json(),
+      physicalResponse.json(),
+    ]);
+    return {
+      pipelineRows: document.querySelectorAll('.wb-pipeline-row').length,
+      holdRows: document.querySelectorAll('.wb-hold-row').length,
+      releaseStatus: document.querySelector('[data-release-status]')?.getAttribute('data-release-status'),
+      wiringPointCount: wiring.points?.length ?? 0,
+      physicalPointCount: physical.point_checks?.points?.length ?? 0,
+      normalizedWiring: (wiring.points ?? []).every((point) => point.controller && point.channel && point.compiler_status),
+      executionVerdict: project.latest_run?.attribution?.execution_unattended_verdict,
+      sourceAuthoringVerdict: project.latest_run?.attribution?.source_authoring_verdict,
+      unattendedVerdict: project.latest_run?.attribution?.unattended_verdict,
+    };
+  }, projectId);
+  await page.evaluate(() => {
+    const button = [...document.querySelectorAll('button')]
+      .find((item) => item.textContent?.includes('Controller I/O and Point Checks'));
+    if (!(button instanceof HTMLButtonElement)) throw new Error('wiring view command missing');
+    button.click();
+  });
+  await page.waitForFunction((count) => document.querySelectorAll('.wb-wiring-table tbody tr').length === count, {}, apiEvidence.wiringPointCount);
+  const wiringSurface = await page.evaluate(() => {
+    const rows = [...document.querySelectorAll('.wb-wiring-table tbody tr')];
+    return {
+      rows: rows.length,
+      unknownControllers: rows.filter((row) => row.querySelector('td:first-child strong')?.textContent?.trim() === 'Unknown').length,
+      missingCompiler: rows.filter((row) => [...row.querySelectorAll('td')].some((cell) => cell.textContent?.trim() === 'Missing')).length,
+      inputSafeStateMismatch: rows.filter((row) => {
+        const cells = row.querySelectorAll('td');
+        return cells[2]?.textContent?.trim() === 'input' && cells[5]?.textContent?.trim() !== 'n/a';
+      }).length,
+    };
+  });
+  await page.evaluate(() => {
+    const overview = [...document.querySelectorAll('.wb-tree-leaf')]
+      .find((item) => item.textContent?.includes('Project Overview'));
+    if (!(overview instanceof HTMLButtonElement)) throw new Error('project overview command missing');
+    overview.click();
+  });
+  await page.waitForFunction((id) => document.querySelector('.wb-view-header p')?.textContent?.includes(id), {}, projectId);
+  return { projectId, ...selection, ...apiEvidence, wiringSurface };
 }
 
 try {
@@ -72,12 +196,12 @@ try {
     }
     await page.waitForSelector('.wb-shell');
     await page.waitForSelector('.wb-project-switcher button');
-    const projectLabels = await page.$$eval('.wb-project-switcher button', (buttons) => buttons.map((button) => button.textContent ?? ''));
-    const requiredProjects = ['Three-station Assembly Line', 'Stepper Collision Guard', 'Dual-slot Shuttle Press Cell Complex Self-test'];
-    const missingProjects = requiredProjects.filter((name) => !projectLabels.some((label) => label.includes(name)));
+    const requiredProjects = ['line.three_station_assembly', 'module.axis_move_blocking_baseline', 'station.dual_slot_shuttle_press_cell'];
+    const projectIds = await page.$$eval('.wb-project-switcher button', (buttons) => buttons.map((button) => button.getAttribute('data-project-id')));
+    const missingProjects = requiredProjects.filter((id) => !projectIds.includes(id));
     if (missingProjects.length > 0) throw new Error(`required delivery projects missing: ${missingProjects.join(', ')}`);
     const projectCoverage = [];
-    for (const projectName of requiredProjects) projectCoverage.push(await selectProject(page, projectName));
+    for (const projectName of requiredProjects) projectCoverage.push(await auditProjectSurface(page, projectName));
     const projectSurface = await page.evaluate(() => ({
       selected: document.querySelector('.wb-project-switcher button.is-selected')?.textContent,
       heading: document.querySelector('.wb-view-header h1')?.textContent,
@@ -104,6 +228,81 @@ try {
     await page.screenshot({ path: path.join(artifactDir, `workbench-overview-${viewport.width}x${viewport.height}.png`) });
 
     await page.evaluate(() => {
+      const button = [...document.querySelectorAll('.wb-tree-leaf')]
+        .find((item) => item.textContent?.trim() === 'Topology');
+      if (!(button instanceof HTMLButtonElement)) throw new Error('delivery project Topology command missing');
+      button.click();
+    });
+    await page.waitForFunction(() => document.querySelector('.wb-geometry-surface')?.textContent?.includes('Semantic Twin Geometry'));
+    const topology = await page.evaluate(async () => {
+      const response = await fetch('/api/delivery-projects/station.dual_slot_shuttle_press_cell/geometry');
+      if (!response.ok) throw new Error(`delivery geometry request failed: ${response.status}`);
+      const artifact = await response.json();
+      const surface = document.querySelector('.wb-geometry-surface');
+      if (artifact.status === 'missing') {
+        const blockerCode = artifact.blocker?.code;
+        return {
+          mode: 'missing',
+          blockerCode,
+          blockerVisible: Boolean(blockerCode && surface?.textContent?.includes(blockerCode)),
+          nodeEvidenceRecords: 0,
+          edgeEvidenceRecords: 0,
+          renderedNodes: 0,
+          renderedEdges: 0,
+        };
+      }
+      const nodeEvidenceRecords = (artifact.nodes ?? []).filter((node) => node.evidence_status).length;
+      const edgeEvidenceRecords = (artifact.edges ?? []).filter((edge) => edge.evidence_status).length;
+      const graph = surface?.querySelector('svg[aria-label^="Semantic twin geometry"]');
+      return {
+        mode: 'rendered',
+        blockerCode: null,
+        blockerVisible: false,
+        nodeEvidenceRecords,
+        edgeEvidenceRecords,
+        renderedNodes: graph?.querySelectorAll('circle').length ?? 0,
+        renderedEdges: graph?.querySelectorAll('path[stroke]').length ?? 0,
+      };
+    });
+    if (topology.mode === 'missing') {
+      if (topology.blockerCode !== 'DELIVERY_GEOMETRY_ARTIFACT_MISSING' || !topology.blockerVisible) {
+        throw new Error(`delivery geometry missing state is not explicit: ${JSON.stringify(topology)}`);
+      }
+    } else if ((topology.nodeEvidenceRecords < 1 && topology.edgeEvidenceRecords < 1)
+      || (topology.renderedNodes < 1 && topology.renderedEdges < 1)) {
+      throw new Error(`delivery geometry evidence did not render: ${JSON.stringify(topology)}`);
+    }
+    let topologyKeyboard = { mode: topology.mode };
+    if (topology.mode === 'rendered') {
+      const nodeSelector = '.wb-geometry-surface .geometry-reference-item--node[role="button"][tabindex="0"]';
+      const edgeSelector = '.wb-geometry-surface .geometry-reference-item--edge[role="button"][tabindex="0"]';
+      await page.waitForSelector(nodeSelector);
+      await page.waitForSelector(edgeSelector);
+      await page.$eval(nodeSelector, (item) => item.focus());
+      const nodeLabel = await page.$eval(nodeSelector, (item) => item.getAttribute('aria-label'));
+      await page.keyboard.press('Enter');
+      await page.waitForSelector('.geometry-reference-detail[data-reference-kind="node"]');
+      const nodeDetail = await page.$eval('.geometry-reference-detail[data-reference-kind="node"]', (item) => ({
+        text: item.textContent?.trim() ?? '',
+        evidence: item.getAttribute('data-evidence-status'),
+      }));
+      await page.$eval(edgeSelector, (item) => item.focus());
+      const edgeLabel = await page.$eval(edgeSelector, (item) => item.getAttribute('aria-label'));
+      await page.keyboard.press('Space');
+      await page.waitForSelector('.geometry-reference-detail[data-reference-kind="edge"]');
+      const edgeDetail = await page.$eval('.geometry-reference-detail[data-reference-kind="edge"]', (item) => ({
+        text: item.textContent?.trim() ?? '',
+        evidence: item.getAttribute('data-evidence-status'),
+      }));
+      if (!nodeLabel?.includes('evidence status') || !nodeDetail.text.includes('Evidence status:') || !nodeDetail.evidence
+        || !edgeLabel?.includes('evidence status') || !edgeDetail.text.includes('Evidence status:') || !edgeDetail.evidence) {
+        throw new Error(`geometry keyboard/status semantics incomplete: ${JSON.stringify({ nodeLabel, nodeDetail, edgeLabel, edgeDetail })}`);
+      }
+      topologyKeyboard = { mode: 'rendered', nodeLabel, nodeDetail, edgeLabel, edgeDetail };
+    }
+    await page.screenshot({ path: path.join(artifactDir, `workbench-topology-${viewport.width}x${viewport.height}.png`) });
+
+    await page.evaluate(() => {
       const button = [...document.querySelectorAll('button')]
         .find((item) => item.textContent?.includes('Controller I/O and Point Checks'));
       if (!(button instanceof HTMLButtonElement)) throw new Error('wiring view command missing');
@@ -111,6 +310,8 @@ try {
     });
     await page.waitForFunction(() => document.querySelectorAll('.wb-data-table tbody tr').length === 16);
     const wiringRows = await page.$$eval('.wb-data-table tbody tr', (rows) => rows.length);
+    const wiringDiagnostics = await page.$$eval('.wb-wiring-diagnostic', (rows) => rows.length);
+    if (wiringDiagnostics !== 0) throw new Error(`canonical delivery wiring has ${wiringDiagnostics} validation diagnostics`);
     await page.screenshot({ path: path.join(artifactDir, `workbench-wiring-${viewport.width}x${viewport.height}.png`) });
 
     const pointProjectionBefore = await page.evaluate(async () => {
@@ -121,18 +322,33 @@ try {
     const firstPointAction = await page.$('.wb-wiring-table tbody tr .wb-icon-command');
     if (!firstPointAction) throw new Error('point observation action missing');
     await firstPointAction.click();
-    await page.waitForSelector('.wb-point-dialog');
+    await page.waitForSelector('.wb-point-dialog', { visible: true });
+    await page.waitForFunction(() => document.activeElement?.getAttribute('aria-label') === 'Close point observation dialog');
+    await page.keyboard.press('Escape');
+    await page.waitForSelector('.wb-point-dialog', { hidden: true });
+    const pointDialogFocusRestored = await page.evaluate(() => document.activeElement?.classList.contains('wb-icon-command'));
+    if (!pointDialogFocusRestored) throw new Error('point observation dialog did not restore trigger focus after Escape');
+    const reopenedPointAction = await page.$('.wb-wiring-table tbody tr .wb-icon-command');
+    if (!reopenedPointAction) throw new Error('point observation action missing after focus restoration');
+    await reopenedPointAction.click();
+    await page.waitForSelector('.wb-point-dialog', { visible: true });
+    await page.waitForSelector('.wb-point-dialog .wb-photo-input input[type="file"]');
     await page.evaluate(() => {
       const button = [...document.querySelectorAll('.wb-point-dialog [aria-label="Point observation status"] button')]
         .find((item) => item.textContent?.trim() === 'blocked');
       if (!(button instanceof HTMLButtonElement)) throw new Error('blocked point status control missing');
       button.click();
     });
+    await page.waitForFunction(() => [...document.querySelectorAll('.wb-point-dialog [aria-label="Point observation status"] button')]
+      .some((item) => item.textContent?.trim() === 'blocked' && item.getAttribute('aria-pressed') === 'true'));
     const pointNote = `Automated browser validation ${viewport.width}x${viewport.height}; not physical acceptance.`;
-    await page.type('.wb-point-dialog textarea', pointNote);
+    await setControlledValue(page, '.wb-point-dialog textarea', pointNote);
+    await page.waitForFunction((expected) => document.querySelector('.wb-point-dialog textarea')?.value === expected, {}, pointNote);
     const photoInput = await page.$('.wb-photo-input input[type="file"]');
     if (!photoInput) throw new Error('point photo input missing');
-    await photoInput.uploadFile(path.join(artifactDir, `workbench-overview-${viewport.width}x${viewport.height}.png`));
+    const pointPhotoName = `workbench-overview-${viewport.width}x${viewport.height}.png`;
+    await photoInput.uploadFile(path.join(artifactDir, pointPhotoName));
+    await page.waitForFunction((expected) => document.querySelector('.wb-photo-input > span:last-of-type')?.textContent?.trim() === expected, {}, pointPhotoName);
     await page.screenshot({ path: path.join(artifactDir, `workbench-point-observation-${viewport.width}x${viewport.height}.png`) });
     await page.click('.wb-point-dialog button[type="submit"]');
     await page.waitForSelector('.wb-point-dialog', { hidden: true });
@@ -176,10 +392,22 @@ try {
       const button = document.querySelector('.wb-hold-row .wb-button');
       if (!(button instanceof HTMLButtonElement)) return { found: false };
       button.scrollIntoView({ block: 'center' });
-      button.click();
       return { found: true, text: button.textContent, disabled: button.disabled };
     });
     if (!signAction.found || signAction.disabled) throw new Error(`authorized wiring signature action unavailable: ${JSON.stringify(signAction)}`);
+    await page.click('.wb-hold-row .wb-button');
+    await page.waitForSelector('.wb-sign-dialog');
+    await page.waitForFunction(() => document.activeElement?.getAttribute('aria-label') === 'Close signature dialog');
+    await page.keyboard.down('Shift');
+    await page.keyboard.press('Tab');
+    await page.keyboard.up('Shift');
+    const signatureFocusTrapped = await page.evaluate(() => Boolean(document.activeElement?.closest('.wb-sign-dialog')));
+    if (!signatureFocusTrapped) throw new Error('signature dialog did not retain keyboard focus');
+    await page.keyboard.press('Escape');
+    await page.waitForSelector('.wb-sign-dialog', { hidden: true });
+    const signatureFocusRestored = await page.evaluate(() => Boolean(document.activeElement?.closest('.wb-hold-row')));
+    if (!signatureFocusRestored) throw new Error('signature dialog did not restore trigger focus after Escape');
+    await page.click('.wb-hold-row .wb-button');
     await page.waitForSelector('.wb-sign-dialog');
     const signatureDialog = await page.evaluate(() => ({
       title: document.querySelector('.wb-sign-dialog h2')?.textContent,
@@ -201,77 +429,192 @@ try {
     });
     await page.waitForSelector('.wb-timeline-view');
     await new Promise((resolve) => setTimeout(resolve, 1500));
-    const agentAudit = await page.evaluate(() => ({
-      anomalyRows: document.querySelectorAll('.wb-anomaly:not(.wb-correction)').length,
-      correctionRows: document.querySelectorAll('.wb-correction').length,
-      longSearchSignals: [...document.querySelectorAll('.wb-anomaly dd')]
-        .filter((item) => item.textContent?.includes('Long search or repeated trial-and-error detected')).length,
-    }));
-    if (agentAudit.anomalyRows !== 10 || agentAudit.correctionRows !== 23) {
+    const agentAudit = await page.evaluate(async () => {
+      const projectId = document.querySelector('.wb-project-switcher button.is-selected')?.getAttribute('data-project-id');
+      const runId = document.querySelector('.wb-timeline-view h1')?.textContent?.replace(/^Agent Run\s+/, '').trim();
+      if (!projectId || !runId) throw new Error('selected project/run identity missing from agent timeline');
+      const response = await fetch(`/api/delivery-projects/${projectId}/runs/${runId}`);
+      if (!response.ok) throw new Error(`agent run request failed: ${response.status}`);
+      const run = await response.json();
+      const sourceAnomalies = run.anomalies ?? run.documents?.anomalies?.records ?? [];
+      const sourceCorrections = run.corrections ?? run.documents?.corrections?.records ?? [];
+      return {
+        anomalyRows: document.querySelectorAll('.wb-anomaly:not(.wb-correction)').length,
+        correctionRows: document.querySelectorAll('.wb-correction').length,
+        expectedAnomalies: sourceAnomalies.length,
+        expectedCorrections: sourceCorrections.length,
+        sourceAuthoringScope: document.querySelector('[data-attribution-scope="source-authoring"]')?.textContent?.trim() ?? '',
+        sourceAuthoringVerdict: document.querySelector('[data-attribution-scope="source-authoring"]')?.getAttribute('data-verdict') ?? '',
+        materializationScope: document.querySelector('[data-attribution-scope="materialization-execution"]')?.textContent?.trim() ?? '',
+        materializationVerdict: document.querySelector('[data-attribution-scope="materialization-execution"]')?.getAttribute('data-verdict') ?? '',
+        longSearchSignals: [...document.querySelectorAll('.wb-anomaly dd')]
+          .filter((item) => item.textContent?.includes('Long search or repeated trial-and-error detected')).length,
+      };
+    });
+    if (agentAudit.anomalyRows !== agentAudit.expectedAnomalies || agentAudit.correctionRows !== agentAudit.expectedCorrections) {
       throw new Error(`agent audit records incomplete: ${JSON.stringify(agentAudit)}`);
+    }
+    if (!agentAudit.sourceAuthoringScope.includes('Source authoring') || !/not[_ ]proven/i.test(agentAudit.sourceAuthoringVerdict)) {
+      throw new Error(`agent run source authoring boundary is not explicit: ${JSON.stringify(agentAudit)}`);
+    }
+    if (!agentAudit.materializationScope.includes('Materialization execution') || agentAudit.materializationVerdict !== 'proven') {
+      throw new Error(`agent run materialization execution proof is not explicit: ${JSON.stringify(agentAudit)}`);
     }
     await page.screenshot({ path: path.join(artifactDir, `workbench-agent-audit-${viewport.width}x${viewport.height}.png`) });
 
     await pressControlShortcut(page, 'k');
     await page.waitForSelector('.wb-command-palette');
-    await page.type('.wb-command-input input', 'Open Verification Evidence', { delay: 20 });
-    const paletteResultCount = await page.$$eval('.wb-command-results [role="option"]', (items) => items.length);
+    await setPaletteQuery(page, 'Open Verification Evidence');
+    const initialPaletteState = await paletteResultState(page);
+    const paletteResultCount = initialPaletteState.items.length;
+    if (initialPaletteState.visiblePaletteCount !== 1) throw new Error(`expected one visible command palette: ${JSON.stringify(initialPaletteState)}`);
     if (paletteResultCount < 1) throw new Error('command palette returned no verification command');
     await page.screenshot({ path: path.join(artifactDir, `workbench-command-palette-${viewport.width}x${viewport.height}.png`) });
     await page.keyboard.press('Enter');
     await page.waitForSelector('.wb-command-palette', { hidden: true });
     await page.waitForFunction(() => document.querySelector('.wb-view-header h1')?.textContent?.includes('Verification'));
 
+    await page.evaluate(() => {
+      const button = [...document.querySelectorAll('.wb-segmented button')]
+        .find((item) => item.textContent?.trim() === 'blocked');
+      if (!(button instanceof HTMLButtonElement)) throw new Error('blocked evidence filter missing');
+      button.click();
+    });
+    await page.waitForFunction(() => document.querySelector('.wb-segmented button[aria-pressed="true"]')?.textContent?.trim() === 'blocked');
+    const evidenceFilterStored = await page.evaluate(() => {
+      const persisted = JSON.parse(localStorage.getItem('rustplc-workbench-layout') ?? '{}');
+      return persisted.state?.evidenceFilter;
+    });
+    if (evidenceFilterStored !== 'blocked') throw new Error(`evidence filter was not persisted: ${evidenceFilterStored}`);
+    await page.evaluate(() => {
+      const button = [...document.querySelectorAll('.wb-project-switcher button')]
+        .find((item) => !item.classList.contains('is-selected'));
+      if (!(button instanceof HTMLButtonElement)) throw new Error('alternate project missing');
+      button.click();
+    });
+    await page.waitForFunction(() => !document.querySelector('.wb-project-switcher button.is-selected')?.textContent?.includes('Dual-slot Shuttle Press Cell'));
+    await page.evaluate(() => {
+      const button = [...document.querySelectorAll('.wb-project-switcher button')]
+        .find((item) => item.textContent?.includes('Dual-slot Shuttle Press Cell'));
+      if (!(button instanceof HTMLButtonElement)) throw new Error('canonical project missing after filter switch');
+      button.click();
+    });
+    await page.waitForFunction(() => document.querySelector('.wb-project-switcher button.is-selected')?.textContent?.includes('Dual-slot Shuttle Press Cell'));
+    await page.waitForFunction(() => document.querySelector('.wb-segmented button[aria-pressed="true"]')?.textContent?.trim() === 'blocked');
+    await page.waitForFunction(() => [...document.querySelectorAll('.wb-stage-row')]
+      .some((row) => row.textContent?.toLowerCase().includes('codegen') && row.textContent?.toLowerCase().includes('blocked')));
+    const evidenceFilterPersistence = { stored: evidenceFilterStored, restored: true };
+
+    const searchFixture = await page.evaluate(async () => {
+      const projectId = 'station.dual_slot_shuttle_press_cell';
+      const [projectResponse, evidenceResponse] = await Promise.all([
+        fetch(`/api/delivery-projects/${projectId}`),
+        fetch(`/api/delivery-projects/${projectId}/evidence`),
+      ]);
+      if (!projectResponse.ok || !evidenceResponse.ok) throw new Error('search fixture API unavailable');
+      const project = await projectResponse.json();
+      const evidencePayload = await evidenceResponse.json();
+      const evidenceItems = Array.isArray(evidencePayload)
+        ? evidencePayload
+        : evidencePayload.evidence ?? evidencePayload.items ?? [];
+      const evidence = evidenceItems.find((item) => item.evidence_state && (item.source_commit || project.source_commit));
+      if (!project.source_commit || !evidence) throw new Error('search fixture lacks commit-bound evidence');
+      return {
+        projectId,
+        projectCommit: project.source_commit,
+        evidenceState: evidence.evidence_state,
+        evidenceCommit: evidence.source_commit ?? project.source_commit,
+      };
+    });
+
     await pressControlShortcut(page, 'k');
-    await page.type('.wb-command-input input', 'stage:codegen status:blocked', { delay: 20 });
-    await new Promise((resolve) => setTimeout(resolve, 750));
-    const stageFilterState = await page.evaluate(() => ({
-      inputValue: document.querySelector('.wb-command-input input')?.value,
-      results: [...document.querySelectorAll('.wb-command-results [role="option"]')].map((item) => item.textContent?.trim() ?? ''),
-      paletteDiagnostics: [...document.querySelectorAll('.wb-command-palette')].map((palette) => ({
-        inputValue: palette.querySelector('.wb-command-input input')?.value,
-        resultCount: palette.querySelectorAll('.wb-command-results [role="option"]').length,
-        display: getComputedStyle(palette).display,
-      })),
-    }));
-    if (stageFilterState.inputValue !== 'stage:codegen status:blocked') {
-      throw new Error(`field:value input state failed: ${JSON.stringify(stageFilterState.inputValue)}`);
+    await setPaletteQuery(page, 'stage:codegen status:blocked');
+    const stageFilterState = await paletteResultState(page);
+    if (stageFilterState.visiblePaletteCount !== 1 || stageFilterState.filteredCount < 1 || stageFilterState.items.length < 1
+      || !stageFilterState.items.every((item) => item.stage?.includes('codegen') && item.status?.includes('blocked'))) {
+      throw new Error(`field:value stage filter failed: ${JSON.stringify(stageFilterState)}`);
     }
-    if (stageFilterState.results.length < 1 || !stageFilterState.results.every((item) => item.toLowerCase().includes('codegen'))) {
-      throw new Error(`field:value stage filter state failed: ${JSON.stringify({ inputValue: stageFilterState.inputValue, resultCount: stageFilterState.results.length, firstResults: stageFilterState.results.slice(0, 8), paletteDiagnostics: stageFilterState.paletteDiagnostics })}`);
-    }
-    const stageTokenResults = await page.$$eval('.wb-command-results [role="option"]', (items) => items.map((item) => item.textContent?.trim() ?? ''));
-    if (stageTokenResults.length < 1 || !stageTokenResults.every((item) => item.toLowerCase().includes('codegen'))) {
-      throw new Error(`field:value stage filter failed: ${JSON.stringify(stageTokenResults)}`);
-    }
+    const stageTokenResults = stageFilterState.items.map((item) => item.text);
     await page.screenshot({ path: path.join(artifactDir, `workbench-command-field-filter-${viewport.width}x${viewport.height}.png`) });
+    await page.focus('.wb-command-input input');
     await page.keyboard.press('Escape');
     await page.waitForSelector('.wb-command-palette', { hidden: true });
 
     await pressControlShortcut(page, 'k');
-    await page.type('.wb-command-input input', 'diagnostic:VERIFICATION_WARNING', { delay: 20 });
-    await page.waitForFunction(() => {
-      const input = document.querySelector('.wb-command-input input');
-      const items = document.querySelectorAll('.wb-command-results [role="option"]');
-      return input instanceof HTMLInputElement && input.value === 'diagnostic:VERIFICATION_WARNING' && items.length > 0;
-    });
-    const diagnosticTokenResults = await page.$$eval('.wb-command-results [role="option"]', (items) => items.map((item) => item.textContent?.trim() ?? ''));
-    if (diagnosticTokenResults.length < 1) throw new Error('field:value diagnostic filter returned no indexed backend diagnostic');
+    await setPaletteQuery(page, 'diagnostic:VERIFICATION_WARNING');
+    const diagnosticFilterState = await paletteResultState(page);
+    if (diagnosticFilterState.visiblePaletteCount !== 1 || diagnosticFilterState.filteredCount < 1 || diagnosticFilterState.items.length < 1
+      || !diagnosticFilterState.items.every((item) => item.diagnostic?.includes('verification_warning'))) {
+      throw new Error(`field:value diagnostic filter failed: ${JSON.stringify(diagnosticFilterState)}`);
+    }
+    const diagnosticTokenResults = diagnosticFilterState.items.map((item) => item.text);
     await page.keyboard.press('Escape');
     await page.waitForSelector('.wb-command-palette', { hidden: true });
-    const paletteFieldFilters = { stageTokenResults, diagnosticTokenResults: diagnosticTokenResults.slice(0, 5) };
+
+    await pressControlShortcut(page, 'k');
+    const evidenceQuery = `category:evidence evidence:${searchFixture.evidenceState} commit:${searchFixture.evidenceCommit.slice(0, 10)}`;
+    await setPaletteQuery(page, evidenceQuery);
+    const evidenceFilterState = await paletteResultState(page);
+    if (evidenceFilterState.visiblePaletteCount !== 1 || evidenceFilterState.filteredCount < 1 || evidenceFilterState.items.length < 1
+      || !evidenceFilterState.items.every((item) => item.id?.startsWith('evidence-')
+        && item.evidence?.includes(searchFixture.evidenceState.toLowerCase())
+        && item.commit?.includes(searchFixture.evidenceCommit.slice(0, 10).toLowerCase()))) {
+      throw new Error(`field:value evidence/commit filter failed: ${JSON.stringify(evidenceFilterState)}`);
+    }
+    await page.keyboard.press('Escape');
+    await page.waitForSelector('.wb-command-palette', { hidden: true });
+
+    await page.click('.wb-activity-bar button[aria-label="Search"]');
+    const projectQuery = `category:project project:${searchFixture.projectId} commit:${searchFixture.projectCommit.slice(0, 10)}`;
+    await replaceInputValue(page, '.wb-search-explorer input', projectQuery);
+    await page.keyboard.press('Enter');
+    await page.waitForSelector('.wb-command-palette');
+    const projectFilterState = await paletteResultState(page);
+    if (projectFilterState.visiblePaletteCount !== 1 || projectFilterState.query !== projectQuery || projectFilterState.filteredCount !== 1
+      || projectFilterState.items.length !== 1 || !projectFilterState.items[0].id?.startsWith('project-')
+      || !projectFilterState.items[0].project?.includes(searchFixture.projectId)
+      || !projectFilterState.items[0].commit?.includes(searchFixture.projectCommit.slice(0, 10).toLowerCase())) {
+      throw new Error(`Search explorer project/commit filter failed: ${JSON.stringify(projectFilterState)}`);
+    }
+    await page.focus('.wb-command-input input');
+    await page.keyboard.press('Escape');
+    await page.waitForSelector('.wb-command-palette', { hidden: true });
+
+    await page.click('.wb-command-center');
+    await page.waitForSelector('.wb-command-palette');
+    await page.waitForFunction(() => document.activeElement?.matches('.wb-command-input input'));
+    await page.keyboard.press('Escape');
+    await page.waitForSelector('.wb-command-palette', { hidden: true });
+    const paletteFocusRestored = await page.evaluate(() => document.activeElement?.classList.contains('wb-command-center'));
+    if (!paletteFocusRestored) throw new Error('command palette did not restore command-center focus');
+    const paletteFieldFilters = {
+      stageTokenResults,
+      diagnosticTokenResults: diagnosticTokenResults.slice(0, 5),
+      evidenceResults: evidenceFilterState.items.map((item) => item.text),
+      projectResults: projectFilterState.items.map((item) => item.text),
+      paletteFocusRestored,
+    };
 
     await page.evaluate(() => window.dispatchEvent(new KeyboardEvent('keydown', { key: '\\', ctrlKey: true, bubbles: true })));
     await page.waitForFunction(() => document.querySelectorAll('.wb-editor-groups.is-split .wb-editor-group').length === 2);
+    const splitSurface = await page.evaluate(() => ({
+      groups: document.querySelectorAll('.wb-editor-groups.is-split .wb-editor-group').length,
+      separators: document.querySelectorAll('[role="separator"][tabindex="0"]').length,
+    }));
 
     await pressControlShortcut(page, 'k');
     await page.type('.wb-command-input input', 'Open Topology', { delay: 20 });
     await page.keyboard.press('Enter');
-    await page.waitForSelector('.wb-editor-group.is-secondary .wb-canvas-surface');
-    const topologyMoveButton = await page.$('.wb-editor-group.is-secondary [aria-label^="Move Topology"]');
+    await page.waitForFunction(() => [...document.querySelectorAll('.wb-editor-group')]
+      .some((group) => group.querySelector('.wb-geometry-surface')
+        && [...group.querySelectorAll('[role="tab"][aria-selected="true"]')].some((tab) => tab.textContent?.includes('Topology'))));
+    const topologySourceGroup = await page.evaluate(() => document.querySelector('.wb-editor-group.is-secondary .wb-geometry-surface') ? 'secondary' : 'primary');
+    const topologyTargetGroup = topologySourceGroup === 'secondary' ? 'primary' : 'secondary';
+    const topologyMoveButton = await page.$(`.wb-editor-group.is-${topologySourceGroup} [aria-label^="Move Topology"]`);
     if (!topologyMoveButton) throw new Error('keyboard-accessible tab move action missing');
     await topologyMoveButton.click();
-    await page.waitForFunction(() => [...document.querySelectorAll('.wb-editor-group.is-primary [role="tab"]')].some((tab) => tab.textContent?.includes('Topology')));
+    await page.waitForFunction((targetGroup) => [...document.querySelectorAll(`.wb-editor-group.is-${targetGroup} [role="tab"]`)].some((tab) => tab.textContent?.includes('Topology')), {}, topologyTargetGroup);
+    await page.waitForSelector(`.wb-editor-group.is-${topologyTargetGroup} .wb-geometry-surface`);
 
     const dimensionsBefore = await page.evaluate(() => ({
       explorer: document.querySelector('.wb-explorer')?.getBoundingClientRect().width ?? 0,
@@ -322,10 +665,15 @@ try {
       groupControl: Boolean(document.querySelector('select[aria-label="Group problems"]')),
       filterControl: Boolean(document.querySelector('select[aria-label="Filter problem severity"]')),
       rows: document.querySelectorAll('.wb-grouped-panel .wb-panel-table > button').length,
+      groupOptions: [...document.querySelectorAll('select[aria-label="Group problems"] option')].map((option) => option.value),
     }));
-    if (!problemPanel.groupControl || !problemPanel.filterControl || problemPanel.rows < 1) {
+    if (!problemPanel.groupControl || !problemPanel.filterControl || problemPanel.rows < 1 || !problemPanel.groupOptions.includes('commit')) {
       throw new Error(`Problems grouping unavailable: ${JSON.stringify(problemPanel)}`);
     }
+    await page.select('select[aria-label="Group problems"]', 'commit');
+    await page.waitForFunction(() => [...document.querySelectorAll('.wb-grouped-panel section > h3')]
+      .some((heading) => /[0-9a-f]{7,40}/i.test(heading.textContent ?? '')));
+    const problemCommitGroups = await page.$$eval('.wb-grouped-panel section > h3', (headings) => headings.map((heading) => heading.textContent?.trim() ?? ''));
     await page.evaluate(() => {
       const row = [...document.querySelectorAll('.wb-grouped-panel .wb-panel-table > button')]
         .find((item) => item.textContent?.includes('ANOM-001'));
@@ -352,13 +700,21 @@ try {
       testGroupControl: Boolean(document.querySelector('select[aria-label="Group tests"]')),
       testFilterControl: Boolean(document.querySelector('select[aria-label="Filter test status"]')),
       testRows: document.querySelectorAll('.wb-grouped-panel .wb-panel-table > button').length,
+      testGroupValue: document.querySelector('select[aria-label="Group tests"]')?.value,
+      testGroupOptions: [...document.querySelectorAll('select[aria-label="Group tests"] option')].map((option) => option.value),
+      testSourceGroups: [...document.querySelectorAll('.wb-grouped-panel section:not(.wb-test-sources) > h3')].map((heading) => heading.textContent?.trim() ?? ''),
       separators: document.querySelectorAll('[role="separator"][tabindex="0"]').length,
       splitGroups: document.querySelectorAll('.wb-editor-groups.is-split .wb-editor-group').length,
       viewportOverflowX: document.documentElement.scrollWidth > window.innerWidth,
       viewportOverflowY: document.documentElement.scrollHeight > window.innerHeight,
     }));
-    if (!groupedPanels.testGroupControl || !groupedPanels.testFilterControl || groupedPanels.testRows < 1) throw new Error(`Tests grouping unavailable: ${JSON.stringify(groupedPanels)}`);
-    if (groupedPanels.separators < 4 || groupedPanels.splitGroups !== 2) throw new Error(`Layout interaction surface incomplete: ${JSON.stringify(groupedPanels)}`);
+    if (!groupedPanels.testGroupControl || !groupedPanels.testFilterControl || groupedPanels.testRows < 1
+      || groupedPanels.testGroupValue !== 'source' || !groupedPanels.testGroupOptions.includes('source')
+      || !groupedPanels.testSourceGroups.every((group) => /Library|Integration|Canonical example|Delivery project|Unclassified source/i.test(group))
+      || !['Library', 'Integration', 'Canonical example', 'Delivery project'].every((expected) => groupedPanels.testSourceGroups.some((group) => group.startsWith(expected)))) {
+      throw new Error(`Tests grouping unavailable: ${JSON.stringify(groupedPanels)}`);
+    }
+    if (splitSurface.groups !== 2 || splitSurface.separators < 4 || groupedPanels.separators < 3) throw new Error(`Layout interaction surface incomplete: ${JSON.stringify({ splitSurface, groupedPanels })}`);
     await page.evaluate(() => {
       const row = [...document.querySelectorAll('.wb-grouped-panel .wb-panel-table > button')]
         .find((item) => item.textContent?.includes('Parser') && item.textContent?.includes('compiler_stages'));
@@ -376,7 +732,7 @@ try {
     }
     await page.screenshot({ path: path.join(artifactDir, `workbench-interactions-${viewport.width}x${viewport.height}.png`) });
 
-    results.push({ viewport, projectCoverage, overview, wiringRows, pointObservation, signatureDialog, agentAudit, paletteResultCount, paletteFieldFilters, dimensionsBefore, dimensionsAfter, pointerResizeBefore, pointerResizeAfter, problemPanel, problemDeepLink, testDeepLink, groupedPanels });
+    results.push({ viewport, projectCoverage, overview, topology, topologyKeyboard, wiringRows, wiringDiagnostics, pointObservation, signatureDialog, agentAudit, paletteResultCount, paletteFieldFilters, evidenceFilterPersistence, splitSurface, dimensionsBefore, dimensionsAfter, pointerResizeBefore, pointerResizeAfter, problemPanel, problemCommitGroups, problemDeepLink, testDeepLink, groupedPanels });
     await page.close();
   }
 } finally {
@@ -385,13 +741,28 @@ try {
 
 const failed = results.some((result) => (
   result.projectCoverage.length !== 3
-  || result.projectCoverage.some((project) => !project.heading || !project.selected)
+  || result.projectCoverage.some((project) => !project.heading || !project.selected
+    || project.pipelineRows < 10
+    || project.holdRows !== 5
+    || project.wiringPointCount < 1
+    || project.physicalPointCount !== project.wiringPointCount
+    || !project.normalizedWiring
+    || project.wiringSurface.rows !== project.wiringPointCount
+    || project.wiringSurface.unknownControllers !== 0
+    || project.wiringSurface.missingCompiler !== 0
+    || project.wiringSurface.inputSafeStateMismatch !== 0
+    || project.executionVerdict !== 'proven'
+    || project.sourceAuthoringVerdict !== 'not_proven'
+    || project.unattendedVerdict !== 'not_proven')
   || result.overview.pipelineRows < 10
   || result.overview.holdRows !== 5
   || !['blocked', 'human_action_required', 'release_approved'].includes(result.overview.releaseStatus)
   || result.overview.viewportOverflowX
   || result.overview.viewportOverflowY
+  || (result.topology.mode === 'missing' && (result.topology.blockerCode !== 'DELIVERY_GEOMETRY_ARTIFACT_MISSING' || !result.topology.blockerVisible))
+  || (result.topology.mode === 'rendered' && (result.topology.nodeEvidenceRecords < 1 && result.topology.edgeEvidenceRecords < 1))
   || result.wiringRows !== 16
+  || result.wiringDiagnostics !== 0
   || result.pointObservation.observationCountAfter !== result.pointObservation.observationCountBefore + 1
   || result.pointObservation.uploadCountAfter !== result.pointObservation.uploadCountBefore + 1
   || result.pointObservation.projectedStatus !== 'blocked'
@@ -400,12 +771,17 @@ const failed = results.some((result) => (
   || result.signatureDialog.digestRows < 1
   || !result.signatureDialog.hasAttestation
   || result.signatureDialog.overflow
-  || result.agentAudit.anomalyRows !== 10
-  || result.agentAudit.correctionRows !== 23
+  || result.agentAudit.anomalyRows !== result.agentAudit.expectedAnomalies
+  || result.agentAudit.correctionRows !== result.agentAudit.expectedCorrections
   || result.agentAudit.longSearchSignals < 1
   || result.paletteResultCount < 1
   || result.paletteFieldFilters.stageTokenResults.length < 1
   || result.paletteFieldFilters.diagnosticTokenResults.length < 1
+  || result.paletteFieldFilters.evidenceResults.length < 1
+  || result.paletteFieldFilters.projectResults.length !== 1
+  || !result.paletteFieldFilters.paletteFocusRestored
+  || result.evidenceFilterPersistence.stored !== 'blocked'
+  || !result.evidenceFilterPersistence.restored
   || result.dimensionsAfter.explorer <= result.dimensionsBefore.explorer
   || result.dimensionsAfter.inspector <= result.dimensionsBefore.inspector
   || result.dimensionsAfter.bottom <= result.dimensionsBefore.bottom
@@ -414,6 +790,7 @@ const failed = results.some((result) => (
   || !result.problemPanel.groupControl
   || !result.problemPanel.filterControl
   || result.problemPanel.rows < 1
+  || result.problemCommitGroups.length < 1
   || !result.problemDeepLink.artifactPath?.endsWith('/anomalies.json')
   || result.problemDeepLink.artifactLine !== '1'
   || !result.testDeepLink.artifactPath?.endsWith('/compiler-stages.json')
@@ -421,8 +798,9 @@ const failed = results.some((result) => (
   || result.groupedPanels.testRows < 1
   || !result.groupedPanels.testGroupControl
   || !result.groupedPanels.testFilterControl
-  || result.groupedPanels.separators < 4
-  || result.groupedPanels.splitGroups !== 2
+  || result.splitSurface.separators < 4
+  || result.splitSurface.groups !== 2
+  || result.groupedPanels.separators < 3
   || result.groupedPanels.viewportOverflowX
   || result.groupedPanels.viewportOverflowY
 ));

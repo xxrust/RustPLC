@@ -350,6 +350,7 @@ const GeometryPreview: React.FC<GeometryPreviewProps> = ({
   const [view, setView] = useState<GeometryViewKind>('constellation');
   const [selectedTaskId, setSelectedTaskId] = useState<string>();
   const [selectedStepId, setSelectedStepId] = useState<string>();
+  const [selectedReference, setSelectedReference] = useState<{ kind: 'node' | 'edge'; id: string }>();
 
   const renderable = isGeometryArtifact(artifact) ? artifact : undefined;
   const narrative = useMemo(() => normalizeNarrative(renderable?.narrative), [renderable?.narrative]);
@@ -364,6 +365,45 @@ const GeometryPreview: React.FC<GeometryPreviewProps> = ({
   const selectedStep =
     selectedTask?.steps.find((step) => step.step_id === selectedStepId) ?? selectedTask?.steps[0];
   const selectedTaskStepIds = new Set(selectedTask?.steps.map((step) => step.step_id) ?? []);
+  const selectedReferenceNode = selectedReference?.kind === 'node'
+    ? scene?.nodes.find((node) => node.id === selectedReference.id)
+    : undefined;
+  const selectedReferenceEdge = selectedReference?.kind === 'edge'
+    ? scene?.edges.find((edge) => edge.id === selectedReference.id)
+    : undefined;
+
+  const activateEdge = (edge: GeometryEdge) => {
+    setSelectedReference({ kind: 'edge', id: edge.id });
+    if (edge.kind !== 'transition') {
+      return;
+    }
+    const targetTask = narrative?.tasks.find((task) =>
+      task.steps.some((step) => step.step_id === edge.from)
+    );
+    if (targetTask) {
+      setSelectedTaskId(targetTask.task_id);
+    }
+    setSelectedStepId(edge.from);
+  };
+
+  const activateNode = (node: GeometryNode) => {
+    setSelectedReference({ kind: 'node', id: node.id });
+    if (node.kind === 'task') {
+      const task = narrative?.tasks.find((item) => item.task_id === node.id);
+      setSelectedTaskId(node.id);
+      setSelectedStepId(task?.steps[0]?.step_id);
+      return;
+    }
+    if (node.kind === 'step') {
+      const task = narrative?.tasks.find((item) =>
+        item.steps.some((step) => step.step_id === node.id)
+      );
+      if (task) {
+        setSelectedTaskId(task.task_id);
+      }
+      setSelectedStepId(node.id);
+    }
+  };
 
   return (
     <Card
@@ -391,7 +431,9 @@ const GeometryPreview: React.FC<GeometryPreviewProps> = ({
           description={
             runMode === 'component_sim'
               ? 'This run has no PLC semantic geometry artifact. Geometry preview currently follows PLC-backed runs.'
-              : 'No geometry artifact for this run yet.'
+              : artifact && 'status' in artifact && artifact.status === 'missing'
+                ? `${artifact.blocker?.code ?? 'GEOMETRY_ARTIFACT_MISSING'}: ${artifact.reason ?? 'No geometry artifact for this run yet.'}`
+                : 'No geometry artifact for this run yet.'
           }
         />
       ) : (
@@ -834,7 +876,7 @@ const GeometryPreview: React.FC<GeometryPreviewProps> = ({
                     <svg
                       viewBox={`0 0 ${scene?.width ?? 1080} ${scene?.height ?? 620}`}
                       style={{ width: '100%', height: 'auto', display: 'block' }}
-                      role="img"
+                      role="group"
                       aria-label={`Semantic twin geometry ${VIEW_LABELS[view]}`}
                     >
                       <defs>
@@ -900,8 +942,12 @@ const GeometryPreview: React.FC<GeometryPreviewProps> = ({
                             ? `M ${from.x} ${from.y} C ${from.x + 44} ${from.y}, ${to.x + 44} ${to.y}, ${to.x} ${to.y}`
                             : `M ${from.x} ${from.y} C ${midX} ${from.y}, ${midX} ${to.y}, ${to.x} ${to.y}`;
                         const attributes = getEdgeAttributes(edge);
+                        const sourceLabel = scene.nodes.find((node) => node.id === edge.from)?.label ?? edge.from;
+                        const targetLabel = scene.nodes.find((node) => node.id === edge.to)?.label ?? edge.to;
                         const title = [
                           `${EDGE_KIND_LABELS[edge.kind]}: ${edge.label}`,
+                          `evidence status: ${edge.evidence_status}`,
+                          ...(isObserved ? ['trace status: observed transition'] : []),
                           ...Object.entries(attributes).map(([key, value]) => `${key}: ${value}`),
                         ].join('\n');
                         const highlighted =
@@ -911,21 +957,25 @@ const GeometryPreview: React.FC<GeometryPreviewProps> = ({
                         return (
                           <g
                             key={edge.id}
-                            onClick={() => {
-                              if (edge.kind !== 'transition') {
-                                return;
+                            className="geometry-reference-item geometry-reference-item--edge"
+                            role="button"
+                            tabIndex={0}
+                            aria-pressed={selectedReference?.kind === 'edge' && selectedReference.id === edge.id}
+                            aria-label={`${EDGE_KIND_LABELS[edge.kind]} ${edge.label}, from ${sourceLabel} to ${targetLabel}, evidence status ${edge.evidence_status}${isObserved ? ', observed transition' : ''}`}
+                            data-reference-id={edge.id}
+                            data-evidence-status={edge.evidence_status}
+                            onClick={() => activateEdge(edge)}
+                            onKeyDown={(event) => {
+                              if (event.key === 'Enter' || event.key === ' ') {
+                                event.preventDefault();
+                                activateEdge(edge);
                               }
-                              const targetTask = narrative?.tasks.find((task) =>
-                                task.steps.some((step) => step.step_id === edge.from)
-                              );
-                              if (targetTask) {
-                                setSelectedTaskId(targetTask.task_id);
-                              }
-                              setSelectedStepId(edge.from);
                             }}
-                            style={{ cursor: edge.kind === 'transition' ? 'pointer' : 'default' }}
+                            style={{ cursor: 'pointer' }}
                           >
+                            <path className="geometry-reference-hit-target" d={path} fill="none" stroke="transparent" strokeWidth="18" />
                             <path
+                              className="geometry-reference-shape"
                               d={path}
                               fill="none"
                               stroke={stroke}
@@ -969,30 +1019,25 @@ const GeometryPreview: React.FC<GeometryPreviewProps> = ({
                         return (
                           <g
                             key={node.id}
+                            className="geometry-reference-item geometry-reference-item--node"
+                            role="button"
+                            tabIndex={0}
+                            aria-pressed={selectedReference?.kind === 'node' && selectedReference.id === node.id}
+                            aria-label={`${node.kind.replaceAll('_', ' ')} ${node.label}, evidence status ${node.evidence_status}${contextual ? ', contextual reference' : ''}`}
+                            data-reference-id={node.id}
+                            data-evidence-status={node.evidence_status}
                             opacity={contextual ? 0.52 : 1}
-                            onClick={() => {
-                              if (node.kind === 'task') {
-                                const task = narrative?.tasks.find((item) => item.task_id === node.id);
-                                setSelectedTaskId(node.id);
-                                setSelectedStepId(task?.steps[0]?.step_id);
-                                return;
-                              }
-                              if (node.kind === 'step') {
-                                const task = narrative?.tasks.find((item) =>
-                                  item.steps.some((step) => step.step_id === node.id)
-                                );
-                                if (task) {
-                                  setSelectedTaskId(task.task_id);
-                                }
-                                setSelectedStepId(node.id);
+                            onClick={() => activateNode(node)}
+                            onKeyDown={(event) => {
+                              if (event.key === 'Enter' || event.key === ' ') {
+                                event.preventDefault();
+                                activateNode(node);
                               }
                             }}
-                            style={{
-                              cursor:
-                                node.kind === 'task' || node.kind === 'step' ? 'pointer' : 'default',
-                            }}
+                            style={{ cursor: 'pointer' }}
                           >
                             <circle
+                              className="geometry-reference-focus-ring"
                               cx={point.x}
                               cy={point.y}
                               r={radius + 8}
@@ -1033,6 +1078,20 @@ const GeometryPreview: React.FC<GeometryPreviewProps> = ({
                       })}
                     </svg>
                   </div>
+                  {(selectedReferenceNode || selectedReferenceEdge) && (
+                    <div
+                      className="geometry-reference-detail"
+                      role="status"
+                      aria-live="polite"
+                      data-reference-kind={selectedReferenceNode ? 'node' : 'edge'}
+                      data-reference-id={selectedReferenceNode?.id ?? selectedReferenceEdge?.id}
+                      data-evidence-status={selectedReferenceNode?.evidence_status ?? selectedReferenceEdge?.evidence_status}
+                    >
+                      <strong>{selectedReferenceNode ? selectedReferenceNode.label : selectedReferenceEdge?.label}</strong>
+                      <span>{selectedReferenceNode ? `Node / ${selectedReferenceNode.kind.replaceAll('_', ' ')}` : `Edge / ${selectedReferenceEdge ? EDGE_KIND_LABELS[selectedReferenceEdge.kind] : ''}`}</span>
+                      <span>Evidence status: {selectedReferenceNode?.evidence_status ?? selectedReferenceEdge?.evidence_status}</span>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>

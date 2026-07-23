@@ -14,7 +14,7 @@
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/run_delivery_project_corpus.ps1
 ```
 
-项目内权威机器结果位于 `runs/20260723-172826/result.json`。当前 harness execution 为 `pass`，acceptance 与 delivery 均为 `blocked`；仓库级 runner 会把“fixture 可验证”与“工程可交付”分开汇总。
+项目内权威机器结果由项目根 `delivery-project.json` 的 `fixtures.api_run_result` 指向当前 canonical run。`harness_status` 表示证据链是否完整执行，`delivery_status` 表示工程交付条件；仓库级 runner 分别汇总这两个状态轴。
 
 已验证范围包括 compile、四类 verification、state-proof、六个 scenario 的 validate/doctor、nominal 两件周期、startup self-check、illegal-start、七个 intent milestone 和统一 `project-check` 中的 `intent_alignment=aligned`。
 

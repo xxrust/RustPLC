@@ -401,6 +401,13 @@ export interface GeometryArtifactMissing {
   schema_version: number;
   artifact_kind: 'semantic_twin_geometry' | string;
   status: 'missing';
+  reason?: string;
+  blocker?: {
+    code?: string;
+    stage?: string;
+    source_ref?: string;
+    source_commit?: string;
+  };
 }
 
 export type GeometryArtifactResponse = GeometryArtifact | GeometryArtifactMissing;

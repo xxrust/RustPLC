@@ -90,7 +90,7 @@ const TopologyPage: React.FC = () => {
 
       <Card>
         <Space>
-          <Text>{t('dashboard.currentProject')}:</Text>
+          <Text>{t('common.currentProject')}:</Text>
           <Text strong>{selectedId || t('common.noneSelected')}</Text>
           <Button icon={<FolderOpenOutlined />} onClick={handleLoadExample}>
             {t('topologyPage.loadExample')}

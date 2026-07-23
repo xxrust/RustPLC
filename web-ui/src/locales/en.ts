@@ -305,6 +305,7 @@ export const en = {
       edit: 'Edit',
       add: 'Add',
       remove: 'Remove',
+      currentProject: 'Current project',
       noneSelected: 'None selected',
     },
 
@@ -334,13 +335,6 @@ export const en = {
       suggestedFix: 'Suggested Fix',
       evidenceRef: 'Evidence Ref',
       noData: 'No diagnosis data',
-    },
-
-    // Main Layout
-    mainLayout: {
-      profile: 'Profile',
-      settings: 'Settings',
-      logout: 'Logout',
     },
 
     // Topology Page
@@ -434,24 +428,9 @@ export const en = {
       state: 'State',
     },
 
-    // Dashboard
-    dashboard: {
-      title: 'Overview',
-      runMode: 'Run Mode',
-      currentProject: 'Current Project',
-      latestRunStatus: 'Latest Run Status',
-      alarmCount: 'Alarm Count',
-      quickAccess: 'Quick Access',
-      runGate: 'Run Gate',
-      auditReport: 'Audit Report',
-      recentRuns: 'Recent Runs',
-      recentAlarms: 'Recent Alarms',
-      viewAll: 'View All',
-    },
-
     // Run Page
     run: {
-      title: 'Run Monitor',
+      title: 'Run & Gate',
       intro: 'Use the current project quick actions first. Open Advanced mode only when you intentionally need custom file paths.',
       statusPass: 'PASS',
       statusFail: 'FAIL',

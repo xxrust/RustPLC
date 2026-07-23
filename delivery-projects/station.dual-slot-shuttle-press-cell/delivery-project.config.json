@@ -114,8 +114,8 @@
     { "correction_id": "COR-010", "status": "verified", "summary": "Added explicit successors and stopped fault-branch fallthrough." },
     { "correction_id": "COR-011", "status": "verified", "summary": "Isolated illegal-start scenario causality." },
     { "correction_id": "COR-012", "status": "verified_with_schema_blocker", "summary": "Added trace-backed intent evidence while retaining the external-reinit schema gap." },
-    { "correction_id": "COR-013", "status": "verified", "summary": "Hardened the original runner for Windows PowerShell 5." },
-    { "correction_id": "COR-014", "status": "verified", "summary": "Expanded plc-gen public syntax guidance after seven trials." },
+    { "correction_id": "COR-013", "status": "verified", "anomaly_id": "ANOM-002", "summary": "Hardened the original runner for Windows PowerShell 5." },
+    { "correction_id": "COR-014", "status": "verified", "anomaly_id": "ANOM-001", "summary": "Expanded plc-gen public syntax guidance after seven trials." },
     { "correction_id": "COR-015", "status": "verified", "summary": "Corrected carrier effect syntax introduced during skill repair." },
     { "correction_id": "COR-016", "status": "verified", "summary": "Separated harness execution success from delivery acceptance." },
     { "correction_id": "COR-017", "status": "verified", "summary": "Made the operator front-door a persistent single-task classifier loop." },
@@ -124,7 +124,7 @@
     { "correction_id": "COR-020", "status": "verified", "summary": "Removed invalid carrier transfer shorthand from plc-gen guidance." },
     { "correction_id": "COR-021", "status": "verified", "summary": "Removed the blocking-wait plus same-step goto gate bypass." },
     { "correction_id": "COR-022", "status": "verified", "summary": "Corrected acceptance causality and evidence-freezing weaknesses." },
-    { "correction_id": "COR-023", "status": "verified", "summary": "Fixed input-manifest type handling and path-filter false positives." }
+    { "correction_id": "COR-023", "status": "verified", "anomaly_id": "ANOM-002", "summary": "Fixed input-manifest type handling and path-filter false positives." }
   ],
   "wiring_points": [
     { "point_id": "plc_main.X0", "alias": "start_cycle_cmd", "direction": "input", "device_terminal": "start_button.out", "safe_state": null },

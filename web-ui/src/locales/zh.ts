@@ -303,6 +303,7 @@ export const zh = {
       edit: '编辑',
       add: '添加',
       remove: '移除',
+      currentProject: '当前项目',
       noneSelected: '未选择',
     },
 
@@ -332,13 +333,6 @@ export const zh = {
       suggestedFix: '建议修复',
       evidenceRef: '证据引用',
       noData: '暂无诊断数据',
-    },
-
-    // Main Layout
-    mainLayout: {
-      profile: '个人信息',
-      settings: '设置',
-      logout: '退出登录',
     },
 
     // Topology Page
@@ -432,24 +426,9 @@ export const zh = {
       state: '状态',
     },
 
-    // Dashboard
-    dashboard: {
-      title: '总览看板',
-      runMode: '运行模式',
-      currentProject: '当前项目',
-      latestRunStatus: '最新运行状态',
-      alarmCount: '告警数量',
-      quickAccess: '快速入口',
-      runGate: '运行门禁',
-      auditReport: '审计报告',
-      recentRuns: '最近运行记录',
-      recentAlarms: '最新告警',
-      viewAll: '查看全部',
-    },
-
     // Run Page
     run: {
-      title: '运行监控',
+      title: '运行与门禁',
       intro: '优先直接运行当前项目。只有在你明确需要自定义文件路径时，才打开高级模式。',
       statusPass: '通过',
       statusFail: '失败',

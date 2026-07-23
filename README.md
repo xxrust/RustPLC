@@ -81,6 +81,14 @@ Autonomous PLC Delivery Workbench 是 RustPLC 的桌面式工程界面。它以�
 
 编译器进展通过真实交付项目体现。Problems、Tests、Search、状态栏和项目证据视图聚合各项目实际触发的阶段、诊断与 blocker；项目内的编译器证据、物理观察和人工责任始终保持独立状态。
 
+当前正式 registry 固定包含三个互相独立的 canonical 项目：
+
+- `module.axis_move_blocking_baseline`：单轴 blocking 动作与 runtime/project-check 基线。
+- `station.dual_slot_shuttle_press_cell`：双槽移载、压装与工艺操作 refinement。
+- `line.three_station_assembly`：三工站装配线、跨设备流程与 scenario runtime 能力边界。
+
+这三个项目共同构成编译器进展接口。项目交付状态当前为 `0 pass / 1 blocked / 2 fail`，工作台按真实 artifact 展示这些结论，不对项目做优劣排名。运行证据已经证明三项目 fixture 可被 Agent 确定性物化和重复执行；源码由 Agent 在无人干预条件下自主创作这一点仍为 `source_authoring_verdict=not_proven`，因此总体 `unattended_verdict=not_proven`。
+
 ```powershell
 cd web-ui
 npm install
@@ -91,13 +99,15 @@ cargo run -p web-server
 
 打开 `http://127.0.0.1:8080`。Loopback 开发模式提供 `engineer`、`electrical`、`commissioning`、`safety`、`release` 和 `admin` 演示身份，默认密码为 `password`；非 loopback 部署必须显式配置认证与允许来源。
 
-工作台需求、证据模型与验收条件见 [Autonomous PLC Delivery Workbench PRD](tasks/prd-autonomous-plc-delivery-workbench.md)，本次完整自测见 [HTML 报告](docs/reports/autonomous_plc_delivery_workbench_selftest.html)。
+工作台需求、证据模型与验收条件见 [Autonomous PLC Delivery Workbench PRD](tasks/prd-autonomous-plc-delivery-workbench.md)，本次阶段性验收见 [HTML 报告](docs/reports/autonomous_plc_delivery_workbench_selftest.html)。完整 WCAG、源码自主创作归因和最终提交后的 clean-checkout 证据仍按报告中的开放项处理。
 
 三项目全流程自测可由一个命令启动；第二轮通过 `-RepeatOf` 对输入 digest、步骤集合和 verdict 做机械比较：
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run_delivery_project_corpus.ps1
 ```
+
+本次验收 corpus 为 `20260724-210000` 和 `20260724-211000`。两轮 harness 均通过，第二轮 repeatability differences 为 0。完整门禁、Subagent 完整度和异常修正记录见 [自测报告](docs/reports/autonomous_plc_delivery_workbench_selftest.md)。
 
 可复制的异常、修正和执行链同时记录在 [Markdown 报告](docs/reports/autonomous_plc_delivery_workbench_selftest.md)。
 

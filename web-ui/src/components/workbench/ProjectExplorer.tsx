@@ -40,6 +40,9 @@ interface ProjectExplorerProps {
   onSelectProject: (projectId: string) => void;
   onSelectRun: (runId: string) => void;
   onOpenView: (view: WorkbenchView, label: string, resourceId?: string) => void;
+  searchQuery: string;
+  onSearchQueryChange: (query: string) => void;
+  onSubmitSearch: (query: string) => void;
 }
 
 const ProjectExplorer: React.FC<ProjectExplorerProps> = (props) => {
@@ -83,7 +86,13 @@ const ProjectExplorer: React.FC<ProjectExplorerProps> = (props) => {
       {props.activity === 'evidence' && (
         <CompactEvidenceList title="Evidence records" rows={props.evidence.map((item) => ({ id: item.evidence_id, label: item.label, detail: item.producer ?? item.artifact_ref ?? 'unknown producer', status: item.evidence_state }))} onOpen={() => props.onOpenView('verification', 'Verification & Evidence')} />
       )}
-      {props.activity === 'search' && <SearchExplorer />}
+      {props.activity === 'search' && (
+        <SearchExplorer
+          value={props.searchQuery}
+          onChange={props.onSearchQueryChange}
+          onSubmit={props.onSubmitSearch}
+        />
+      )}
       {props.activity === 'source-control' && <SourceControlExplorer project={props.project} />}
     </aside>
   );
@@ -111,7 +120,7 @@ const ProjectTree: React.FC<ProjectTreeProps> = ({
   <div className="wb-tree">
     <div className="wb-project-switcher">
       {projects.map((item) => (
-        <button key={item.project_id} type="button" className={selectedProjectId === item.project_id ? 'is-selected' : undefined} onClick={() => onSelectProject(item.project_id)}>
+        <button key={item.project_id} data-project-id={item.project_id} type="button" className={selectedProjectId === item.project_id ? 'is-selected' : undefined} onClick={() => onSelectProject(item.project_id)}>
           <span><FolderOutlined /> {item.name ?? item.project_id}</span>
           <StatusPill status={item.stale ? 'stale' : item.status} />
         </button>
@@ -169,10 +178,32 @@ const CompactEvidenceList: React.FC<{ title: string; rows: Array<{ id: string; l
   <div className="wb-compact-list"><div className="wb-list-caption">{title}<span>{rows.length}</span></div>{rows.length > 0 ? rows.map((row) => <button type="button" key={row.id} onClick={onOpen}><span><strong>{row.label}</strong><small>{row.detail}</small></span><StatusPill status={row.status} /></button>) : <WorkbenchState kind="empty" title={`No ${title.toLowerCase()}`} detail="The delivery-project API returned no records for this project." />}</div>
 );
 
-const SearchExplorer: React.FC = () => {
-  const [value, setValue] = useState('');
+const SearchExplorer: React.FC<{
+  value: string;
+  onChange: (value: string) => void;
+  onSubmit: (value: string) => void;
+}> = ({ value, onChange, onSubmit }) => {
   const examples = useMemo(() => ['stage:codegen status:blocked', 'diagnostic:SEM-110', 'evidence:stale'], []);
-  return <div className="wb-search-explorer"><label><SearchOutlined /><input value={value} onChange={(event) => setValue(event.target.value)} placeholder="Search project evidence" /></label><p>Queries search projects, runs, diagnostics, semantic objects, and holds.</p>{examples.map((example) => <button type="button" key={example} onClick={() => setValue(example)}>{example}</button>)}</div>;
+  return (
+    <div className="wb-search-explorer">
+      <label>
+        <SearchOutlined />
+        <span className="wb-visually-hidden">Search project evidence</span>
+        <input
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          onKeyDown={(event) => { if (event.key === 'Enter') onSubmit(value); }}
+          placeholder="Search project evidence"
+        />
+      </label>
+      <p>Queries search projects, runs, diagnostics, semantic objects, and holds.</p>
+      {examples.map((example) => (
+        <button type="button" key={example} onClick={() => { onChange(example); onSubmit(example); }}>
+          {example}
+        </button>
+      ))}
+    </div>
+  );
 };
 
 const SourceControlExplorer: React.FC<{ project?: DeliveryProjectDetail }> = ({ project }) => (

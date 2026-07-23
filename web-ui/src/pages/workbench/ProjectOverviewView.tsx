@@ -15,6 +15,7 @@ import type {
   VerificationStage,
 } from '../../types/workbench';
 import { StatusPill } from '../../components/workbench/WorkbenchPrimitives';
+import { useDialogFocus } from '../../components/workbench/useDialogFocus';
 import { formatTime, shortCommit } from '../../components/workbench/workbenchUtils';
 import { useAppStore } from '../../stores/appStore';
 
@@ -42,6 +43,7 @@ const ProjectOverviewView: React.FC<ProjectOverviewViewProps> = ({
   const [decision, setDecision] = useState<'approve' | 'reject'>('approve');
   const [comment, setComment] = useState('');
   const [acknowledged, setAcknowledged] = useState(false);
+  const { dialogRef, onDialogKeyDown } = useDialogFocus<HTMLFormElement>(Boolean(selectedHold), () => setSelectedHold(null));
   const latestRun = runs[0];
   const blockedStages = verification.filter((stage) => stage.status === 'blocked');
   const staleEvidence = evidence.filter((item) => item.stale || item.evidence_state === 'stale');
@@ -65,6 +67,7 @@ const ProjectOverviewView: React.FC<ProjectOverviewViewProps> = ({
     if (!selectedHold || !signatureContext || !acknowledged) return;
     await onSign(selectedHold.hold_id, {
       hold_type: selectedHold.hold_id,
+      attestation_standard: signatureContext.attestation_standard,
       source_commit: signatureContext.source_commit,
       evidence_digests: signatureContext.current_evidence_digests,
       decision,
@@ -160,13 +163,15 @@ const ProjectOverviewView: React.FC<ProjectOverviewViewProps> = ({
 
       {selectedHold && signatureContext && (
         <div className="wb-dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closeSignature(); }}>
-          <form className="wb-sign-dialog" role="dialog" aria-modal="true" aria-labelledby="hold-sign-title" onSubmit={submitSignature}>
-            <header><div><h2 id="hold-sign-title">Sign {selectedHold.label}</h2><p>{selectedHold.role ?? 'Assigned reviewer'} responsibility</p></div><button type="button" aria-label="Close signature dialog" onClick={closeSignature}>x</button></header>
+          <form ref={dialogRef} className="wb-sign-dialog" role="dialog" aria-modal="true" aria-labelledby="hold-sign-title" tabIndex={-1} onKeyDown={onDialogKeyDown} onSubmit={submitSignature}>
+            <header><div><h2 id="hold-sign-title">Sign {selectedHold.label}</h2><p>{selectedHold.role ?? 'Assigned reviewer'} responsibility</p></div><button type="button" aria-label="Close signature dialog" data-dialog-autofocus onClick={closeSignature}>x</button></header>
             <dl className="wb-sign-facts">
               <div><dt>Project</dt><dd>{project.project_id}</dd></div>
+              <div><dt>Attestation</dt><dd>{signatureContext.attestation_standard}</dd></div>
               <div><dt>Source commit</dt><dd className="wb-mono">{signatureContext.source_commit}</dd></div>
               <div><dt>Evidence set</dt><dd>{Object.keys(signatureContext.current_evidence_digests).length} current artifact digests</dd></div>
             </dl>
+            <p className="wb-sign-scope">{signatureContext.attestation_scope}</p>
             <div className="wb-digest-preview">
               {Object.entries(signatureContext.current_evidence_digests).slice(0, 4).map(([path, digest]) => <div key={path}><span>{path}</span><code>{digest}</code></div>)}
               {Object.keys(signatureContext.current_evidence_digests).length > 4 && <p>+ {Object.keys(signatureContext.current_evidence_digests).length - 4} additional digests bound to this signature</p>}

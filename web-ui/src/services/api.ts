@@ -32,8 +32,12 @@ import type {
   PointObservation,
   VerificationStage,
   WiringPoint,
+  WiringProjection,
   WorkspaceProblem,
+  WorkspaceProblemsProjection,
   WorkspaceTest,
+  WorkspaceTestSource,
+  WorkspaceTestsProjection,
 } from '../types/workbench';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
@@ -82,6 +86,67 @@ function recordOf(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' ? value as Record<string, unknown> : {};
 }
 
+function readableRecord(value: unknown, preferredKeys: string[]): string | undefined {
+  if (typeof value === 'string') return value || undefined;
+  const record = recordOf(value);
+  const parts = preferredKeys.flatMap((key) => {
+    const field = record[key];
+    if (Array.isArray(field)) return field.map(String).filter(Boolean);
+    return field === undefined || field === null || field === '' ? [] : [String(field)];
+  });
+  return parts.length > 0 ? parts.join(' / ') : undefined;
+}
+
+function stringList(value: unknown): string[] | undefined {
+  return Array.isArray(value) ? value.map(String).filter(Boolean) : undefined;
+}
+
+function workspaceProblemSeverity(value: unknown): WorkspaceProblem['severity'] {
+  const severity = String(value ?? 'info').toLowerCase();
+  if (severity === 'warn') return 'warning';
+  if (severity === 'error' || severity === 'warning' || severity === 'blocked') return severity;
+  return 'info';
+}
+
+function normalizeTestSource(value: unknown): WorkspaceTestSource {
+  const source = recordOf(value);
+  const freshness = recordOf(source.freshness);
+  const runs = Array.isArray(freshness.runs) ? freshness.runs.map((runValue) => {
+    const run = recordOf(runValue);
+    const runFreshness = recordOf(run.freshness);
+    return {
+      run_id: String(run.run_id ?? '') || undefined,
+      freshness: {
+        state: String(runFreshness.state ?? '') || undefined,
+        bindings: Array.isArray(runFreshness.bindings)
+          ? runFreshness.bindings.map((bindingValue) => {
+              const binding = recordOf(bindingValue);
+              return {
+                name: String(binding.name ?? '') || undefined,
+                state: String(binding.state ?? '') || undefined,
+                artifact: binding.artifact === null ? null : String(binding.artifact ?? '') || undefined,
+                expected_sha256: binding.expected_sha256 === null ? null : String(binding.expected_sha256 ?? '') || undefined,
+                actual_sha256: binding.actual_sha256 === null ? null : String(binding.actual_sha256 ?? '') || undefined,
+              };
+            })
+          : [],
+      },
+    };
+  }) : [];
+  return {
+    project_id: String(source.project_id ?? '') || undefined,
+    execution_source: String(source.execution_source ?? 'unknown'),
+    status: String(source.status ?? 'unknown'),
+    test_count: Number(source.test_count ?? 0) || 0,
+    freshness: {
+      state: String(freshness.state ?? '') || undefined,
+      error_code: String(freshness.error_code ?? '') || undefined,
+      reason: String(freshness.reason ?? '') || undefined,
+      runs,
+    },
+  };
+}
+
 function evidenceState(value: unknown): EvidenceRecord['evidence_state'] {
   const status = String(value ?? 'derived').toLowerCase();
   if (status.includes('not_exercised') || status.includes('blocked') || status === 'failed') return 'blocked';
@@ -101,8 +166,11 @@ function normalizeRun(value: unknown): AgentRun {
   const provenance = recordOf(documents.provenance);
   const anomalies = listFromPayload<Record<string, unknown>>(documents.anomalies, ['records']);
   const corrections = listFromPayload<Record<string, unknown>>(documents.corrections, ['records']);
+  const eventRecords = listFromPayload<Record<string, unknown>>(documents.agent_events, ['records']);
   const models = Array.isArray(provenance.models) ? provenance.models.map(recordOf) : [];
-  const agents = recordOf(provenance.agents);
+  const agents = Array.isArray(provenance.agents) ? provenance.agents.map(recordOf) : [];
+  const attribution = recordOf(run.attribution);
+  const attributionRecords = Array.isArray(attribution.records) ? attribution.records.map(recordOf) : [];
   const inputManifest = recordOf(documents.input_manifest);
   const digest = recordOf(inputManifest.digest);
   const statusRecord = recordOf(run.evidence_status);
@@ -110,16 +178,31 @@ function normalizeRun(value: unknown): AgentRun {
   const startedAt = String(run.started_at ?? provenance.started_at_utc ?? '');
   const completedAt = String(run.completed_at ?? provenance.completed_at_utc ?? '');
   const duration = Number(run.elapsed_ms ?? provenance.elapsed_ms ?? 0);
-  const event = startedAt || completedAt ? [{
+  const fallbackEvent = startedAt || completedAt ? [{
     event_id: `${String(run.run_id)}:execution`,
     timestamp: startedAt || completedAt,
     task: 'Unattended delivery generation',
-    agent: String(agents.implementation_agent ?? agents.root_agent ?? 'recorded agent team'),
+    agent: String(agents[0]?.agent_id ?? 'recorded agent team'),
     tool: 'agent harness',
     duration_ms: Number.isFinite(duration) ? duration : undefined,
     result: String(provenance.unattended_reason ?? run.reported_status ?? 'Recorded run'),
     status: statusState,
   }] : [];
+  const events = eventRecords.length > 0 ? eventRecords.map((item) => {
+    const artifactRefs = Array.isArray(item.artifact_refs) ? item.artifact_refs : [];
+    return {
+      event_id: String(item.event_id ?? ''),
+      timestamp: String(item.started_at ?? item.timestamp ?? '') || undefined,
+      task: String(item.task ?? item.phase ?? 'Unlabeled task'),
+      agent: String(item.agent_id ?? item.agent ?? 'Agent identity not recorded'),
+      tool: String(item.tool ?? 'Tool not recorded'),
+      duration_ms: Number(item.duration_ms ?? 0) || undefined,
+      result: String(item.result ?? item.action ?? 'Recorded event'),
+      status: evidenceState(item.result ?? item.status),
+      artifact_ref: artifactRefs.length > 0 ? String(artifactRefs[0]) : undefined,
+      artifact_refs: artifactRefs.map(String),
+    };
+  }) : fallbackEvent;
   return {
     run_id: String(run.run_id ?? 'unknown'),
     status: statusState === 'blocked' ? 'blocked' : statusState === 'verified' ? 'complete' : undefined,
@@ -129,16 +212,43 @@ function normalizeRun(value: unknown): AgentRun {
     model: String(run.model ?? models[0]?.model ?? '') || undefined,
     unattended_verdict: String(run.unattended_verdict ?? provenance.unattended_verdict ?? '') || undefined,
     input_manifest_digest: String(run.input_manifest_digest ?? digest.value ?? inputManifest.sha256 ?? '') || undefined,
-    events: event,
+    events,
+    attribution: attribution.unattended_verdict ? {
+      provenance_scope: String(attribution.provenance_scope ?? '') || undefined,
+      unattended_verdict: String(attribution.unattended_verdict),
+      execution_unattended_verdict: String(attribution.execution_unattended_verdict ?? '') || undefined,
+      source_authoring_verdict: String(attribution.source_authoring_verdict ?? '') || undefined,
+      source_authoring_record_count: Number(attribution.source_authoring_record_count ?? 0),
+      reason: String(attribution.reason ?? '') || undefined,
+      human_intervention_detected: Boolean(attribution.human_intervention_detected),
+      validation_issues: Array.isArray(attribution.validation_issues)
+        ? attribution.validation_issues.map(String)
+        : [],
+      records: attributionRecords.map((item) => ({
+        path: String(item.path ?? 'unknown'),
+        before_sha256: item.before_sha256 === null ? null : String(item.before_sha256 ?? '') || undefined,
+        after_sha256: String(item.after_sha256 ?? '') || undefined,
+        current_sha256: String(item.current_sha256 ?? '') || undefined,
+        recorded_attribution_kind: String(item.recorded_attribution_kind ?? '') || undefined,
+        attribution_kind: String(item.attribution_kind ?? 'unattributed_change'),
+        agent_id: String(item.agent_id ?? '') || undefined,
+        task_id: String(item.task_id ?? '') || undefined,
+        event_id: String(item.event_id ?? '') || undefined,
+        current_state: String(item.current_state ?? '') || undefined,
+      })),
+    } : undefined,
     anomalies: anomalies.map((item) => ({
       anomaly_id: String(item.anomaly_id ?? ''),
       code: String(item.gap_id ?? item.anomaly_id ?? ''),
       summary: String(item.summary ?? 'Anomaly record'),
-      root_cause: String(item.classification ?? ''),
-      correction: String(item.correction ?? ''),
+      root_cause: readableRecord(item.root_cause, ['classification', 'summary'])
+        ?? (String(item.classification ?? '') || undefined),
+      correction: readableRecord(item.correction, ['status', 'summaries', 'reason']),
+      verification_result: readableRecord(item.verification_result, ['status', 'evidence_refs']),
       status: evidenceState(item.status),
-      retry_count: Number(item.retry_count ?? 0) || undefined,
+      retry_count: Math.max(Number(item.retry_count ?? 0), Number(item.historical_retry_count ?? 0)) || undefined,
       long_search_or_trial_and_error: Boolean(item.long_search_or_trial_and_error),
+      affected_files: stringList(item.affected_files) ?? stringList(item.evidence_paths),
     })),
     corrections: corrections.map((item) => ({
       anomaly_id: String(item.correction_id ?? ''),
@@ -173,11 +283,21 @@ export const deliveryProjectApi = {
     );
     return normalizeRun(data);
   },
-  getWiring: async (projectId: string): Promise<WiringPoint[]> => {
+  getWiring: async (projectId: string): Promise<WiringProjection> => {
     const { data } = await apiClient.get<unknown>(
       `/delivery-projects/${encodeURIComponent(projectId)}/wiring`
     );
-    return listFromPayload<WiringPoint>(data, ['points', 'wiring', 'items']);
+    const payload = recordOf(data);
+    return {
+      points: listFromPayload<WiringPoint>(data, ['points', 'wiring', 'items']),
+      diagnostics: listFromPayload<Record<string, unknown>>(payload.diagnostics, ['items']).map((item) => ({
+        code: String(item.code ?? 'WIRING_DIAGNOSTIC'),
+        kind: String(item.kind ?? 'wiring_error'),
+        point_id: String(item.point_id ?? '') || undefined,
+        severity: String(item.severity ?? 'error') as 'error' | 'warning' | 'blocked',
+        message: String(item.message ?? 'Wiring validation failed'),
+      })),
+    };
   },
   getPhysicalEvidence: async (projectId: string): Promise<PhysicalEvidenceProjection> => {
     const { data } = await apiClient.get<PhysicalEvidenceProjection>(
@@ -240,34 +360,67 @@ export const deliveryProjectApi = {
     );
     return listFromPayload<EvidenceRecord>(data, ['evidence', 'items']);
   },
-  getWorkspaceProblems: async (): Promise<WorkspaceProblem[]> => {
+  getGeometry: async (projectId: string): Promise<GeometryArtifactResponse> => {
+    const { data } = await apiClient.get<GeometryArtifactResponse>(
+      `/delivery-projects/${encodeURIComponent(projectId)}/geometry`
+    );
+    return data;
+  },
+  getWorkspaceProblems: async (): Promise<WorkspaceProblemsProjection> => {
     const { data } = await apiClient.get<unknown>('/workspace/problems');
-    return listFromPayload<Record<string, unknown>>(data, ['problems', 'items']).map((problem, index) => ({
+    const payload = recordOf(data);
+    const problems = listFromPayload<Record<string, unknown>>(data, ['problems', 'items']).map((problem, index) => ({
       id: String(problem.id ?? problem.code ?? `problem-${index}`),
       project_id: problem.project_id ? String(problem.project_id) : undefined,
-      severity: String(problem.severity ?? 'info') as WorkspaceProblem['severity'],
+      severity: workspaceProblemSeverity(problem.severity),
       stage: problem.stage ? String(problem.stage) : undefined,
       code: problem.code ? String(problem.code) : undefined,
       message: String(problem.message ?? 'Compiler evidence problem'),
-      source_ref: String(recordOf(problem.artifact).path ?? problem.source_ref ?? '') || undefined,
+      source_ref: String(problem.source_ref ?? recordOf(problem.artifact).path ?? '') || undefined,
+      source_commit: String(problem.source_commit ?? '') || undefined,
+      artifact_ref: String(problem.artifact_ref ?? recordOf(problem.artifact).path ?? '') || undefined,
+      semantic_object: problem.semantic_object
+        ? {
+            kind: String(recordOf(problem.semantic_object).kind ?? '') || undefined,
+            id: String(recordOf(problem.semantic_object).id ?? '') || undefined,
+          }
+        : undefined,
+      deep_link: problem.deep_link ? recordOf(problem.deep_link) : undefined,
       line: Number(problem.line ?? recordOf(problem.location).line ?? 0) || undefined,
       column: Number(problem.column ?? recordOf(problem.location).column ?? 0) || undefined,
     }));
+    return {
+      schema_version: Number(payload.schema_version ?? 0) || undefined,
+      count: Number(payload.count ?? problems.length),
+      partial: Boolean(payload.partial),
+      problems,
+    };
   },
-  getWorkspaceTests: async (): Promise<WorkspaceTest[]> => {
+  getWorkspaceTests: async (): Promise<WorkspaceTestsProjection> => {
     const { data } = await apiClient.get<unknown>('/workspace/tests');
-    return listFromPayload<Record<string, unknown>>(data, ['tests', 'items']).map((test, index) => {
+    const payload = recordOf(data);
+    const tests = listFromPayload<Record<string, unknown>>(data, ['tests', 'items']).map((test, index) => {
       const state = evidenceState(test.status ?? test.reported_status);
       return {
         id: String(test.id ?? `${test.project_id ?? 'workspace'}:${test.name ?? index}`),
         project_id: test.project_id ? String(test.project_id) : undefined,
         suite: test.suite ? String(test.suite) : undefined,
+        execution_source: String(test.execution_source ?? '') || undefined,
+        test_scope: String(test.test_scope ?? '') || undefined,
         name: String(test.name ?? 'Unnamed test'),
         status: state === 'verified' ? 'pass' : state === 'blocked' ? 'blocked' : state === 'warning' ? 'fail' : 'skipped',
         duration_ms: Number(test.duration_ms ?? test.elapsed_ms ?? 0) || undefined,
         artifact_ref: String(recordOf(recordOf(test.provenance).artifact).path ?? '') || undefined,
       } satisfies WorkspaceTest;
     });
+    return {
+      schema_version: Number(payload.schema_version ?? 0) || undefined,
+      count: Number(payload.count ?? tests.length),
+      partial: Boolean(payload.partial),
+      boundary: String(payload.boundary ?? '') || undefined,
+      sources: Array.isArray(payload.sources) ? payload.sources.map(normalizeTestSource) : [],
+      tests,
+    };
   },
   getSignatures: async (projectId: string): Promise<HoldSignatureContext> => {
     const { data } = await apiClient.get<HoldSignatureContext>(

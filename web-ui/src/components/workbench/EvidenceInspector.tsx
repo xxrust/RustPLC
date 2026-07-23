@@ -45,7 +45,7 @@ const EvidenceInspector: React.FC<{
                 <div><dt>Digest</dt><dd className="wb-mono wb-break">{selectedEvidence.digest ?? 'Not supplied'}</dd></div>
                 <div><dt>Responsibility</dt><dd>{selectedEvidence.responsibility_state ?? 'Unassigned'}</dd></div>
               </dl>
-              {selectedEvidence.artifact_ref && <button className="wb-link-button" type="button"><LinkOutlined /> {selectedEvidence.artifact_ref}</button>}
+              {selectedEvidence.artifact_ref && <a className="wb-link-button" href={artifactHref(selectedEvidence.artifact_ref)} target="_blank" rel="noreferrer"><LinkOutlined /> {selectedEvidence.artifact_ref}</a>}
             </div>
           ) : <p className="wb-empty-copy">Select an evidence-backed object to inspect its producer, revision, and artifact digest.</p>}
         </section>
@@ -71,5 +71,10 @@ const EvidenceInspector: React.FC<{
     </aside>
   );
 };
+
+function artifactHref(path: string): string {
+  const normalized = path.replace(/\\/g, '/').replace(/^\/?api\/artifacts\//, '').replace(/^\/?artifacts\//, '').replace(/^\//, '');
+  return `/api/artifacts/${normalized.split('/').map(encodeURIComponent).join('/')}`;
+}
 
 export default EvidenceInspector;

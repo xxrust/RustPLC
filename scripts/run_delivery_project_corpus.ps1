@@ -40,6 +40,61 @@ function Repo-Ref {
     return $resolved.Substring($prefix.Length).Replace('\', '/')
 }
 
+function ConvertTo-NativeArgument {
+    param([AllowEmptyString()][string]$Value)
+    if ($Value.Length -gt 0 -and $Value -notmatch '[\s"]') { return $Value }
+    $builder = New-Object System.Text.StringBuilder
+    [void]$builder.Append('"')
+    $backslashes = 0
+    foreach ($character in $Value.ToCharArray()) {
+        if ($character -eq '\') { $backslashes++; continue }
+        if ($character -eq '"') {
+            for ($index = 0; $index -lt ($backslashes * 2 + 1); $index++) { [void]$builder.Append('\') }
+            [void]$builder.Append('"')
+            $backslashes = 0
+            continue
+        }
+        for ($index = 0; $index -lt $backslashes; $index++) { [void]$builder.Append('\') }
+        $backslashes = 0
+        [void]$builder.Append($character)
+    }
+    for ($index = 0; $index -lt ($backslashes * 2); $index++) { [void]$builder.Append('\') }
+    [void]$builder.Append('"')
+    return $builder.ToString()
+}
+
+function Invoke-NativeProcess {
+    param(
+        [Parameter(Mandatory)][string]$Command,
+        [Parameter(Mandatory)][string[]]$Arguments,
+        [Parameter(Mandatory)][string]$WorkingDirectory,
+        [Parameter(Mandatory)][string]$StdoutPath,
+        [Parameter(Mandatory)][string]$StderrPath
+    )
+    $startInfo = New-Object System.Diagnostics.ProcessStartInfo
+    $startInfo.FileName = $Command
+    $startInfo.Arguments = (@($Arguments | ForEach-Object { ConvertTo-NativeArgument ([string]$_) }) -join ' ')
+    $startInfo.WorkingDirectory = $WorkingDirectory
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = $true
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    $process = New-Object System.Diagnostics.Process
+    $process.StartInfo = $startInfo
+    [void]$process.Start()
+    $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+    $stderrTask = $process.StandardError.ReadToEndAsync()
+    $process.WaitForExit()
+    $stdout = $stdoutTask.Result
+    $stderr = $stderrTask.Result
+    $exitCode = $process.ExitCode
+    $process.Dispose()
+    $utf8 = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllText($StdoutPath, $stdout, $utf8)
+    [System.IO.File]::WriteAllText($StderrPath, $stderr, $utf8)
+    return $exitCode
+}
+
 function Invoke-CapturedCommand {
     param(
         [Parameter(Mandatory)][string]$Command,
@@ -49,12 +104,12 @@ function Invoke-CapturedCommand {
     )
     New-Item -ItemType Directory -Force -Path (Split-Path -Parent $StdoutPath), (Split-Path -Parent $StderrPath) | Out-Null
     $watch = [System.Diagnostics.Stopwatch]::StartNew()
-    $previousPreference = $ErrorActionPreference
-    $ErrorActionPreference = 'Continue'
-    & $Command @Arguments 1> $StdoutPath 2> $StderrPath
-    $exitCode = $LASTEXITCODE
-    $ErrorActionPreference = $previousPreference
-    $watch.Stop()
+    try {
+        $exitCode = Invoke-NativeProcess $Command $Arguments $repoRoot $StdoutPath $StderrPath
+    }
+    finally {
+        $watch.Stop()
+    }
     return [ordered]@{ exit_code = $exitCode; elapsed_ms = [int64]$watch.ElapsedMilliseconds }
 }
 
@@ -259,7 +314,8 @@ $anomalies = @(
     [ordered]@{ anomaly_id = 'CORPUS-ANOM-012'; classification = 'repeatability_digest_design'; status = 'corrected'; retry_count = 1; long_search_or_trial_and_error = $false; summary = 'The input-manifest digest included run metadata and could not serve as a stable cross-run source digest.'; correction_id = 'CORPUS-COR-011' },
     [ordered]@{ anomaly_id = 'CORPUS-ANOM-013'; classification = 'validator_registry_coupling'; status = 'corrected'; retry_count = 1; long_search_or_trial_and_error = $false; summary = 'The validator hard-coded the canonical delivery-projects registry and rejected valid run-specific specimen manifests.'; correction_id = 'CORPUS-COR-012' },
     [ordered]@{ anomaly_id = 'CORPUS-ANOM-014'; classification = 'historical_retry_projection'; status = 'corrected'; retry_count = 1; long_search_or_trial_and_error = $false; summary = 'Station historical retry counts were projected as current-run retries and made chronology validation demand synthetic events.'; correction_id = 'CORPUS-COR-013' },
-    [ordered]@{ anomaly_id = 'CORPUS-ANOM-015'; classification = 'incomplete_input_digest'; status = 'corrected'; retry_count = 1; long_search_or_trial_and_error = $false; summary = 'The stable digest covered source files but omitted the config that selects scenarios, accepted product gaps, and acceptance metadata.'; correction_id = 'CORPUS-COR-014' }
+    [ordered]@{ anomaly_id = 'CORPUS-ANOM-015'; classification = 'incomplete_input_digest'; status = 'corrected'; retry_count = 1; long_search_or_trial_and_error = $false; summary = 'The stable digest covered source files but omitted the config that selects scenarios, accepted product gaps, and acceptance metadata.'; correction_id = 'CORPUS-COR-014' },
+    [ordered]@{ anomaly_id = 'CORPUS-ANOM-016'; classification = 'windows_path_budget'; status = 'corrected'; retry_count = 1; long_search_or_trial_and_error = $false; summary = 'The clean-checkout runner repeated a long outer RunId inside corpus and project run directories, pushing module and station artifacts beyond the traditional Windows MAX_PATH boundary.'; correction_id = 'CORPUS-COR-015' }
 )
 $corrections = @(
     [ordered]@{ correction_id = 'CORPUS-COR-001'; status = 'verified'; summary = 'Definition v2 preserves the station fixture, adds module and line layers, and separates harness_status from delivery_status.' },
@@ -275,7 +331,8 @@ $corrections = @(
     [ordered]@{ correction_id = 'CORPUS-COR-011'; status = 'verified'; summary = 'Materializer now records a stable source-set digest and rechecks it after pipeline execution.' },
     [ordered]@{ correction_id = 'CORPUS-COR-012'; status = 'verified'; summary = 'Validator now accepts an explicit repository-contained RegistryRoot; corpus runs pass their specimen registry.' },
     [ordered]@{ correction_id = 'CORPUS-COR-013'; status = 'verified'; summary = 'Station records current-run retry_count separately from historical_retry_count while preserving the seven-attempt finding.' },
-    [ordered]@{ correction_id = 'CORPUS-COR-014'; status = 'verified'; summary = 'Repeatability now compares input_set_sha256 over config, source, and review while preserving a separate source_set_sha256.' }
+    [ordered]@{ correction_id = 'CORPUS-COR-014'; status = 'verified'; summary = 'Repeatability now compares input_set_sha256 over config, source, and review while preserving a separate source_set_sha256.' },
+    [ordered]@{ correction_id = 'CORPUS-COR-015'; status = 'verified'; summary = 'The clean runner now uses the short internal run id cc and rejects projected artifact paths beyond a 240-character Windows safety budget before cloning.' }
 )
 
 $completed = [DateTime]::UtcNow
