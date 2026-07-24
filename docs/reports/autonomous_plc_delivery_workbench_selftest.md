@@ -147,7 +147,7 @@ Canonical run `20260724-commit-b1` 由三个独立 clean clone 基于实现提�
 | `ANOM-054` | 多 run 项目中旧 verification、problem、test 和 evidence 可污染当前交付视图 | 项目投影遍历 `agent_runs` 全集合，同名 stage 后写覆盖 | 引入 current-run selector，优先使用 `artifact_roots.verification`；新增双 run 回归，证明旧 safety warning、gap、anomaly、test 和 evidence 不进入当前投影，完整 web-server 测试 66/66 |
 | `ANOM-055` | station B1 agent 的 route-state audit 因未显式写“禁止 UI 备用路线”失败一次 | agent 自行引入 route-governance 元数据，额外门禁超出 canonical 核心路线 | 仅补充允许目录内的 route metadata 后 audit 通过；clone/build/materialize/validator 未重跑、零重试。该摩擦计入提示/skill 优化信号 |
 | `ANOM-056` | “停止旧服务、构建、启动新服务”组合命令被安全策略整体拒绝 | 进程终止与后续构建/启动捆绑在一个长命令中，动作边界不可独立审计 | 拆成已确认 PID 的 Stop-Process、独立 cargo build、隐藏窗口 Start-Process 和 HTTP readiness 四步；新服务 PID 72012 在 8080 返回 200 |
-| `ANOM-057` | 最终只读 subagent 暂存区审计因 `502 Bad Gateway` 中止 | 本地 Codex 代理向上游 `/responses` 转发失败；该 agent 未产生审计结论，也未修改文件 | 主线程保留失败原文并确认 agent 无写入；改由暂存路径白名单、`git diff --cached --check`、实现 commit 审计、最终 clean-checkout 和三方 SHA 校验完成替代验证。该异常属于 agent 基础设施故障，不归因于 RustPLC 产品逻辑 |
+| `ANOM-057` | 最终只读 subagent 暂存区审计首次因 `502 Bad Gateway` 中止 | 本地 Codex 代理向上游 `/responses` 转发失败；首次调用未产生审计结论，也未修改文件。代理恢复后复审运行时间超过预期，约 3 分钟时仍在扩展核对范围，但没有出现命令试错或文件写入 | 主线程保留首次失败原文；恢复后重新派发只读审计，并把范围收紧到 Git 状态、桌面壳、责任链、current-run selector 和双 run 测试。复审最终确认 `HEAD/master/origin` 一致、无独立 monitor 页面、三项目与四段责任链完整、历史 run 不污染当前投影、未提交文件均未进入交付提交。该异常属于 agent 基础设施故障和提示范围控制问题，不归因于 RustPLC 产品逻辑 |
 
 这些记录区分产品缺陷、harness 缺陷、脚本缺陷和环境问题。重复试错集中在浏览器 harness 的 controlled input、焦点与 selector，说明此前的 UI 自动化提示缺少“等待 React 状态稳定、使用窄 selector、按项目恢复 session”的明确规则。
 
