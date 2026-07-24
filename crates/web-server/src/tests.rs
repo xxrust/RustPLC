@@ -1870,6 +1870,7 @@ fn write_delivery_project_fixture(workspace_root: &std::path::Path) {
             "system_contract": "plc/main.system.md",
             "artifact_roots": {
                 "agent_runs": "out/agent-runs",
+                "verification": "out/agent-runs/run-1",
                 "wiring": "out/wiring",
                 "release": "release"
             },
@@ -2042,6 +2043,90 @@ fn write_delivery_project_fixture(workspace_root: &std::path::Path) {
         .expect("hold contract should serialize"),
     )
     .expect("hold contract should be written");
+}
+
+fn write_historical_delivery_run_fixture(workspace_root: &std::path::Path) {
+    let run_root = workspace_root.join("delivery-projects/demo-line/out/agent-runs/run-0-old");
+    fs::create_dir_all(run_root.join("compile")).expect("old compile directory should exist");
+    fs::create_dir_all(run_root.join("project-check"))
+        .expect("old project-check directory should exist");
+    fs::write(
+        run_root.join("input-manifest.json"),
+        "{\"schema_version\":1}\n",
+    )
+    .expect("old input manifest should be written");
+    fs::write(
+        run_root.join("result.json"),
+        serde_json::to_vec_pretty(&json!({
+            "schema_version": 1,
+            "run_id": "run-0-old",
+            "harness_execution_id": "run-0-old",
+            "artifact_root": "out/agent-runs/run-0-old",
+            "git_head": "old-commit",
+            "status": { "delivery": "fail" },
+            "steps": [{
+                "name": "old_compile_verify",
+                "classification": "fail",
+                "exit_code": 1,
+                "note": "historical failure must not enter current tests"
+            }],
+            "known_gaps": [{
+                "id": "GAP-OLD-RUN",
+                "layer": "runtime",
+                "classification": "code-gap",
+                "evidence": "historical gap must not enter current problems"
+            }]
+        }))
+        .expect("old result should serialize"),
+    )
+    .expect("old result should be written");
+    fs::write(
+        run_root.join("compile/verification_report.json"),
+        serde_json::to_vec_pretty(&json!({
+            "schema_version": 1,
+            "verification": {
+                "safety": {
+                    "level": "fail",
+                    "warnings": [{
+                        "code": "OLD-SAFETY-WARNING",
+                        "level": "error",
+                        "message": "historical safety result must not overwrite current safety"
+                    }],
+                    "checked_rules": 99,
+                    "skipped_rules": 0
+                }
+            }
+        }))
+        .expect("old verification report should serialize"),
+    )
+    .expect("old verification report should be written");
+    fs::write(
+        run_root.join("project-check/project_check_report.json"),
+        serde_json::to_vec_pretty(&json!({
+            "schema_version": 1,
+            "status": "fail",
+            "steps": [{
+                "name": "old_project_check",
+                "status": "fail",
+                "exit_code": 1
+            }]
+        }))
+        .expect("old project check should serialize"),
+    )
+    .expect("old project check should be written");
+    fs::write(
+        run_root.join("anomalies.json"),
+        serde_json::to_vec_pretty(&json!({
+            "schema_version": 1,
+            "records": [{
+                "anomaly_id": "ANOM-OLD-RUN",
+                "status": "blocked",
+                "summary": "historical anomaly must not enter current problems"
+            }]
+        }))
+        .expect("old anomalies should serialize"),
+    )
+    .expect("old anomalies should be written");
 }
 
 fn normalized_fixture_sha256(path: &std::path::Path) -> String {
@@ -2343,6 +2428,127 @@ async fn delivery_routes_aggregate_manifest_runs_and_evidence() {
     assert!(digests
         .values()
         .all(|digest| digest.len() == 64 && digest.chars().all(|ch| ch.is_ascii_hexdigit())));
+}
+
+#[tokio::test]
+async fn delivery_project_projections_ignore_historical_runs() {
+    let workspace_root = temp_workspace_root("delivery-current-run-projection");
+    write_delivery_project_fixture(&workspace_root);
+    write_historical_delivery_run_fixture(&workspace_root);
+    let app = build_app(test_state(workspace_root.clone(), BTreeMap::new()));
+
+    let runs = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/delivery-projects/line.demo/runs")
+                .body(Body::empty())
+                .expect("runs request should build"),
+        )
+        .await
+        .expect("runs route should respond");
+    assert_eq!(runs.status(), StatusCode::OK);
+    let runs = response_json(runs).await;
+    assert_eq!(runs["runs"].as_array().map(Vec::len), Some(2));
+    assert!(runs["runs"].as_array().is_some_and(|runs| {
+        runs.iter().any(|run| run["run_id"] == "run-1")
+            && runs.iter().any(|run| run["run_id"] == "run-0-old")
+    }));
+
+    let projects = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/delivery-projects")
+                .body(Body::empty())
+                .expect("projects request should build"),
+        )
+        .await
+        .expect("projects route should respond");
+    let projects = response_json(projects).await;
+    assert_eq!(projects["projects"][0]["run_count"], 2);
+    assert_eq!(projects["projects"][0]["latest_run"]["run_id"], "run-1");
+
+    let verification = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/delivery-projects/line.demo/verification")
+                .body(Body::empty())
+                .expect("verification request should build"),
+        )
+        .await
+        .expect("verification route should respond");
+    let verification = response_json(verification).await;
+    assert!(verification["reports"].as_array().is_some_and(|reports| {
+        !reports.is_empty() && reports.iter().all(|report| report["run_id"] == "run-1")
+    }));
+    let safety = verification["stages"]
+        .as_array()
+        .and_then(|stages| stages.iter().find(|stage| stage["stage"] == "safety"))
+        .expect("current safety stage should be projected");
+    assert_eq!(safety["reported_status"], "pass");
+    assert!(!verification.to_string().contains("OLD-SAFETY-WARNING"));
+
+    let problems = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/workspace/problems")
+                .body(Body::empty())
+                .expect("problems request should build"),
+        )
+        .await
+        .expect("problems route should respond");
+    let problems = response_json(problems).await;
+    assert!(problems["problems"].as_array().is_some_and(|records| {
+        records.iter().any(|record| record["code"] == "GAP-DEMO")
+            && records
+                .iter()
+                .filter(|record| record["project_id"] == "line.demo")
+                .all(|record| record["run_id"].is_null() || record["run_id"] == "run-1")
+    }));
+    assert!(!problems.to_string().contains("GAP-OLD-RUN"));
+    assert!(!problems.to_string().contains("ANOM-OLD-RUN"));
+
+    let tests = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/workspace/tests")
+                .body(Body::empty())
+                .expect("tests request should build"),
+        )
+        .await
+        .expect("tests route should respond");
+    let tests = response_json(tests).await;
+    assert!(tests["tests"].as_array().is_some_and(|records| {
+        !records.is_empty()
+            && records
+                .iter()
+                .filter(|record| record["project_id"] == "line.demo")
+                .all(|record| record["run_id"] == "run-1")
+    }));
+    assert!(!tests.to_string().contains("old_compile_verify"));
+    assert!(!tests.to_string().contains("old_project_check"));
+
+    let evidence = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/delivery-projects/line.demo/evidence")
+                .body(Body::empty())
+                .expect("evidence request should build"),
+        )
+        .await
+        .expect("evidence route should respond");
+    let evidence = response_json(evidence).await;
+    assert!(evidence.to_string().contains("out/agent-runs/run-1"));
+    assert!(!evidence.to_string().contains("out/agent-runs/run-0-old"));
+
+    let digests = current_evidence_digests(&workspace_root, "line.demo")
+        .expect("current evidence digests should resolve");
+    assert!(digests.keys().any(|path| path.contains("run-1")));
+    assert!(!digests.keys().any(|path| path.contains("run-0-old")));
 }
 
 #[tokio::test]

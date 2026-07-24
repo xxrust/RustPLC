@@ -116,19 +116,29 @@ async function auditProjectSurface(page, projectId) {
   await page.waitForFunction(() => document.querySelectorAll('.wb-pipeline-row').length >= 10);
   await page.waitForFunction(() => document.querySelectorAll('.wb-hold-row').length === 5);
   const apiEvidence = await page.evaluate(async (id) => {
-    const [projectResponse, wiringResponse, physicalResponse] = await Promise.all([
+    const [projectResponse, wiringResponse, physicalResponse, releaseResponse] = await Promise.all([
       fetch(`/api/delivery-projects/${id}`),
       fetch(`/api/delivery-projects/${id}/wiring`),
       fetch(`/api/delivery-projects/${id}/physical-evidence`),
+      fetch(`/api/delivery-projects/${id}/release`),
     ]);
-    if (![projectResponse, wiringResponse, physicalResponse].every((response) => response.ok)) {
+    if (![projectResponse, wiringResponse, physicalResponse, releaseResponse].every((response) => response.ok)) {
       throw new Error(`project evidence request failed for ${id}`);
     }
-    const [project, wiring, physical] = await Promise.all([
+    const [project, wiring, physical, release] = await Promise.all([
       projectResponse.json(),
       wiringResponse.json(),
       physicalResponse.json(),
+      releaseResponse.json(),
     ]);
+    const hilReview = release.holds?.find((hold) => hold.hold_id === 'hil_review');
+    const hilLabel = hilReview?.status === 'human_confirmed'
+      ? 'confirmed'
+      : hilReview?.status === 'human_action_required'
+        ? 'action required'
+        : hilReview?.status;
+    const hilStatusText = [...document.querySelectorAll('.wb-statusbar > span')]
+      .find((item) => item.textContent?.trim().startsWith('HIL '))?.textContent?.trim() ?? '';
     return {
       pipelineRows: document.querySelectorAll('.wb-pipeline-row').length,
       holdRows: document.querySelectorAll('.wb-hold-row').length,
@@ -139,6 +149,11 @@ async function auditProjectSurface(page, projectId) {
       executionVerdict: project.latest_run?.attribution?.execution_unattended_verdict,
       sourceAuthoringVerdict: project.latest_run?.attribution?.source_authoring_verdict,
       unattendedVerdict: project.latest_run?.attribution?.unattended_verdict,
+      hilReviewStatus: hilReview?.status,
+      hilReviewReason: hilReview?.reason,
+      hilStatusBound: Boolean(hilLabel && hilStatusText === `HIL ${hilLabel}`),
+      inspectorHilReasonVisible: Boolean(hilReview?.reason && document.querySelector('.wb-release-projection')?.textContent?.includes(hilReview.reason)),
+      inspectorBlockedPrerequisites: document.querySelectorAll('.wb-prerequisite-list li').length,
     };
   }, projectId);
   await page.evaluate(() => {
@@ -217,6 +232,11 @@ try {
       projectCount: document.querySelectorAll('.wb-project-switcher button').length,
       pipelineRows: document.querySelectorAll('.wb-pipeline-row').length,
       holdRows: document.querySelectorAll('.wb-hold-row').length,
+      responsibilitySteps: document.querySelectorAll('.wb-responsibility-step').length,
+      responsibilityStages: [...document.querySelectorAll('.wb-responsibility-step')]
+        .map((item) => item.getAttribute('data-responsibility-stage')),
+      agentAuthoringVerdict: document.querySelector('[data-responsibility-stage="agent-authoring"]')?.getAttribute('data-verdict'),
+      humanOwnedStages: document.querySelectorAll('[data-responsibility-owner="human"]').length,
       releaseStatus: document.querySelector('[data-release-status]')?.getAttribute('data-release-status'),
       viewportOverflowX: document.documentElement.scrollWidth > window.innerWidth,
       viewportOverflowY: document.documentElement.scrollHeight > window.innerHeight,
@@ -753,9 +773,19 @@ const failed = results.some((result) => (
     || project.wiringSurface.inputSafeStateMismatch !== 0
     || project.executionVerdict !== 'proven'
     || project.sourceAuthoringVerdict !== 'not_proven'
-    || project.unattendedVerdict !== 'not_proven')
+    || project.unattendedVerdict !== 'not_proven'
+    || !project.hilReviewStatus
+    || !project.hilReviewReason
+    || !project.hilStatusBound
+    || !project.inspectorHilReasonVisible
+    || project.inspectorBlockedPrerequisites < 1)
   || result.overview.pipelineRows < 10
   || result.overview.holdRows !== 5
+  || result.overview.responsibilitySteps !== 4
+  || !['agent-authoring', 'compiler-verification', 'physical-validation', 'release-authorization']
+    .every((stage) => result.overview.responsibilityStages.includes(stage))
+  || result.overview.agentAuthoringVerdict !== 'not_proven'
+  || result.overview.humanOwnedStages !== 2
   || !['blocked', 'human_action_required', 'release_approved'].includes(result.overview.releaseStatus)
   || result.overview.viewportOverflowX
   || result.overview.viewportOverflowY

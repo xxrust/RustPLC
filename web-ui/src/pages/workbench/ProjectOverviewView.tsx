@@ -1,13 +1,17 @@
 import React, { useMemo, useState } from 'react';
 import {
   BranchesOutlined,
+  CodeOutlined,
   FileTextOutlined,
   LockOutlined,
+  RobotOutlined,
   SafetyCertificateOutlined,
+  ToolOutlined,
 } from '@ant-design/icons';
 import type {
   AgentRun,
   DeliveryProjectDetail,
+  EvidenceState,
   EvidenceRecord,
   HoldSignatureContext,
   HumanHold,
@@ -46,7 +50,23 @@ const ProjectOverviewView: React.FC<ProjectOverviewViewProps> = ({
   const { dialogRef, onDialogKeyDown } = useDialogFocus<HTMLFormElement>(Boolean(selectedHold), () => setSelectedHold(null));
   const latestRun = runs[0];
   const blockedStages = verification.filter((stage) => stage.status === 'blocked');
+  const verifiedStages = verification.filter((stage) => stage.status === 'verified').length;
   const staleEvidence = evidence.filter((item) => item.stale || item.evidence_state === 'stale');
+  const sourceAuthoringVerdict = latestRun?.attribution?.source_authoring_verdict
+    ?? latestRun?.unattended_verdict
+    ?? 'not_proven';
+  const pointCheckHold = project.human_holds?.find((hold) => hold.hold_id === 'point_check_completion');
+  const confirmedHoldCount = project.human_holds?.filter((hold) => hold.status === 'confirmed').length ?? 0;
+  const holdCount = project.human_holds?.length ?? 0;
+  const compilerState: EvidenceState = verification.length === 0
+    ? 'missing'
+    : blockedStages.length > 0
+      ? 'blocked'
+      : verifiedStages === verification.length
+        ? 'verified'
+        : 'warning';
+  const physicalState = holdStateToEvidence(pointCheckHold?.status);
+  const releaseState = releaseVerdictToEvidence(project.release_verdict);
   const signaturesByHold = useMemo(() => {
     const signatures = [...(signatureContext?.signatures ?? [])]
       .sort((left, right) => right.signed_at_ms - left.signed_at_ms);
@@ -101,6 +121,63 @@ const ProjectOverviewView: React.FC<ProjectOverviewViewProps> = ({
       )}
 
       <div className="wb-overview-grid">
+        <section className="wb-section wb-section--wide wb-responsibility-section" aria-labelledby="delivery-responsibility-title">
+          <div className="wb-section-heading">
+            <h2 id="delivery-responsibility-title">Delivery responsibility chain</h2>
+            <span>Source to release</span>
+          </div>
+          <div className="wb-responsibility-chain" role="list" aria-label="Delivery responsibility and evidence chain">
+            <div
+              className="wb-responsibility-step"
+              role="listitem"
+              data-responsibility-stage="agent-authoring"
+              data-responsibility-owner="agent"
+              data-verdict={sourceAuthoringVerdict}
+            >
+              <span className="wb-responsibility-icon" aria-hidden="true"><RobotOutlined /></span>
+              <div className="wb-responsibility-title"><strong>Agent source authoring</strong><small>Agent-owned</small></div>
+              <StatusPill status={verdictToEvidence(sourceAuthoringVerdict)} label={humanizeVerdict(sourceAuthoringVerdict)} />
+              <p>{sourceAuthoringDetail(latestRun)}</p>
+            </div>
+            <div
+              className="wb-responsibility-step"
+              role="listitem"
+              data-responsibility-stage="compiler-verification"
+              data-responsibility-owner="compiler"
+              data-verdict={compilerState}
+            >
+              <span className="wb-responsibility-icon" aria-hidden="true"><CodeOutlined /></span>
+              <div className="wb-responsibility-title"><strong>Compiler verification</strong><small>RustPLC-owned</small></div>
+              <StatusPill status={compilerState} />
+              <p>{verifiedStages} of {verification.length} indexed stages verified; {blockedStages.length} blocked.</p>
+            </div>
+            <div
+              className="wb-responsibility-step"
+              role="listitem"
+              data-responsibility-stage="physical-validation"
+              data-responsibility-owner="human"
+              data-verdict={pointCheckHold?.status ?? 'pending'}
+            >
+              <span className="wb-responsibility-icon" aria-hidden="true"><ToolOutlined /></span>
+              <div className="wb-responsibility-title"><strong>Wiring and point checks</strong><small>Human-owned</small></div>
+              <StatusPill status={physicalState} label={humanizeVerdict(pointCheckHold?.status ?? 'pending')} />
+              <p>{confirmedHoldCount} of {holdCount} human hold points confirmed. Physical observations remain independent evidence.</p>
+            </div>
+            <div
+              className="wb-responsibility-step"
+              role="listitem"
+              data-responsibility-stage="release-authorization"
+              data-responsibility-owner="human"
+              data-verdict={project.release_verdict ?? 'not_issued'}
+            >
+              <span className="wb-responsibility-icon" aria-hidden="true"><LockOutlined /></span>
+              <div className="wb-responsibility-title"><strong>Release authorization</strong><small>Human-owned</small></div>
+              <StatusPill status={releaseState} label={humanizeVerdict(project.release_verdict ?? 'not_issued')} />
+              <p>The release decision is bound to the current source revision and evidence digests.</p>
+            </div>
+          </div>
+        </section>
+
         <section className="wb-section">
           <div className="wb-section-heading"><h2>Delivery contract</h2><span>Authored boundaries</span></div>
           <dl className="wb-definition-list">
@@ -198,6 +275,37 @@ function canSignHold(role: string | undefined, holdId: string): boolean {
     || (role === 'safety_reviewer' && holdId === 'safety_review')
     || (role === 'release_approver' && holdId === 'release_approval')
   );
+}
+
+function verdictToEvidence(verdict: string): EvidenceState {
+  const normalized = verdict.toLowerCase().replaceAll(' ', '_');
+  if (['proven', 'verified', 'complete', 'approved', 'release_approved'].includes(normalized)) return 'verified';
+  if (['blocked', 'failed', 'rejected', 'human_intervention_detected', 'not_releasable'].includes(normalized)) return 'blocked';
+  if (['missing', 'not_recorded', 'not_issued'].includes(normalized)) return 'missing';
+  return 'warning';
+}
+
+function holdStateToEvidence(status: HumanHold['status'] | undefined): EvidenceState {
+  if (status === 'confirmed') return 'observed';
+  if (status === 'blocked' || status === 'rejected') return 'blocked';
+  if (status === 'stale') return 'stale';
+  if (status === 'pending') return 'warning';
+  return 'missing';
+}
+
+function releaseVerdictToEvidence(verdict: string | undefined): EvidenceState {
+  return verdict ? verdictToEvidence(verdict) : 'missing';
+}
+
+function humanizeVerdict(verdict: string): string {
+  return verdict.replaceAll('_', ' ');
+}
+
+function sourceAuthoringDetail(run: AgentRun | undefined): string {
+  const recordCount = run?.attribution?.source_authoring_record_count ?? 0;
+  return recordCount > 0
+    ? `${recordCount} file-level source records bind authorship to this run.`
+    : 'No file-level source records bind authored PLC source to this run.';
 }
 
 export default ProjectOverviewView;

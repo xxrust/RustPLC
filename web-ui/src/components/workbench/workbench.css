@@ -182,6 +182,12 @@
 .wb-inspector-list dd { margin: 0; color: var(--wb-text-2); min-width: 0; overflow-wrap: anywhere; }
 .wb-inspector-summary { display: grid; gap: 7px; }
 .wb-inspector-summary > span { display: flex; align-items: center; justify-content: space-between; color: var(--wb-text-2); }
+.wb-prerequisite-list { margin-top: 12px; color: var(--wb-text-2); }
+.wb-prerequisite-list > strong { font-size: 11px; }
+.wb-prerequisite-list ul { margin: 8px 0 0; padding: 0; list-style: none; display: grid; gap: 8px; }
+.wb-prerequisite-list li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 3px 8px; align-items: start; }
+.wb-prerequisite-list li > span { text-transform: capitalize; overflow-wrap: anywhere; }
+.wb-prerequisite-list small { grid-column: 1 / -1; color: var(--wb-muted); line-height: 1.35; overflow-wrap: anywhere; }
 .wb-provenance > div:first-child { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
 .wb-link-button { width: 100%; margin-top: 10px; display: flex; align-items: center; gap: 7px; padding: 6px 8px; border: 1px solid var(--wb-border); border-radius: 4px; background: transparent; color: var(--wb-blue); text-align: left; cursor: pointer; overflow-wrap: anywhere; }
 .wb-release-boundary { display: flex; gap: 10px; color: var(--wb-amber); }
@@ -265,6 +271,16 @@
 .wb-section-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
 .wb-section-heading h2 { margin: 0; color: var(--wb-text); font-size: 13px; }
 .wb-section-heading span { color: var(--wb-muted); font-size: 11px; }
+.wb-responsibility-section { padding-bottom: 18px; }
+.wb-responsibility-chain { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border: 1px solid var(--wb-border); background: var(--wb-border); }
+.wb-responsibility-step { min-width: 0; min-height: 128px; display: grid; grid-template-columns: 30px minmax(0, 1fr); grid-template-rows: auto auto minmax(0, 1fr); align-content: start; gap: 7px 9px; padding: 11px 12px; background: #181c23; }
+.wb-responsibility-step + .wb-responsibility-step { border-left: 1px solid var(--wb-border); }
+.wb-responsibility-icon { grid-row: 1 / 3; width: 28px; height: 28px; display: grid; place-items: center; border: 1px solid var(--wb-border-strong); color: var(--wb-cyan); font-size: 15px; }
+.wb-responsibility-title { min-width: 0; display: grid; gap: 2px; }
+.wb-responsibility-title strong { overflow: hidden; color: var(--wb-text); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.wb-responsibility-title small { color: var(--wb-muted); font-size: 10px; }
+.wb-responsibility-step > .wb-status { grid-column: 2; justify-self: start; }
+.wb-responsibility-step p { grid-column: 1 / -1; align-self: end; margin: 2px 0 0; color: var(--wb-text-2); font-size: 11px; line-height: 1.45; overflow-wrap: anywhere; }
 .wb-definition-list { margin: 0; }
 .wb-definition-list > div { display: grid; grid-template-columns: 130px minmax(0, 1fr); gap: 12px; padding: 7px 0; border-bottom: 1px solid #2a2f39; }
 .wb-definition-list > div:last-child { border-bottom: 0; }
@@ -521,11 +537,19 @@
   .wb-verification-layout,
   .wb-timeline-layout,
   .wb-overview-grid { grid-template-columns: minmax(0, 1fr); }
+  .wb-responsibility-chain { grid-template-columns: minmax(0, 1fr); }
+  .wb-responsibility-step + .wb-responsibility-step { border-top: 1px solid var(--wb-border); border-left: 0; }
   .wb-stage-list { border-right: 0; border-bottom: 1px solid var(--wb-border); }
   .wb-section { border-right: 0; }
   .wb-wiring-header-tools { width: 100%; align-items: stretch; flex-direction: column; }
   .wb-wiring-header-tools .wb-filter-input { width: 100%; min-width: 0; }
   .wb-point-summary { white-space: normal; }
+}
+
+@container (min-width: 641px) and (max-width: 920px) {
+  .wb-responsibility-chain { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .wb-responsibility-step:nth-child(3) { border-top: 1px solid var(--wb-border); border-left: 0; }
+  .wb-responsibility-step:nth-child(4) { border-top: 1px solid var(--wb-border); }
 }
 
 @media (max-width: 1180px) {

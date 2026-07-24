@@ -401,7 +401,7 @@ async fn get_delivery_geometry(
 ) -> Result<Json<Value>, ApiError> {
     let catalog = load_catalog(&state.workspace_root);
     let project = find_project(&catalog, &id)?;
-    if let Some(run_root) = collect_run_roots(project).into_iter().next() {
+    if let Some(run_root) = current_run_root(project) {
         let candidates = [
             run_root.join("compile/geometry.json"),
             run_root.join("geometry.json"),
@@ -469,7 +469,7 @@ async fn get_delivery_verification(
     let catalog = load_catalog(&state.workspace_root);
     let project = find_project(&catalog, &id)?;
     let mut reports = Vec::new();
-    for run_root in collect_run_roots(project) {
+    if let Some(run_root) = current_run_root(project) {
         let run_id = run_identifier(project, &run_root);
         for path in verification_report_paths(&run_root) {
             let Ok(document) = read_structured_document(&path) else {
@@ -580,7 +580,7 @@ async fn get_workspace_tests(State(state): State<Arc<AppState>>) -> Json<Value> 
     let mut sources = Vec::new();
     let mut seen = HashSet::new();
     for project in &catalog.projects {
-        let local_runs = collect_run_roots(project);
+        let local_runs = current_run_root(project).into_iter().collect::<Vec<_>>();
         let local_start = tests.len();
         let mut local_freshness = Vec::new();
         for run_root in &local_runs {
@@ -841,7 +841,10 @@ fn find_project<'a>(
 
 fn project_summary(project: &DeliveryProject) -> Value {
     let runs = collect_run_roots(project);
-    let latest = runs.first().map(|root| run_summary(project, root));
+    let current_run = current_run_root_from(project, &runs);
+    let latest = current_run
+        .as_deref()
+        .map(|root| run_summary(project, root));
     let explicit_status = string_at(&project.manifest, &["delivery_status"])
         .or_else(|| {
             project
@@ -1008,6 +1011,26 @@ fn collect_run_roots(project: &DeliveryProject) -> Vec<PathBuf> {
     let mut roots = roots.into_iter().collect::<Vec<_>>();
     roots.sort_by(|left, right| right.file_name().cmp(&left.file_name()));
     roots
+}
+
+fn current_run_root(project: &DeliveryProject) -> Option<PathBuf> {
+    let runs = collect_run_roots(project);
+    current_run_root_from(project, &runs)
+}
+
+fn current_run_root_from(project: &DeliveryProject, runs: &[PathBuf]) -> Option<PathBuf> {
+    for declared_root in declared_artifact_roots(project, "verification") {
+        if let Some(run_root) = runs.iter().find(|run_root| {
+            declared_root.as_path() == run_root.as_path()
+                || declared_root.starts_with(run_root.as_path())
+        }) {
+            return Some(run_root.clone());
+        }
+        if declared_root.is_dir() && is_within_workspace(project, &declared_root) {
+            return Some(declared_root);
+        }
+    }
+    runs.first().cloned()
 }
 
 fn add_run_directories(root: &StdPath, output: &mut BTreeSet<PathBuf>) {
@@ -2028,20 +2051,13 @@ fn collect_project_artifacts(project: &DeliveryProject) -> Vec<PathBuf> {
             paths.insert(path);
         }
     }
-    for key in [
-        "agent_runs",
-        "verification",
-        "wiring",
-        "execution",
-        "release",
-    ] {
+    if let Some(run_root) = current_run_root(project) {
+        paths.extend(collect_files(&run_root, MAX_PROJECT_ARTIFACTS));
+    }
+    for key in ["wiring", "execution", "release"] {
         for root in declared_artifact_roots(project, key) {
             paths.extend(collect_files(&root, MAX_PROJECT_ARTIFACTS));
         }
-    }
-    let conventional_runs = project.project_root.join("harness-runs");
-    if conventional_runs.is_dir() {
-        paths.extend(collect_files(&conventional_runs, MAX_PROJECT_ARTIFACTS));
     }
     let physical_evidence = project
         .workspace_root
@@ -2131,7 +2147,7 @@ fn project_problems(project: &DeliveryProject) -> Vec<Value> {
             }));
         }
     }
-    for run_root in collect_run_roots(project) {
+    if let Some(run_root) = current_run_root(project) {
         let run_id = run_identifier(project, &run_root);
         let documents = run_documents(project, &run_root);
         if let Some(result) = documents.get("result") {

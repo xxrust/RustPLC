@@ -14,6 +14,7 @@ const EvidenceInspector: React.FC<{
   const blocked = evidence.filter((item) => item.evidence_state === 'blocked');
   const stale = evidence.filter((item) => item.stale || item.evidence_state === 'stale');
   const selectedEvidence = evidence.find((item) => item.artifact_ref?.includes(activeTab?.resource_id ?? '')) ?? evidence[0];
+  const hilHold = releaseProjection?.holds.find((hold) => hold.hold_id === 'hil_review');
 
   return (
     <aside className="wb-inspector" aria-label="Evidence inspector">
@@ -60,12 +61,27 @@ const EvidenceInspector: React.FC<{
                 <dl className="wb-inspector-list wb-release-projection">
                   <div><dt>Delivery gate</dt><dd>{releaseProjection.delivery_status_gate.status}</dd></div>
                   <div><dt>Delivery status</dt><dd>{releaseProjection.delivery_status}</dd></div>
-                  <div><dt>Blocked prerequisites</dt><dd>{releaseProjection.blocked_prerequisites.length}</dd></div>
+                  <div><dt>HIL review</dt><dd><StatusPill status={holdEvidenceState(hilHold?.status)} label={holdStatusLabel(hilHold?.status)} /></dd></div>
+                  {hilHold?.reason && <div><dt>HIL reason</dt><dd>{hilHold.reason}</dd></div>}
                   {releaseProjection.delivery_status_gate.error_code && <div><dt>Gate code</dt><dd className="wb-mono">{releaseProjection.delivery_status_gate.error_code}</dd></div>}
                 </dl>
               ) : <p>Release projection is unavailable.</p>}
             </div>
           </div>
+          {releaseProjection && releaseProjection.blocked_prerequisites.length > 0 && (
+            <div className="wb-prerequisite-list">
+              <strong>Blocked prerequisites</strong>
+              <ul>
+                {releaseProjection.blocked_prerequisites.map((hold) => (
+                  <li key={hold.hold_id}>
+                    <span>{hold.hold_id.replaceAll('_', ' ')}</span>
+                    <StatusPill status={holdEvidenceState(hold.status)} label={holdStatusLabel(hold.status)} />
+                    {hold.reason && <small>{hold.reason}</small>}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
         </section>
       </div>
     </aside>
@@ -75,6 +91,19 @@ const EvidenceInspector: React.FC<{
 function artifactHref(path: string): string {
   const normalized = path.replace(/\\/g, '/').replace(/^\/?api\/artifacts\//, '').replace(/^\/?artifacts\//, '').replace(/^\//, '');
   return `/api/artifacts/${normalized.split('/').map(encodeURIComponent).join('/')}`;
+}
+
+function holdStatusLabel(status?: string): string {
+  if (!status) return 'unavailable';
+  if (status === 'human_confirmed') return 'confirmed';
+  if (status === 'human_action_required') return 'action required';
+  return status.replaceAll('_', ' ');
+}
+
+function holdEvidenceState(status?: string): 'verified' | 'blocked' | 'stale' {
+  if (status === 'human_confirmed') return 'verified';
+  if (status === 'stale') return 'stale';
+  return 'blocked';
 }
 
 export default EvidenceInspector;

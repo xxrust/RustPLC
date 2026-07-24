@@ -169,6 +169,11 @@ const WorkbenchShell: React.FC = () => {
   }, [physicalEvidenceQuery.data?.point_checks.points, wiringQuery.data?.points]);
   const verification = useMemo(() => verificationQuery.data ?? [], [verificationQuery.data]);
   const evidence = useMemo(() => evidenceQuery.data ?? [], [evidenceQuery.data]);
+  const hilHold = useMemo(
+    () => releaseProjectionQuery.data?.holds.find((hold) => hold.hold_id === 'hil_review')
+      ?? holdProjectionQuery.data?.holds.find((hold) => hold.hold_id === 'hil_review'),
+    [holdProjectionQuery.data?.holds, releaseProjectionQuery.data?.holds],
+  );
   const problemsProjection = useMemo<WorkspaceProblemsProjection>(
     () => problemsQuery.data ?? { count: 0, partial: false, problems: [] },
     [problemsQuery.data],
@@ -524,7 +529,7 @@ const WorkbenchShell: React.FC = () => {
         <span>{project?.stale ? <StatusPill status="stale" /> : 'Workspace current'}</span>
         <span>Agent {runQuery.data?.status ?? runs[0]?.status ?? 'idle'}</span>
         <span>Verification {verification.filter((stage) => stage.status === 'verified').length}/{verification.length}</span>
-        <span>HIL {evidence.some((item) => item.evidence_state === 'observed') ? 'evidence present' : 'unobserved'}</span>
+        <span title={hilHold?.reason}>HIL {formatHoldStatus(hilHold)}</span>
         <span className="wb-statusbar__right">Holds {project?.human_holds?.filter((hold) => hold.status !== 'confirmed').length ?? 0} open</span>
       </footer>
       {paletteOpen && (
@@ -567,6 +572,15 @@ function normalizeHoldProjection(hold: HoldProjectionItem): HumanHold {
     reason: hold.reason,
     blocker_ids: hold.blocker_ids,
   };
+}
+
+function formatHoldStatus(hold?: HoldProjectionItem): string {
+  if (!hold) return 'unavailable';
+  switch (hold.status) {
+    case 'human_confirmed': return 'confirmed';
+    case 'human_action_required': return 'action required';
+    default: return hold.status;
+  }
 }
 
 interface EditorGroupProps {
