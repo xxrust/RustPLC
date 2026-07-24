@@ -560,6 +560,11 @@ graph TB
 
 完整文档分为三个层次：
 
+### 操作手册
+
+- [RustPLC 操作说明（HTML 图文版）](docs/guides/rustplc-user-guide.html)
+- [RustPLC 操作说明（Markdown 版）](docs/guides/rustplc-user-guide.md)
+
 ### 架构与开发指南
 
 | 文档 | 用途 |

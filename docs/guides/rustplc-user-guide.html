@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>RustPLC 操作说明</title>
+  <style>
+    :root { color-scheme: dark; --bg:#0f1115; --surface:#171a21; --surface-2:#1d222c; --border:#303744; --text:#e8edf5; --muted:#a9b3c2; --cyan:#57d6ff; --blue:#83b9ff; --green:#70d89b; --amber:#f2bd67; --red:#ff7d88; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--bg); color:var(--text); font:15px/1.65 system-ui,-apple-system,"Segoe UI","Microsoft YaHei",sans-serif; }
+    a { color:var(--cyan); }
+    .shell { max-width:1240px; margin:0 auto; padding:28px 28px 72px; }
+    header { border-bottom:1px solid var(--border); padding:12px 0 28px; margin-bottom:26px; }
+    .eyebrow { color:var(--cyan); font:12px/1.2 "Cascadia Code","JetBrains Mono",monospace; letter-spacing:.08em; text-transform:uppercase; }
+    h1 { margin:8px 0 6px; font-size:32px; line-height:1.2; letter-spacing:0; }
+    h2 { margin:38px 0 12px; font-size:22px; line-height:1.25; }
+    h3 { margin:24px 0 8px; font-size:17px; }
+    p { max-width:78ch; }
+    .lede { color:var(--muted); font-size:17px; max-width:78ch; }
+    .callout { border:1px solid var(--border); background:var(--surface); padding:16px 18px; border-radius:6px; margin:18px 0; }
+    .callout strong { color:var(--cyan); }
+    .grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; }
+    .card { background:var(--surface); border:1px solid var(--border); border-radius:6px; padding:15px; }
+    .card h3 { margin-top:0; color:var(--blue); }
+    pre { overflow:auto; background:#0a0c10; border:1px solid var(--border); border-radius:6px; padding:16px; color:#d7e3f5; font:13px/1.55 "Cascadia Code","JetBrains Mono",Consolas,monospace; }
+    code { font-family:"Cascadia Code","JetBrains Mono",Consolas,monospace; color:#d9e6ff; }
+    table { width:100%; border-collapse:collapse; margin:12px 0 18px; background:var(--surface); }
+    th,td { border:1px solid var(--border); padding:9px 10px; text-align:left; vertical-align:top; }
+    th { background:var(--surface-2); color:var(--cyan); font-weight:600; }
+    figure { margin:22px 0; }
+    figure img { display:block; width:100%; border:1px solid var(--border); border-radius:6px; background:#0a0c10; }
+    figcaption { color:var(--muted); font-size:13px; margin-top:7px; }
+    .steps { counter-reset:step; list-style:none; padding:0; }
+    .steps li { counter-increment:step; position:relative; padding:10px 12px 10px 46px; border-left:1px solid var(--border); }
+    .steps li::before { content:counter(step); position:absolute; left:-14px; top:10px; width:26px; height:26px; border:1px solid var(--cyan); border-radius:50%; background:var(--bg); color:var(--cyan); text-align:center; line-height:24px; font-weight:700; }
+    .status-pass { color:var(--green); } .status-blocked { color:var(--amber); } .status-fail { color:var(--red); }
+    .small { color:var(--muted); font-size:13px; }
+    .footer { border-top:1px solid var(--border); margin-top:44px; padding-top:18px; color:var(--muted); font-size:13px; }
+    @media (max-width:800px) { .shell { padding:20px 16px 56px; } .grid { grid-template-columns:1fr; } h1 { font-size:27px; } }
+    @media print { body { background:#fff; color:#111; } .shell { max-width:none; padding:0; } .card,.callout,table,pre { color:#111; background:#fff; border-color:#bbb; } a { color:#0645ad; } th { color:#111; background:#eee; } figure img { max-height:520px; object-fit:contain; } }
+  </style>
+</head>
+<body>
+<main class="shell">
+  <header>
+    <div class="eyebrow">RustPLC / User Guide / 2026</div>
+    <h1>RustPLC 操作说明</h1>
+    <p class="lede">这份手册说明如何创建项目、编写 source、运行验证和仿真，再通过 Cursor / VS Code 式交付工作台完成证据审查、接线点检、HIL 检查和人工放行。</p>
+    <div class="callout"><strong>重要边界：</strong>编译器验证证明源码语义满足当前模型。真实接线、现场测量、目标硬件时序、HIL 和安全签字仍由具备责任的人员完成。</div>
+  </header>
+
+  <h2>1. 一条完整路径</h2>
+  <pre>system intent -> PLC source -> parser/semantic/IR -> verification
+                                             |
+                 +---------------------------+---------------------------+
+                 |                           |                           |
+              SIL trace                 ST / firmware              delivery evidence
+                                                                             |
+                                           wiring -> HIL -> human release</pre>
+  <div class="grid">
+    <div class="card"><h3>CLI 工程入口</h3><p>创建 source、生成 scenario、运行 <code>project-check</code>、仿真、导出 ST 或 release bundle。</p></div>
+    <div class="card"><h3>Web 审查入口</h3><p>选择 module / station / line，阅读 source、run、Problems、Tests、Topology 和 Evidence。</p></div>
+    <div class="card"><h3>人工责任入口</h3><p>完成 wiring point checks、物理观察、safety review、HIL review 和 release approval。</p></div>
+  </div>
+
+  <h2>2. 安装和启动</h2>
+  <pre><code>git clone https://github.com/xxrust/RustPLC.git
+cd RustPLC
+cargo build --release
+
+npm --prefix web-ui install
+npm --prefix web-ui run build</code></pre>
+  <p>CLI 帮助：</p>
+  <pre><code>cargo run --release --bin rust_plc -- --help
+cargo run --release --bin rust_plc -- help project-check</code></pre>
+  <p>源码仓根目录使用 <code>cargo run --release --bin rust_plc -- ...</code>。已安装二进制使用 <code>rust_plc ...</code>。</p>
+
+  <h2>3. 创建项目</h2>
+  <ol class="steps">
+    <li>判断交付层：可复用机构选择 <code>module</code>，独立工艺单元选择 <code>station</code>，多工站集成选择 <code>line</code>。</li>
+    <li>为小项目创建单文件 scaffold，复杂项目使用 structured fragments。</li>
+    <li>填写 <code>plc/main.system.md</code>，再填写 topology、process model、task/step、fault、scenario 和 intent contract。</li>
+  </ol>
+  <pre><code>cargo run --release --bin rust_plc -- new station_press \
+  --layout structured-fragments \
+  --delivery-layer station</code></pre>
+  <pre>station_press/
+  plc/main.system.md
+  rustplc.bundle.toml
+  00_topology/   process_model/
+  01_init/       02_process/
+  03_constraints/ 04_faults/
+  05_supervision/ 06_manual/ 07_hmi/
+  config/state_proof.toml
+  scenarios/     out/</pre>
+
+  <h2>4. CLI 验证</h2>
+  <h3>生成 scenario</h3>
+  <pre><code>rust_plc scenario-init rustplc.bundle.toml \
+  --out scenarios/nominal/normal.yaml --preset normal</code></pre>
+  <p>补充普通 PLC 输入、传感器、复位和人工事件。真实场景不能只发送 start pulse。</p>
+  <h3>运行项目门禁</h3>
+  <pre><code>rust_plc project-check rustplc.bundle.toml \
+  --scenario scenarios/nominal/normal.yaml \
+  --out-dir out/project-check/normal \
+  --require-process-model --output human</code></pre>
+  <p><code>project-check</code> 会组织 compile/verification、sequence-lint、state-proof-check、process-model-check、scenario-doctor、no-board-gate，以及显式提供 contract/evidence 时的 intent alignment。</p>
+  <h3>仿真、gate 和输出</h3>
+  <pre><code>rust_plc sim-plc rustplc.bundle.toml \
+  --scenario scenarios/nominal/normal.yaml \
+  --out out/sim/normal/trace.jsonl
+
+rust_plc no-board-gate rustplc.bundle.toml \
+  --scenario scenarios/nominal/normal.yaml \
+  --out-dir out/gate/normal --output human
+
+rust_plc gen-st rustplc.bundle.toml --out out/codegen/st/main.st
+
+rust_plc release-bundle rustplc.bundle.toml \
+  --scenario scenarios/nominal/normal.yaml \
+  --out-dir out/release/normal</code></pre>
+
+  <h2>5. Web 工作台</h2>
+  <pre><code>cargo run -p web-server</code></pre>
+  <p>浏览器打开 <a href="http://127.0.0.1:8080">http://127.0.0.1:8080</a>。loopback 演示账号密码均为 <code>password</code>：<code>engineer</code>、<code>electrical</code>、<code>commissioning</code>、<code>safety</code>、<code>release</code>、<code>admin</code>。</p>
+
+  <figure>
+    <img src="../../web-ui/artifacts/workbench-overview-1440x900.png" alt="RustPLC Web 工作台项目总览，显示 Explorer、四段责任链、Problems 面板和 Evidence Inspector">
+    <figcaption>图 1：Project Overview。首屏直接显示 Agent source authoring、Compiler verification、Wiring and point checks、Release authorization 四段责任链。</figcaption>
+  </figure>
+
+  <h3>5.1 选择项目和阅读总览</h3>
+  <ol class="steps">
+    <li>左侧 Explorer 选择 <code>module</code>、<code>station</code> 或 <code>line</code> 项目。</li>
+    <li>在 Project Overview 确认 source revision、run ID、delivery status 和 release boundary。</li>
+    <li>从四段责任链判断下一位责任人：Agent、编译器、接线/调试人员、安全审查人或放行人。</li>
+    <li>从右侧 Evidence Inspector 查看 artifact 来源、digest、责任归属和 blocked 原因。</li>
+  </ol>
+  <p><code>Ctrl+K</code> 打开 command palette。Explorer 可打开 Source Bundle、Topology、Wiring、Verification、Run Timeline、Trace Replay；底部 panel 提供 Problems、Tests、Verification、Terminal 和 Audit Log。</p>
+
+  <h3>5.2 处理诊断和 run 证据</h3>
+  <figure>
+    <img src="../../web-ui/artifacts/workbench-artifact-problem-1440x900.png" alt="RustPLC Web 工作台打开 anomalies.json 和 Problems 面板">
+    <figcaption>图 2：问题和 artifact 详情。点击代码或深链可定位到具体报告、run 或源文件。</figcaption>
+  </figure>
+  <p>先看 stage、diagnostic code、source reference 和 current run ID。<code>blocked</code> 表示前置条件缺失，<code>fail</code> 表示工具或项目发现错误，<code>not_proven</code> 表示证据尚未证明命题，<code>stale</code> 表示证据属于旧 revision/run。</p>
+
+  <h3>5.3 接线和点检</h3>
+  <figure>
+    <img src="../../web-ui/artifacts/workbench-wiring-1440x900.png" alt="RustPLC Web 工作台 Wiring and Point Checks 页面，显示 PLC channel、semantic alias、terminal、safe state 和 wire ID">
+    <figcaption>图 3：Wiring and Point Checks。表格显示编译器映射，观察记录属于人工拥有的独立证据。</figcaption>
+  </figure>
+  <ol class="steps">
+    <li>按 alias、PLC channel、terminal 和 wire ID 对照电气图。</li>
+    <li>由电气或调试责任人完成实际接线和端子检查。</li>
+    <li>点击点位的 evidence action，记录 observation，附照片、测量值或仪表记录。</li>
+    <li>复核 safe state、信号方向和 wiring diagnostic。</li>
+  </ol>
+  <div class="callout"><strong>现场边界：</strong>浏览器测试或仿真产生的 synthetic observation 不是实际接线证明。真实点检必须来自现场责任人和可追溯的物理证据。</div>
+
+  <h3>5.4 查看 Agent 完整度</h3>
+  <figure>
+    <img src="../../web-ui/artifacts/workbench-agent-audit-1440x900.png" alt="RustPLC Web 工作台 Agent Run Timeline 页面，显示文件归因、materialization execution 和 anomaly 数量">
+    <figcaption>图 4：Agent Run Timeline。源码创作归因和物化执行归因分开显示。</figcaption>
+  </figure>
+  <p>当 <code>source_authoring_verdict=not_proven</code> 时，说明当前证据证明了物化/执行过程，但没有证明源码最初由 Agent 无人干预创作。这个状态应保留，不能用 harness pass 覆盖。</p>
+
+  <h2>6. HIL 和人工放行</h2>
+  <pre>compile/verification -> scenario/no-board -> wiring point checks
+                              -> safety review -> HIL review -> release approval</pre>
+  <table>
+    <thead><tr><th>责任链节点</th><th>拥有者</th><th>完成条件</th></tr></thead>
+    <tbody>
+      <tr><td>Agent source authoring</td><td>Agent / engineer oversight</td><td>source provenance 可追溯</td></tr>
+      <tr><td>Compiler verification</td><td>RustPLC</td><td>当前 run 的 compile、verification、scenario 和 gate 证据齐全</td></tr>
+      <tr><td>Wiring and point checks</td><td>Electrical / commissioning</td><td>逐点接线、safe state、照片/测量证据完成</td></tr>
+      <tr><td>Release authorization</td><td>Safety reviewer / release approver</td><td>前置 holds、HIL 和当前 revision 签字满足要求</td></tr>
+    </tbody>
+  </table>
+  <p>HIL 状态直接来自 <code>hil_review</code> hold。普通 observed evidence 不会自动转成 HIL pass。release approval 还要求 delivery status 为 <code>pass</code> 或 <code>current</code>，并且前置签字属于当前 revision。</p>
+
+  <h2>7. 状态处理</h2>
+  <table>
+    <thead><tr><th>状态</th><th>含义</th><th>下一步</th></tr></thead>
+    <tbody>
+      <tr><td class="status-pass">pass / verified</td><td>当前阶段有可追溯通过证据</td><td>保留 artifact，继续下一阶段</td></tr>
+      <tr><td class="status-blocked">blocked</td><td>前置条件或人工门禁缺失</td><td>补齐指定前置条件</td></tr>
+      <tr><td class="status-fail">fail</td><td>工具或项目发现错误</td><td>修复 source/model/scenario 后重跑</td></tr>
+      <tr><td>pending</td><td>人工动作尚未完成</td><td>由对应角色执行点检、审查或签字</td></tr>
+      <tr><td>not_proven</td><td>证据不足以证明命题</td><td>补 provenance、trace 或现场证据</td></tr>
+      <tr><td>stale</td><td>证据对应旧 revision/run</td><td>针对当前 revision 重新运行</td></tr>
+    </tbody>
+  </table>
+
+  <h2>8. 交付前清单</h2>
+  <div class="grid">
+    <div class="card"><h3>Source</h3><p>system contract、topology、process model、task/step、fault、scenario 和 intent contract 已完成。</p></div>
+    <div class="card"><h3>Compiler</h3><p>project-check、state proof、scenario、no-board 和 intent alignment 结果已保存。</p></div>
+    <div class="card"><h3>Human</h3><p>接线点检、HIL、safety review、release approval 和现场安全链检查已完成。</p></div>
+  </div>
+  <div class="callout"><strong>最后判断：</strong>RustPLC 的交付状态由项目证据决定。编译成功是必要条件，物理接线、HIL 和人工放行是独立的完成条件。</div>
+
+  <div class="footer">相关文件：<a href="rustplc-user-guide.md">Markdown companion</a> · <a href="../reports/autonomous_plc_delivery_workbench_selftest.html">工作台自测报告</a> · <a href="https://github.com/xxrust/RustPLC">RustPLC GitHub</a></div>
+</main>
+</body>
+</html>
