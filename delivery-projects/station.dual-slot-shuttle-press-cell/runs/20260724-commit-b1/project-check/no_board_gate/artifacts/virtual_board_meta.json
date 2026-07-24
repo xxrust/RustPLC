@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "source_plc": "delivery-projects/station.dual-slot-shuttle-press-cell/source/rustplc.bundle.toml",
+  "scenario_path": "delivery-projects/station.dual-slot-shuttle-press-cell/source/scenarios/nominal_two_part.yaml",
+  "generated_at": "2026-07-24T00:36:05.2585598Z",
+  "tick_ms": 10,
+  "duration_ticks": 2000
+}

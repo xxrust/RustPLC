@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "command": "scenario-doctor",
+  "output": "json",
+  "plc": "delivery-projects/station.dual-slot-shuttle-press-cell/source/rustplc.bundle.toml",
+  "scenario": "delivery-projects/station.dual-slot-shuttle-press-cell/source/scenarios/nominal_two_part.yaml",
+  "status": "pass",
+  "error_count": 0,
+  "warn_count": 0,
+  "issues": []
+}

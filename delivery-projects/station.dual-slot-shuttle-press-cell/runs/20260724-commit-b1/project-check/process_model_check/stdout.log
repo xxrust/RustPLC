@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "command": "process-model-check",
+  "output": "json",
+  "source_plc": "delivery-projects/station.dual-slot-shuttle-press-cell/source/rustplc.bundle.toml",
+  "model_path": "delivery-projects/station.dual-slot-shuttle-press-cell/source\\process_model\\process_operation_model.toml",
+  "status": "fail",
+  "expected_operation_count": 10,
+  "actual_operation_count": 10,
+  "issue_count": 1,
+  "issues": [
+    {
+      "code": "OP-003",
+      "operation_id": "press_process.mark_carrier_pressed.op62",
+      "message": "split/merge/transform-carrier operation is present in process_model but admission/refinement semantics are not fully modeled yet"
+    }
+  ]
+}

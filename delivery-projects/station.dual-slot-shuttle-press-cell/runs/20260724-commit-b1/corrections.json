@@ -1,0 +1,147 @@
+{
+    "schema_version":  1,
+    "project_id":  "station.dual_slot_shuttle_press_cell",
+    "run_id":  "20260724-commit-b1",
+    "source_commit":  "5b0bbbbe301673447d1e9c3819dcdebaedc303f5",
+    "correction_count":  23,
+    "records":  [
+                    {
+                        "correction_id":  "COR-001",
+                        "status":  "verified",
+                        "summary":  "Expanded state-proof residual baseline coverage.",
+                        "anomaly_id":  null
+                    },
+                    {
+                        "correction_id":  "COR-002",
+                        "status":  "verified",
+                        "summary":  "Added axis enable before motion.",
+                        "anomaly_id":  null
+                    },
+                    {
+                        "correction_id":  "COR-003",
+                        "status":  "verified",
+                        "summary":  "Removed unsupported rejected-workpiece contract claims.",
+                        "anomaly_id":  null
+                    },
+                    {
+                        "correction_id":  "COR-004",
+                        "status":  "verified",
+                        "summary":  "Separated transfer and mount to preserve token ownership.",
+                        "anomaly_id":  null
+                    },
+                    {
+                        "correction_id":  "COR-005",
+                        "status":  "verified",
+                        "summary":  "Removed unjustified workpiece-operation serialization.",
+                        "anomaly_id":  null
+                    },
+                    {
+                        "correction_id":  "COR-006",
+                        "status":  "verified_with_blocker",
+                        "summary":  "Completed source process operations while retaining the OP-003 checker gap.",
+                        "anomaly_id":  null
+                    },
+                    {
+                        "correction_id":  "COR-007",
+                        "status":  "verified",
+                        "summary":  "Mapped axis enable to an executable controller output.",
+                        "anomaly_id":  null
+                    },
+                    {
+                        "correction_id":  "COR-008",
+                        "status":  "verified",
+                        "summary":  "Added startup relative-motion proof before absolute moves.",
+                        "anomaly_id":  null
+                    },
+                    {
+                        "correction_id":  "COR-009",
+                        "status":  "verified",
+                        "summary":  "Replaced ignored placeholders with compiled fragments.",
+                        "anomaly_id":  null
+                    },
+                    {
+                        "correction_id":  "COR-010",
+                        "status":  "verified",
+                        "summary":  "Added explicit successors and stopped fault-branch fallthrough.",
+                        "anomaly_id":  null
+                    },
+                    {
+                        "correction_id":  "COR-011",
+                        "status":  "verified",
+                        "summary":  "Isolated illegal-start scenario causality.",
+                        "anomaly_id":  null
+                    },
+                    {
+                        "correction_id":  "COR-012",
+                        "status":  "verified_with_schema_blocker",
+                        "summary":  "Added trace-backed intent evidence while retaining the external-reinit schema gap.",
+                        "anomaly_id":  null
+                    },
+                    {
+                        "correction_id":  "COR-013",
+                        "status":  "verified",
+                        "anomaly_id":  "ANOM-002",
+                        "summary":  "Hardened the original runner for Windows PowerShell 5."
+                    },
+                    {
+                        "correction_id":  "COR-014",
+                        "status":  "verified",
+                        "anomaly_id":  "ANOM-001",
+                        "summary":  "Expanded plc-gen public syntax guidance after seven trials."
+                    },
+                    {
+                        "correction_id":  "COR-015",
+                        "status":  "verified",
+                        "summary":  "Corrected carrier effect syntax introduced during skill repair.",
+                        "anomaly_id":  null
+                    },
+                    {
+                        "correction_id":  "COR-016",
+                        "status":  "verified",
+                        "summary":  "Separated harness execution success from delivery acceptance.",
+                        "anomaly_id":  null
+                    },
+                    {
+                        "correction_id":  "COR-017",
+                        "status":  "verified",
+                        "summary":  "Made the operator front-door a persistent single-task classifier loop.",
+                        "anomaly_id":  null
+                    },
+                    {
+                        "correction_id":  "COR-018",
+                        "status":  "verified_with_integration_blockers",
+                        "summary":  "Added executable residual/manual handling and PLC-internal HMI code producers.",
+                        "anomaly_id":  null
+                    },
+                    {
+                        "correction_id":  "COR-019",
+                        "status":  "verified",
+                        "summary":  "Replaced invalid int-code and compound-wait suggestions with compiling forms.",
+                        "anomaly_id":  null
+                    },
+                    {
+                        "correction_id":  "COR-020",
+                        "status":  "verified",
+                        "summary":  "Removed invalid carrier transfer shorthand from plc-gen guidance.",
+                        "anomaly_id":  null
+                    },
+                    {
+                        "correction_id":  "COR-021",
+                        "status":  "verified",
+                        "summary":  "Removed the blocking-wait plus same-step goto gate bypass.",
+                        "anomaly_id":  null
+                    },
+                    {
+                        "correction_id":  "COR-022",
+                        "status":  "verified",
+                        "summary":  "Corrected acceptance causality and evidence-freezing weaknesses.",
+                        "anomaly_id":  null
+                    },
+                    {
+                        "correction_id":  "COR-023",
+                        "status":  "verified",
+                        "anomaly_id":  "ANOM-002",
+                        "summary":  "Fixed input-manifest type handling and path-filter false positives."
+                    }
+                ]
+}

@@ -1,0 +1,53 @@
+{
+    "schema_version":  1,
+    "project_id":  "module.axis_move_blocking_baseline",
+    "run_id":  "20260724-commit-b1",
+    "source_commit":  "5b0bbbbe301673447d1e9c3819dcdebaedc303f5",
+    "dirty_worktree":  false,
+    "changed_paths":  [
+
+                      ],
+    "runner_version":  "delivery-fixture-materializer-v4",
+    "compiler_version":  "0.1.0",
+    "file_count":  6,
+    "implementation_file_count":  4,
+    "missing_required":  [
+
+                         ],
+    "path_uniqueness_required":  true,
+    "digest_policy":  "sha256 over UTF-8 text with CRLF and CR normalized to LF",
+    "source_set_sha256":  "68f1261c8b82f60f9d1e51a8f23715c7c0081f68b61e18afd779bf2b58c80129",
+    "input_set_sha256":  "4a274d5c6ba88502f374d3e5a587fe7bd88abb02b1d225d43655ad2b5b9cb74f",
+    "files":  [
+                  {
+                      "path":  "delivery-project.config.json",
+                      "size_bytes":  2372,
+                      "sha256":  "c2dfe2ca17f1db9c87d42ef2d813c702d415cde0c37192764a87c23f595b1a28"
+                  },
+                  {
+                      "path":  "review/completeness.md",
+                      "size_bytes":  473,
+                      "sha256":  "1e5e618560734fb366a7c473bdd76857b0d9710512efbb6fbce1e30418736c87"
+                  },
+                  {
+                      "path":  "source/plc/main.plc",
+                      "size_bytes":  1233,
+                      "sha256":  "0f9e6d8401a9cb98a9dbb28db4d040ded16dddcd77773003b2edac28a8a7cce4"
+                  },
+                  {
+                      "path":  "source/plc/main.system.md",
+                      "size_bytes":  1201,
+                      "sha256":  "6cd8d5ab3a4bec471c87c5bbe605574d05a7f6d062c9897c1993ac6545e6d992"
+                  },
+                  {
+                      "path":  "source/scenarios/normal.yaml",
+                      "size_bytes":  704,
+                      "sha256":  "47be06e4bac1488f77d1b4b90e118a5009da05a2298b851a9cbbe46ffecfd0e8"
+                  },
+                  {
+                      "path":  "source/scenarios/timeout.yaml",
+                      "size_bytes":  705,
+                      "sha256":  "b468d6cf0e419eb153d1559442354e98edf8e1df27ef461098fefd7cdebf8260"
+                  }
+              ]
+}

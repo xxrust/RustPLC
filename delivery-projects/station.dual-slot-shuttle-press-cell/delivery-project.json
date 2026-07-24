@@ -1,24 +1,27 @@
 {
     "schema_version":  1,
     "project_id":  "station.dual_slot_shuttle_press_cell",
-    "title":  "Dual-slot Shuttle Press Cell Complex Self-test",
+    "title":  "Dual-slot Shuttle Press Cell",
     "delivery_layer":  "station",
-    "source_commit":  "0474cfb54809189bd42055f58b8a565a1b6498a8",
+    "source_commit":  "5b0bbbbe301673447d1e9c3819dcdebaedc303f5",
     "source_entry":  "source/rustplc.bundle.toml",
     "system_contract":  "source/plc/main.system.md",
-    "delivery_status":  "blocked",
+    "scenario_roots":  [
+                           "source/scenarios"
+                       ],
+    "delivery_status":  "failed",
     "artifact_roots":  {
                            "agent_runs":  "runs",
-                           "verification":  "runs/20260723-172826",
+                           "verification":  "runs/20260724-commit-b1",
                            "wiring":  "wiring",
-                           "execution":  "runs/20260723-172826",
+                           "execution":  "runs/20260724-commit-b1/project-check/no_board_gate/artifacts",
                            "release":  "release"
                        },
     "evidence_summary":  {
-                             "acceptance_pass":  12,
-                             "acceptance_blocked":  5,
-                             "acceptance_fail":  0,
-                             "strict_acceptance_percent":  70.6,
+                             "acceptance_pass":  9,
+                             "acceptance_blocked":  3,
+                             "acceptance_fail":  1,
+                             "strict_acceptance_percent":  69.2,
                              "implementation_completeness_percent":  84
                          },
     "evidence_bindings":  {
@@ -29,10 +32,10 @@
                                                                   "value":  "00be1df58f2c7861522a9b1cede9c4a928670fa31025f9427cf5fcedc96df056",
                                                                   "normalization":  "utf8_lf"
                                                               },
-                                                   "source_commit":  "0474cfb54809189bd42055f58b8a565a1b6498a8",
+                                                   "source_commit":  "5b0bbbbe301673447d1e9c3819dcdebaedc303f5",
                                                    "freshness":  {
                                                                      "status":  "input_snapshot",
-                                                                     "basis":  "Project-local bundle in the committed source snapshot."
+                                                                     "basis":  "Project-local source entry included in the same-run input manifest."
                                                                  }
                                                },
                               "system_contract":  {
@@ -42,23 +45,23 @@
                                                                      "value":  "10666b54a02cd58327c95f460a789e91379d3bbdde2898a38d0a818feed959a1",
                                                                      "normalization":  "utf8_lf"
                                                                  },
-                                                      "source_commit":  "0474cfb54809189bd42055f58b8a565a1b6498a8",
+                                                      "source_commit":  "5b0bbbbe301673447d1e9c3819dcdebaedc303f5",
                                                       "freshness":  {
                                                                         "status":  "input_snapshot",
-                                                                        "basis":  "Project-local system contract."
+                                                                        "basis":  "Project-local system contract included in the source snapshot."
                                                                     }
                                                   },
                               "authoritative_result":  {
-                                                           "artifact_ref":  "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260723-172826/result.json",
+                                                           "artifact_ref":  "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260724-commit-b1/result.json",
                                                            "digest":  {
                                                                           "algorithm":  "sha256",
-                                                                          "value":  "f0829779d1a0294dd580fef80e5958908a38d09c57790f7c7eebbd257abe3fd1",
+                                                                          "value":  "b1c374d0579af988df68a3985c5063283f5f7b08555610d73258178f9817eee1",
                                                                           "normalization":  "utf8_lf"
                                                                       },
-                                                           "source_commit":  "0474cfb54809189bd42055f58b8a565a1b6498a8",
+                                                           "source_commit":  "5b0bbbbe301673447d1e9c3819dcdebaedc303f5",
                                                            "freshness":  {
                                                                              "status":  "same_run",
-                                                                             "basis":  "Normalized committed result for the final corrected harness run."
+                                                                             "basis":  "Current materialization result."
                                                                          }
                                                        },
                               "reviewed_completeness":  {
@@ -68,67 +71,101 @@
                                                                            "value":  "2dbeb2b2f105c57b336afdd876f110737a59ff96f9b61e1958f898d182f25bb9",
                                                                            "normalization":  "utf8_lf"
                                                                        },
-                                                            "source_commit":  "0474cfb54809189bd42055f58b8a565a1b6498a8",
+                                                            "source_commit":  "5b0bbbbe301673447d1e9c3819dcdebaedc303f5",
                                                             "freshness":  {
                                                                               "status":  "reviewed_post_run",
                                                                               "basis":  "Committed bounded completeness review."
                                                                           }
-                                                        }
+                                                        },
+                              "geometry_export":  {
+                                                      "artifact_ref":  "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260724-commit-b1/compile/geometry-export-status.json",
+                                                      "digest":  {
+                                                                     "algorithm":  "sha256",
+                                                                     "value":  "8055286ae787ee4a21c4454d695a5f279cf76c7438fa0b6e244257400a1d6485",
+                                                                     "normalization":  "utf8_lf"
+                                                                 },
+                                                      "source_commit":  "5b0bbbbe301673447d1e9c3819dcdebaedc303f5",
+                                                      "freshness":  {
+                                                                        "status":  "same_run",
+                                                                        "basis":  "Current-run geometry-export status; a failed export remains a blocker and never substitutes an empty graph."
+                                                                    }
+                                                  },
+                              "geometry":  {
+                                               "artifact_ref":  "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260724-commit-b1/compile/geometry.json",
+                                               "digest":  {
+                                                              "algorithm":  "sha256",
+                                                              "value":  "3b1743963cf288c634b9a98a72c5c58c382709e8893001faf0e4e2327541727d",
+                                                              "normalization":  "utf8_lf"
+                                                          },
+                                               "source_commit":  "5b0bbbbe301673447d1e9c3819dcdebaedc303f5",
+                                               "freshness":  {
+                                                                 "status":  "same_run",
+                                                                 "basis":  "Compiler-owned semantic-twin geometry from this run."
+                                                             }
+                                           }
                           },
     "fixtures":  {
                      "api_run_result":  {
-                                            "fixture_ref":  "runs/20260723-172826/result.json",
+                                            "fixture_ref":  "runs/20260724-commit-b1/result.json",
                                             "digest":  {
                                                            "algorithm":  "sha256",
-                                                           "value":  "f0829779d1a0294dd580fef80e5958908a38d09c57790f7c7eebbd257abe3fd1",
+                                                           "value":  "b1c374d0579af988df68a3985c5063283f5f7b08555610d73258178f9817eee1",
                                                            "normalization":  "utf8_lf"
                                                        }
                                         },
                      "provenance":  {
-                                        "fixture_ref":  "runs/20260723-172826/provenance.json",
+                                        "fixture_ref":  "runs/20260724-commit-b1/provenance.json",
                                         "digest":  {
                                                        "algorithm":  "sha256",
-                                                       "value":  "d9612d80d28ec9d50c89126d3cb7ed8a8a6f1c92b2af7d9b909ee95ac76c1235",
+                                                       "value":  "c74753c43413e36a22d29cc8911a17396f3cda125e74fbbd074c41a20ec82c64",
                                                        "normalization":  "utf8_lf"
                                                    }
                                     },
                      "input_manifest":  {
-                                            "fixture_ref":  "runs/20260723-172826/input-manifest.json",
+                                            "fixture_ref":  "runs/20260724-commit-b1/input-manifest.json",
                                             "digest":  {
                                                            "algorithm":  "sha256",
-                                                           "value":  "129316a6c9b79741bc4f722fad7dde8d791fe31ef4f678318f70133e21bf4fb4",
+                                                           "value":  "d8e23032845c5b63701341ce34f9a99bf4f66a2291d7c5cc5fed683cbc6fe046",
                                                            "normalization":  "utf8_lf"
                                                        }
                                         },
                      "anomalies":  {
-                                       "fixture_ref":  "runs/20260723-172826/anomalies.json",
+                                       "fixture_ref":  "runs/20260724-commit-b1/anomalies.json",
                                        "digest":  {
                                                       "algorithm":  "sha256",
-                                                      "value":  "a80a4c097b244556cc4f42816da4c0ec373d01fc3540bbd238f0f85f9eddc50c",
+                                                      "value":  "be14644efea8e1296acb46565b433dd04c9c2e0877a5bb89c6727bd5b6afc2bc",
                                                       "normalization":  "utf8_lf"
                                                   }
                                    },
                      "corrections":  {
-                                         "fixture_ref":  "runs/20260723-172826/corrections.json",
+                                         "fixture_ref":  "runs/20260724-commit-b1/corrections.json",
                                          "digest":  {
                                                         "algorithm":  "sha256",
-                                                        "value":  "b3d1b33891d75ecd59e5b213ec5bdd891c193456abb0d6008304bc7501221839",
+                                                        "value":  "d0ec1269529d1ea57f22698eee69f79fe93308b8b0161cdea11f78075bfe820c",
                                                         "normalization":  "utf8_lf"
                                                     }
                                      },
                      "compiler_stages":  {
-                                             "fixture_ref":  "runs/20260723-172826/compiler-stages.json",
+                                             "fixture_ref":  "runs/20260724-commit-b1/compiler-stages.json",
                                              "digest":  {
                                                             "algorithm":  "sha256",
-                                                            "value":  "a399aff2b70ac41d3310c646213654a362939f4f6d3e9a0490ce86055db0b735",
+                                                            "value":  "9a4f98589fc417dbfefec1ede00523f2b3e7a8c04d6d58943edaed9177322a0c",
                                                             "normalization":  "utf8_lf"
                                                         }
                                          },
+                     "agent_events":  {
+                                          "fixture_ref":  "runs/20260724-commit-b1/agent-events.json",
+                                          "digest":  {
+                                                         "algorithm":  "sha256",
+                                                         "value":  "b29a4c8025dcdcfb8b0c8a18adca90562adf1b9e4d10201d2aec58eb67c3aea9",
+                                                         "normalization":  "utf8_lf"
+                                                     }
+                                      },
                      "wiring_point_checks":  {
                                                  "fixture_ref":  "wiring/point-checks.json",
                                                  "digest":  {
                                                                 "algorithm":  "sha256",
-                                                                "value":  "e87fc66de3403cbf55fbac7dae6397dda40ef604632c6d6d1df7406dced8cc77",
+                                                                "value":  "95996778bbc94b8e174cdf7ae274bed0280901834b4caed12bb581b580afc9a0",
                                                                 "normalization":  "utf8_lf"
                                                             }
                                              },
@@ -136,17 +173,25 @@
                                          "fixture_ref":  "release/human-holds.json",
                                          "digest":  {
                                                         "algorithm":  "sha256",
-                                                        "value":  "78e5151256ac2cfc589e33fa69859d1e70ee441181b5f0544f4bee75d13290b4",
+                                                        "value":  "df1aa6174fac8580636d73f05357a3712b0cdc3220829ea3fa9436c3fefaa640",
                                                         "normalization":  "utf8_lf"
                                                     }
                                      },
-                     "agent_events":  {
-                                          "fixture_ref":  "runs/20260723-172826/agent-events.json",
-                                          "digest":  {
-                                                         "algorithm":  "sha256",
-                                                         "value":  "3edef38d1173009334a9d7344ecd17a14ecf79264fceeb70ed546e4cd2fd0eb5",
-                                                         "normalization":  "utf8_lf"
-                                                     }
-                                      }
+                     "geometry_export":  {
+                                             "fixture_ref":  "runs/20260724-commit-b1/compile/geometry-export-status.json",
+                                             "digest":  {
+                                                            "algorithm":  "sha256",
+                                                            "value":  "8055286ae787ee4a21c4454d695a5f279cf76c7438fa0b6e244257400a1d6485",
+                                                            "normalization":  "utf8_lf"
+                                                        }
+                                         },
+                     "geometry":  {
+                                      "fixture_ref":  "runs/20260724-commit-b1/compile/geometry.json",
+                                      "digest":  {
+                                                     "algorithm":  "sha256",
+                                                     "value":  "3b1743963cf288c634b9a98a72c5c58c382709e8893001faf0e4e2327541727d",
+                                                     "normalization":  "utf8_lf"
+                                                 }
+                                  }
                  }
 }

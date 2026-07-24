@@ -1,179 +1,293 @@
 {
-    "schema_version":  1,
+    "schema_version":  2,
     "project_id":  "line.three_station_assembly",
-    "source_commit":  "0474cfb54809189bd42055f58b8a565a1b6498a8",
+    "source_commit":  "5b0bbbbe301673447d1e9c3819dcdebaedc303f5",
     "status":  "human_action_required",
     "summary":  {
                     "declared_points":  15,
+                    "compiler_derived_points":  15,
                     "verified_points":  0,
                     "blocked_points":  0,
                     "human_action_required_points":  15
                 },
+    "validation_summary":  {
+                               "status":  "pass",
+                               "error_count":  0,
+                               "checked_rules":  [
+                                                     "duplicate_channel",
+                                                     "duplicate_alias",
+                                                     "duplicate_terminal",
+                                                     "direction_mismatch",
+                                                     "unresolved_alias",
+                                                     "unbound_port",
+                                                     "missing_safe_state"
+                                                 ]
+                           },
+    "diagnostics":  [
+
+                    ],
+    "evidence_sources":  {
+                             "controller":  [
+                                                {
+                                                    "artifact_ref":  "delivery-projects/line.three-station-assembly/source/plc/main.plc",
+                                                    "digest":  {
+                                                                   "algorithm":  "sha256",
+                                                                   "value":  "d7c099f0b78d819611e1395aa92f06df5956edd1942376e46d5c07ae8d70de08",
+                                                                   "normalization":  "utf8_lf"
+                                                               },
+                                                    "source_commit":  "5b0bbbbe301673447d1e9c3819dcdebaedc303f5",
+                                                    "freshness":  {
+                                                                      "status":  "input_snapshot",
+                                                                      "basis":  "Source artifact declares the project controller or controller I/O aliases."
+                                                                  }
+                                                }
+                                            ],
+                             "devices":  [
+                                             {
+                                                 "artifact_ref":  "delivery-projects/line.three-station-assembly/source/plc/main.plc",
+                                                 "digest":  {
+                                                                "algorithm":  "sha256",
+                                                                "value":  "d7c099f0b78d819611e1395aa92f06df5956edd1942376e46d5c07ae8d70de08",
+                                                                "normalization":  "utf8_lf"
+                                                            },
+                                                 "source_commit":  "5b0bbbbe301673447d1e9c3819dcdebaedc303f5",
+                                                 "freshness":  {
+                                                                   "status":  "input_snapshot",
+                                                                   "basis":  "Source artifact declares one or more topology devices."
+                                                               }
+                                             }
+                                         ],
+                             "connections":  [
+                                                 {
+                                                     "artifact_ref":  "delivery-projects/line.three-station-assembly/source/plc/main.plc",
+                                                     "digest":  {
+                                                                    "algorithm":  "sha256",
+                                                                    "value":  "d7c099f0b78d819611e1395aa92f06df5956edd1942376e46d5c07ae8d70de08",
+                                                                    "normalization":  "utf8_lf"
+                                                                },
+                                                     "source_commit":  "5b0bbbbe301673447d1e9c3819dcdebaedc303f5",
+                                                     "freshness":  {
+                                                                       "status":  "input_snapshot",
+                                                                       "basis":  "Source artifact declares topology relations used to bind controller points and device terminals."
+                                                                   }
+                                                 }
+                                             ],
+                             "compiler_ir":  [
+                                                 {
+                                                     "artifact_ref":  "delivery-projects/line.three-station-assembly/runs/20260724-commit-b1/compile/ir_bundle.json",
+                                                     "digest":  {
+                                                                    "algorithm":  "sha256",
+                                                                    "value":  "13a14f66f16cfc566c6d5d232467d31a28956ee6ead33a8e4aa6eb73fc79df13",
+                                                                    "normalization":  "utf8_lf"
+                                                                },
+                                                     "source_commit":  "5b0bbbbe301673447d1e9c3819dcdebaedc303f5",
+                                                     "freshness":  {
+                                                                       "status":  "same_run",
+                                                                       "basis":  "Authoritative wiring row set derived from the current compile/ir_bundle.json topology.links projection."
+                                                                   }
+                                                 }
+                                             ]
+                         },
+    "expected_vs_derived":  {
+                                "expected_count":  15,
+                                "derived_count":  15,
+                                "contract":  "config is expected metadata/audit input; points are authoritative compiler-derived topology links"
+                            },
     "points":  [
                    {
-                       "point_id":  "plc_main.X0",
-                       "alias":  "push_extended",
-                       "direction":  "input",
-                       "device_terminal":  "sensor_push_ext.out",
-                       "signal_type":  "analog",
-                       "safe_state":  null,
-                       "status":  "human_action_required",
-                       "measurement":  null,
-                       "photo_ref":  null
-                   },
-                   {
-                       "point_id":  "plc_main.X1",
-                       "alias":  "push_retracted",
-                       "direction":  "input",
-                       "device_terminal":  "sensor_push_ret.out",
-                       "signal_type":  "analog",
-                       "safe_state":  null,
-                       "status":  "human_action_required",
-                       "measurement":  null,
-                       "photo_ref":  null
-                   },
-                   {
-                       "point_id":  "plc_main.X2",
-                       "alias":  "press_extended",
-                       "direction":  "input",
-                       "device_terminal":  "sensor_press_ext.out",
-                       "signal_type":  "analog",
-                       "safe_state":  null,
-                       "status":  "human_action_required",
-                       "measurement":  null,
-                       "photo_ref":  null
-                   },
-                   {
-                       "point_id":  "plc_main.X3",
-                       "alias":  "press_retracted",
-                       "direction":  "input",
-                       "device_terminal":  "sensor_press_ret.out",
-                       "signal_type":  "analog",
-                       "safe_state":  null,
-                       "status":  "human_action_required",
-                       "measurement":  null,
-                       "photo_ref":  null
-                   },
-                   {
-                       "point_id":  "plc_main.X4",
-                       "alias":  "quality_ok",
-                       "direction":  "input",
-                       "device_terminal":  "sensor_quality_ok.out",
-                       "signal_type":  "analog",
-                       "safe_state":  null,
-                       "status":  "human_action_required",
-                       "measurement":  null,
-                       "photo_ref":  null
-                   },
-                   {
-                       "point_id":  "plc_main.X5",
-                       "alias":  "quality_ng",
-                       "direction":  "input",
-                       "device_terminal":  "sensor_quality_ng.out",
-                       "signal_type":  "analog",
-                       "safe_state":  null,
-                       "status":  "human_action_required",
-                       "measurement":  null,
-                       "photo_ref":  null
-                   },
-                   {
-                       "point_id":  "plc_main.X6",
-                       "alias":  "eject_extended",
-                       "direction":  "input",
-                       "device_terminal":  "sensor_eject_ext.out",
-                       "signal_type":  "analog",
-                       "safe_state":  null,
-                       "status":  "human_action_required",
-                       "measurement":  null,
-                       "photo_ref":  null
-                   },
-                   {
-                       "point_id":  "plc_main.X7",
-                       "alias":  "eject_retracted",
-                       "direction":  "input",
-                       "device_terminal":  "sensor_eject_ret.out",
-                       "signal_type":  "analog",
-                       "safe_state":  null,
-                       "status":  "human_action_required",
-                       "measurement":  null,
-                       "photo_ref":  null
-                   },
-                   {
-                       "point_id":  "plc_main.X8",
-                       "alias":  "reject_extended",
-                       "direction":  "input",
-                       "device_terminal":  "sensor_reject_ext.out",
-                       "signal_type":  "analog",
-                       "safe_state":  null,
-                       "status":  "human_action_required",
-                       "measurement":  null,
-                       "photo_ref":  null
-                   },
-                   {
-                       "point_id":  "plc_main.X9",
-                       "alias":  "reject_retracted",
-                       "direction":  "input",
-                       "device_terminal":  "sensor_reject_ret.out",
-                       "signal_type":  "analog",
-                       "safe_state":  null,
-                       "status":  "human_action_required",
-                       "measurement":  null,
-                       "photo_ref":  null
-                   },
-                   {
+                       "wire_id":  "wire:X11:start_button.out",
                        "point_id":  "plc_main.X11",
                        "alias":  "start_command",
                        "direction":  "input",
                        "device_terminal":  "start_button.out",
-                       "signal_type":  "analog",
+                       "signal_type":  "digital",
                        "safe_state":  null,
                        "status":  "human_action_required",
                        "measurement":  null,
-                       "photo_ref":  null
+                       "photo_ref":  null,
+                       "evidence_source":  "delivery-projects/line.three-station-assembly/runs/20260724-commit-b1/compile/ir_bundle.json"
                    },
                    {
+                       "wire_id":  "wire:Y0:valve_push.coil",
                        "point_id":  "plc_main.Y0",
                        "alias":  "push_valve",
                        "direction":  "output",
                        "device_terminal":  "valve_push.coil",
-                       "signal_type":  "analog",
+                       "signal_type":  "digital",
                        "safe_state":  "off",
                        "status":  "human_action_required",
                        "measurement":  null,
-                       "photo_ref":  null
+                       "photo_ref":  null,
+                       "evidence_source":  "delivery-projects/line.three-station-assembly/runs/20260724-commit-b1/compile/ir_bundle.json"
                    },
                    {
+                       "wire_id":  "wire:X0:sensor_push_ext.out",
+                       "point_id":  "plc_main.X0",
+                       "alias":  "push_extended",
+                       "direction":  "input",
+                       "device_terminal":  "sensor_push_ext.out",
+                       "signal_type":  "digital",
+                       "safe_state":  null,
+                       "status":  "human_action_required",
+                       "measurement":  null,
+                       "photo_ref":  null,
+                       "evidence_source":  "delivery-projects/line.three-station-assembly/runs/20260724-commit-b1/compile/ir_bundle.json"
+                   },
+                   {
+                       "wire_id":  "wire:X1:sensor_push_ret.out",
+                       "point_id":  "plc_main.X1",
+                       "alias":  "push_retracted",
+                       "direction":  "input",
+                       "device_terminal":  "sensor_push_ret.out",
+                       "signal_type":  "digital",
+                       "safe_state":  null,
+                       "status":  "human_action_required",
+                       "measurement":  null,
+                       "photo_ref":  null,
+                       "evidence_source":  "delivery-projects/line.three-station-assembly/runs/20260724-commit-b1/compile/ir_bundle.json"
+                   },
+                   {
+                       "wire_id":  "wire:Y1:valve_press.coil",
                        "point_id":  "plc_main.Y1",
                        "alias":  "press_valve",
                        "direction":  "output",
                        "device_terminal":  "valve_press.coil",
-                       "signal_type":  "analog",
+                       "signal_type":  "digital",
                        "safe_state":  "off",
                        "status":  "human_action_required",
                        "measurement":  null,
-                       "photo_ref":  null
+                       "photo_ref":  null,
+                       "evidence_source":  "delivery-projects/line.three-station-assembly/runs/20260724-commit-b1/compile/ir_bundle.json"
                    },
                    {
+                       "wire_id":  "wire:X2:sensor_press_ext.out",
+                       "point_id":  "plc_main.X2",
+                       "alias":  "press_extended",
+                       "direction":  "input",
+                       "device_terminal":  "sensor_press_ext.out",
+                       "signal_type":  "digital",
+                       "safe_state":  null,
+                       "status":  "human_action_required",
+                       "measurement":  null,
+                       "photo_ref":  null,
+                       "evidence_source":  "delivery-projects/line.three-station-assembly/runs/20260724-commit-b1/compile/ir_bundle.json"
+                   },
+                   {
+                       "wire_id":  "wire:X3:sensor_press_ret.out",
+                       "point_id":  "plc_main.X3",
+                       "alias":  "press_retracted",
+                       "direction":  "input",
+                       "device_terminal":  "sensor_press_ret.out",
+                       "signal_type":  "digital",
+                       "safe_state":  null,
+                       "status":  "human_action_required",
+                       "measurement":  null,
+                       "photo_ref":  null,
+                       "evidence_source":  "delivery-projects/line.three-station-assembly/runs/20260724-commit-b1/compile/ir_bundle.json"
+                   },
+                   {
+                       "wire_id":  "wire:X4:sensor_quality_ok.out",
+                       "point_id":  "plc_main.X4",
+                       "alias":  "quality_ok",
+                       "direction":  "input",
+                       "device_terminal":  "sensor_quality_ok.out",
+                       "signal_type":  "digital",
+                       "safe_state":  null,
+                       "status":  "human_action_required",
+                       "measurement":  null,
+                       "photo_ref":  null,
+                       "evidence_source":  "delivery-projects/line.three-station-assembly/runs/20260724-commit-b1/compile/ir_bundle.json"
+                   },
+                   {
+                       "wire_id":  "wire:X5:sensor_quality_ng.out",
+                       "point_id":  "plc_main.X5",
+                       "alias":  "quality_ng",
+                       "direction":  "input",
+                       "device_terminal":  "sensor_quality_ng.out",
+                       "signal_type":  "digital",
+                       "safe_state":  null,
+                       "status":  "human_action_required",
+                       "measurement":  null,
+                       "photo_ref":  null,
+                       "evidence_source":  "delivery-projects/line.three-station-assembly/runs/20260724-commit-b1/compile/ir_bundle.json"
+                   },
+                   {
+                       "wire_id":  "wire:Y2:valve_eject.coil",
                        "point_id":  "plc_main.Y2",
                        "alias":  "eject_valve",
                        "direction":  "output",
                        "device_terminal":  "valve_eject.coil",
-                       "signal_type":  "analog",
+                       "signal_type":  "digital",
                        "safe_state":  "off",
                        "status":  "human_action_required",
                        "measurement":  null,
-                       "photo_ref":  null
+                       "photo_ref":  null,
+                       "evidence_source":  "delivery-projects/line.three-station-assembly/runs/20260724-commit-b1/compile/ir_bundle.json"
                    },
                    {
+                       "wire_id":  "wire:X6:sensor_eject_ext.out",
+                       "point_id":  "plc_main.X6",
+                       "alias":  "eject_extended",
+                       "direction":  "input",
+                       "device_terminal":  "sensor_eject_ext.out",
+                       "signal_type":  "digital",
+                       "safe_state":  null,
+                       "status":  "human_action_required",
+                       "measurement":  null,
+                       "photo_ref":  null,
+                       "evidence_source":  "delivery-projects/line.three-station-assembly/runs/20260724-commit-b1/compile/ir_bundle.json"
+                   },
+                   {
+                       "wire_id":  "wire:X7:sensor_eject_ret.out",
+                       "point_id":  "plc_main.X7",
+                       "alias":  "eject_retracted",
+                       "direction":  "input",
+                       "device_terminal":  "sensor_eject_ret.out",
+                       "signal_type":  "digital",
+                       "safe_state":  null,
+                       "status":  "human_action_required",
+                       "measurement":  null,
+                       "photo_ref":  null,
+                       "evidence_source":  "delivery-projects/line.three-station-assembly/runs/20260724-commit-b1/compile/ir_bundle.json"
+                   },
+                   {
+                       "wire_id":  "wire:Y3:valve_reject.coil",
                        "point_id":  "plc_main.Y3",
                        "alias":  "reject_valve",
                        "direction":  "output",
                        "device_terminal":  "valve_reject.coil",
-                       "signal_type":  "analog",
+                       "signal_type":  "digital",
                        "safe_state":  "off",
                        "status":  "human_action_required",
                        "measurement":  null,
-                       "photo_ref":  null
+                       "photo_ref":  null,
+                       "evidence_source":  "delivery-projects/line.three-station-assembly/runs/20260724-commit-b1/compile/ir_bundle.json"
+                   },
+                   {
+                       "wire_id":  "wire:X8:sensor_reject_ext.out",
+                       "point_id":  "plc_main.X8",
+                       "alias":  "reject_extended",
+                       "direction":  "input",
+                       "device_terminal":  "sensor_reject_ext.out",
+                       "signal_type":  "digital",
+                       "safe_state":  null,
+                       "status":  "human_action_required",
+                       "measurement":  null,
+                       "photo_ref":  null,
+                       "evidence_source":  "delivery-projects/line.three-station-assembly/runs/20260724-commit-b1/compile/ir_bundle.json"
+                   },
+                   {
+                       "wire_id":  "wire:X9:sensor_reject_ret.out",
+                       "point_id":  "plc_main.X9",
+                       "alias":  "reject_retracted",
+                       "direction":  "input",
+                       "device_terminal":  "sensor_reject_ret.out",
+                       "signal_type":  "digital",
+                       "safe_state":  null,
+                       "status":  "human_action_required",
+                       "measurement":  null,
+                       "photo_ref":  null,
+                       "evidence_source":  "delivery-projects/line.three-station-assembly/runs/20260724-commit-b1/compile/ir_bundle.json"
                    }
                ]
 }

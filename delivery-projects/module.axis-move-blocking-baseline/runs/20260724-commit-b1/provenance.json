@@ -1,0 +1,534 @@
+{
+    "schema_version":  2,
+    "project_id":  "module.axis_move_blocking_baseline",
+    "run_id":  "20260724-commit-b1",
+    "source_commit":  "5b0bbbbe301673447d1e9c3819dcdebaedc303f5",
+    "git_base_commit":  "5b0bbbbe301673447d1e9c3819dcdebaedc303f5",
+    "dirty_worktree_at_start":  false,
+    "started_at_utc":  "2026-07-24T00:35:55.9685687Z",
+    "completed_at_utc":  "2026-07-24T00:35:59.4356530Z",
+    "elapsed_ms":  3467,
+    "model":  "deterministic_harness",
+    "provenance_scope":  "delivery_fixture_materialization",
+    "execution_unattended_verdict":  "proven",
+    "source_authoring_verdict":  "not_proven",
+    "unattended_verdict":  "not_proven",
+    "unattended_reason":  "Immutable inputs and harness outputs prove unattended materialization only; source authoring provenance is absent.",
+    "event_stream":  "delivery-projects/module.axis-move-blocking-baseline/runs/20260724-commit-b1/agent-events.json",
+    "input_manifest":  {
+                           "artifact_ref":  "delivery-projects/module.axis-move-blocking-baseline/runs/20260724-commit-b1/input-manifest.json",
+                           "digest":  {
+                                          "algorithm":  "sha256",
+                                          "value":  "0de9e58f9548ee985a07f4fa55c2ae3f1f6ebe30f91137ce27701f9f704ac4e9",
+                                          "normalization":  "utf8_lf"
+                                      },
+                           "source_commit":  "5b0bbbbe301673447d1e9c3819dcdebaedc303f5",
+                           "freshness":  {
+                                             "status":  "input_snapshot",
+                                             "basis":  "Immutable input snapshot captured before compiler execution."
+                                         }
+                       },
+    "models":  [
+                   {
+                       "role":  "materializer",
+                       "model":  "deterministic_harness",
+                       "status":  "recorded",
+                       "basis":  "PowerShell orchestrator identity, not an inferred chat model."
+                   }
+               ],
+    "agents":  [
+                   {
+                       "agent_id":  "root.delivery_fixture_materializer",
+                       "identity_kind":  "deterministic_orchestrator",
+                       "model":  "deterministic_harness",
+                       "role":  "materialize_and_validate"
+                   }
+               ],
+    "task_definitions":  [
+                             {
+                                 "task_id":  "materialize_delivery_project_fixture",
+                                 "agent_id":  "root.delivery_fixture_materializer",
+                                 "task_kind":  "materialization",
+                                 "definition_ref":  "delivery-projects/module.axis-move-blocking-baseline/delivery-project.config.json",
+                                 "acceptance":  "Run all declared compiler/scenario/project gates, freeze evidence, and preserve failures."
+                             },
+                             {
+                                 "task_id":  "compile_verify",
+                                 "agent_id":  "root.delivery_fixture_materializer",
+                                 "task_kind":  "validation",
+                                 "phase":  "compile",
+                                 "tool":  "target/debug/rust_plc.exe",
+                                 "command":  "target/debug/rust_plc.exe delivery-projects/module.axis-move-blocking-baseline/source/plc/main.plc --report delivery-projects/module.axis-move-blocking-baseline/runs/20260724-commit-b1/compile/verification_report.json --ir-out delivery-projects/module.axis-move-blocking-baseline/runs/20260724-commit-b1/compile/ir_bundle.json --no-print-ir"
+                             },
+                             {
+                                 "task_id":  "geometry_export",
+                                 "agent_id":  "root.delivery_fixture_materializer",
+                                 "task_kind":  "validation",
+                                 "phase":  "geometry",
+                                 "tool":  "target/debug/rust_plc.exe",
+                                 "command":  "target/debug/rust_plc.exe geometry-export delivery-projects/module.axis-move-blocking-baseline/source/plc/main.plc --out delivery-projects/module.axis-move-blocking-baseline/runs/20260724-commit-b1/compile/geometry.json --output json"
+                             },
+                             {
+                                 "task_id":  "scenario_validate_01",
+                                 "agent_id":  "root.delivery_fixture_materializer",
+                                 "task_kind":  "validation",
+                                 "phase":  "scenario_validation",
+                                 "tool":  "target/debug/rust_plc.exe",
+                                 "command":  "target/debug/rust_plc.exe scenario-validate delivery-projects/module.axis-move-blocking-baseline/source/plc/main.plc --scenario delivery-projects/module.axis-move-blocking-baseline/source/scenarios/normal.yaml --output json"
+                             },
+                             {
+                                 "task_id":  "scenario_validate_02",
+                                 "agent_id":  "root.delivery_fixture_materializer",
+                                 "task_kind":  "validation",
+                                 "phase":  "scenario_validation",
+                                 "tool":  "target/debug/rust_plc.exe",
+                                 "command":  "target/debug/rust_plc.exe scenario-validate delivery-projects/module.axis-move-blocking-baseline/source/plc/main.plc --scenario delivery-projects/module.axis-move-blocking-baseline/source/scenarios/timeout.yaml --output json"
+                             },
+                             {
+                                 "task_id":  "project_check",
+                                 "agent_id":  "root.delivery_fixture_materializer",
+                                 "task_kind":  "validation",
+                                 "phase":  "project_check",
+                                 "tool":  "target/debug/rust_plc.exe",
+                                 "command":  "target/debug/rust_plc.exe project-check delivery-projects/module.axis-move-blocking-baseline/source/plc/main.plc --scenario delivery-projects/module.axis-move-blocking-baseline/source/scenarios/normal.yaml --out-dir delivery-projects/module.axis-move-blocking-baseline/runs/20260724-commit-b1/project-check --output json"
+                             }
+                         ],
+    "skills":  [
+                   {
+                       "name":  "agent-harness-project-standard",
+                       "version":  "agent-harness-project-standard-v1",
+                       "status":  "recorded_by_runner_contract"
+                   }
+               ],
+    "tool_versions":  [
+                          {
+                              "name":  "rust_plc",
+                              "version":  "0.1.0",
+                              "status":  "recorded_from_Cargo.toml"
+                          },
+                          {
+                              "name":  "fixture_materializer",
+                              "version":  "delivery-fixture-materializer-v4",
+                              "status":  "recorded"
+                          },
+                          {
+                              "name":  "PowerShell",
+                              "version":  "5.1.26100.7462",
+                              "status":  "recorded"
+                          },
+                          {
+                              "name":  "git",
+                              "version":  "git version 2.49.0.windows.1",
+                              "status":  "recorded"
+                          }
+                      ],
+    "file_attribution":  {
+                             "policy_version":  "rustplc-file-attribution-v1",
+                             "human_intervention_detected":  false,
+                             "summary":  {
+                                             "agent_generated":  41,
+                                             "agent_modified":  2,
+                                             "pre_existing_user_change":  0,
+                                             "human_intervention_detected":  0
+                                         },
+                             "records":  [
+                                             {
+                                                 "path":  "delivery-projects/module.axis-move-blocking-baseline/release/human-holds.json",
+                                                 "before_sha256":  "0b22fcaf5a401037fd0537992cc3d1513c60bdbb7ffa81c514f0d51dd9cc4524",
+                                                 "after_sha256":  "8815472e78ce3ab066b9127f41af3ec0f15c99d36172832fead76c44e0334119",
+                                                 "attribution_kind":  "agent_modified",
+                                                 "agent_id":  "root.delivery_fixture_materializer",
+                                                 "task_id":  "materialize_delivery_project_fixture",
+                                                 "basis":  "The path is inside the harness-owned run, wiring, or release output set."
+                                             },
+                                             {
+                                                 "path":  "delivery-projects/module.axis-move-blocking-baseline/runs/20260724-commit-b1/agent-events.json",
+                                                 "before_sha256":  null,
+                                                 "after_sha256":  "9671de228e41790a160b6ea0ce5cd96ff7a0a0f20e5ada0328aadb247af9f100",
+                                                 "attribution_kind":  "agent_generated",
+                                                 "agent_id":  "root.delivery_fixture_materializer",
+                                                 "task_id":  "materialize_delivery_project_fixture",
+                                                 "basis":  "The path is inside the harness-owned run, wiring, or release output set."
+                                             },
+                                             {
+                                                 "path":  "delivery-projects/module.axis-move-blocking-baseline/runs/20260724-commit-b1/anomalies.json",
+                                                 "before_sha256":  null,
+                                                 "after_sha256":  "38fd9190236c67b7a3314d0234a811be9e38a6923c2f6d39da83c3cd89e3a473",
+                                                 "attribution_kind":  "agent_generated",
+                                                 "agent_id":  "root.delivery_fixture_materializer",
+                                                 "task_id":  "materialize_delivery_project_fixture",
+                                                 "basis":  "The path is inside the harness-owned run, wiring, or release output set."
+                                             },
+                                             {
+                                                 "path":  "delivery-projects/module.axis-move-blocking-baseline/runs/20260724-commit-b1/compile/geometry.json",
+                                                 "before_sha256":  null,
+                                                 "after_sha256":  "05570a5f0a60fbbadea823371b3188926683abe752861de8c94a300b53987b81",
+                                                 "attribution_kind":  "agent_generated",
+                                                 "agent_id":  "root.delivery_fixture_materializer",
+                                                 "task_id":  "materialize_delivery_project_fixture",
+                                                 "basis":  "The path is inside the harness-owned run, wiring, or release output set."
+                                             },
+                                             {
+                                                 "path":  "delivery-projects/module.axis-move-blocking-baseline/runs/20260724-commit-b1/compile/geometry-export-status.json",
+                                                 "before_sha256":  null,
+                                                 "after_sha256":  "2c81f4ef1255f5ba35fa0364dc0ccc708cfb4c5809d1411d15313352433211b6",
+                                                 "attribution_kind":  "agent_generated",
+                                                 "agent_id":  "root.delivery_fixture_materializer",
+                                                 "task_id":  "materialize_delivery_project_fixture",
+                                                 "basis":  "The path is inside the harness-owned run, wiring, or release output set."
+                                             },
+                                             {
+                                                 "path":  "delivery-projects/module.axis-move-blocking-baseline/runs/20260724-commit-b1/compile/ir_bundle.json",
+                                                 "before_sha256":  null,
+                                                 "after_sha256":  "c3e8efb4b1103a607219a2de9525b647bbb6079cfadd17280ea4d7071078a143",
+                                                 "attribution_kind":  "agent_generated",
+                                                 "agent_id":  "root.delivery_fixture_materializer",
+                                                 "task_id":  "materialize_delivery_project_fixture",
+                                                 "basis":  "The path is inside the harness-owned run, wiring, or release output set."
+                                             },
+                                             {
+                                                 "path":  "delivery-projects/module.axis-move-blocking-baseline/runs/20260724-commit-b1/compile/verification_report.json",
+                                                 "before_sha256":  null,
+                                                 "after_sha256":  "3457c27e2fc43171015a027c53d13b1f13e6c732bffe86b0b32256cee394dd63",
+                                                 "attribution_kind":  "agent_generated",
+                                                 "agent_id":  "root.delivery_fixture_materializer",
+                                                 "task_id":  "materialize_delivery_project_fixture",
+                                                 "basis":  "The path is inside the harness-owned run, wiring, or release output set."
+                                             },
+                                             {
+                                                 "path":  "delivery-projects/module.axis-move-blocking-baseline/runs/20260724-commit-b1/compiler-stages.json",
+                                                 "before_sha256":  null,
+                                                 "after_sha256":  "8b2ba4323d38692ebaf77c91e831b5325fc4659f639c0dd119515f31a2398a45",
+                                                 "attribution_kind":  "agent_generated",
+                                                 "agent_id":  "root.delivery_fixture_materializer",
+                                                 "task_id":  "materialize_delivery_project_fixture",
+                                                 "basis":  "The path is inside the harness-owned run, wiring, or release output set."
+                                             },
+                                             {
+                                                 "path":  "delivery-projects/module.axis-move-blocking-baseline/runs/20260724-commit-b1/corrections.json",
+                                                 "before_sha256":  null,
+                                                 "after_sha256":  "3aee0af12fcae1a6c4b1257266339723b605a23efd972e0a117485c8b9a4aaff",
+                                                 "attribution_kind":  "agent_generated",
+                                                 "agent_id":  "root.delivery_fixture_materializer",
+                                                 "task_id":  "materialize_delivery_project_fixture",
+                                                 "basis":  "The path is inside the harness-owned run, wiring, or release output set."
+                                             },
+                                             {
+                                                 "path":  "delivery-projects/module.axis-move-blocking-baseline/runs/20260724-commit-b1/input-manifest.json",
+                                                 "before_sha256":  null,
+                                                 "after_sha256":  "0de9e58f9548ee985a07f4fa55c2ae3f1f6ebe30f91137ce27701f9f704ac4e9",
+                                                 "attribution_kind":  "agent_generated",
+                                                 "agent_id":  "root.delivery_fixture_materializer",
+                                                 "task_id":  "materialize_delivery_project_fixture",
+                                                 "basis":  "The path is inside the harness-owned run, wiring, or release output set."
+                                             },
+                                             {
+                                                 "path":  "delivery-projects/module.axis-move-blocking-baseline/runs/20260724-commit-b1/logs/compile_verify.stderr.log",
+                                                 "before_sha256":  null,
+                                                 "after_sha256":  "b7dedc233e442944c44be647b91e1b9532e923cf85404a0ca1bdf630fc4abab5",
+                                                 "attribution_kind":  "agent_generated",
+                                                 "agent_id":  "root.delivery_fixture_materializer",
+                                                 "task_id":  "materialize_delivery_project_fixture",
+                                                 "basis":  "The path is inside the harness-owned run, wiring, or release output set."
+                                             },
+                                             {
+                                                 "path":  "delivery-projects/module.axis-move-blocking-baseline/runs/20260724-commit-b1/logs/compile_verify.stdout.log",
+                                                 "before_sha256":  null,
+                                                 "after_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                                                 "attribution_kind":  "agent_generated",
+                                                 "agent_id":  "root.delivery_fixture_materializer",
+                                                 "task_id":  "materialize_delivery_project_fixture",
+                                                 "basis":  "The path is inside the harness-owned run, wiring, or release output set."
+                                             },
+                                             {
+                                                 "path":  "delivery-projects/module.axis-move-blocking-baseline/runs/20260724-commit-b1/logs/geometry_export.stderr.log",
+                                                 "before_sha256":  null,
+                                                 "after_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                                                 "attribution_kind":  "agent_generated",
+                                                 "agent_id":  "root.delivery_fixture_materializer",
+                                                 "task_id":  "materialize_delivery_project_fixture",
+                                                 "basis":  "The path is inside the harness-owned run, wiring, or release output set."
+                                             },
+                                             {
+                                                 "path":  "delivery-projects/module.axis-move-blocking-baseline/runs/20260724-commit-b1/logs/geometry_export.stdout.log",
+                                                 "before_sha256":  null,
+                                                 "after_sha256":  "50c0852a0d906b73d27da255c2722ed0e64be9286ec3c79e0baeafca82ecdc0e",
+                                                 "attribution_kind":  "agent_generated",
+                                                 "agent_id":  "root.delivery_fixture_materializer",
+                                                 "task_id":  "materialize_delivery_project_fixture",
+                                                 "basis":  "The path is inside the harness-owned run, wiring, or release output set."
+                                             },
+                                             {
+                                                 "path":  "delivery-projects/module.axis-move-blocking-baseline/runs/20260724-commit-b1/logs/project_check.stderr.log",
+                                                 "before_sha256":  null,
+                                                 "after_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                                                 "attribution_kind":  "agent_generated",
+                                                 "agent_id":  "root.delivery_fixture_materializer",
+                                                 "task_id":  "materialize_delivery_project_fixture",
+                                                 "basis":  "The path is inside the harness-owned run, wiring, or release output set."
+                                             },
+                                             {
+                                                 "path":  "delivery-projects/module.axis-move-blocking-baseline/runs/20260724-commit-b1/logs/project_check.stdout.log",
+                                                 "before_sha256":  null,
+                                                 "after_sha256":  "0fe3c0e2a91d4166e6499c3cb1ed03c7c71bd3078af3ea8620afb23edb391281",
+                                                 "attribution_kind":  "agent_generated",
+                                                 "agent_id":  "root.delivery_fixture_materializer",
+                                                 "task_id":  "materialize_delivery_project_fixture",
+                                                 "basis":  "The path is inside the harness-owned run, wiring, or release output set."
+                                             },
+                                             {
+                                                 "path":  "delivery-projects/module.axis-move-blocking-baseline/runs/20260724-commit-b1/logs/scenario_validate_01.stderr.log",
+                                                 "before_sha256":  null,
+                                                 "after_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                                                 "attribution_kind":  "agent_generated",
+                                                 "agent_id":  "root.delivery_fixture_materializer",
+                                                 "task_id":  "materialize_delivery_project_fixture",
+                                                 "basis":  "The path is inside the harness-owned run, wiring, or release output set."
+                                             },
+                                             {
+                                                 "path":  "delivery-projects/module.axis-move-blocking-baseline/runs/20260724-commit-b1/logs/scenario_validate_01.stdout.log",
+                                                 "before_sha256":  null,
+                                                 "after_sha256":  "f4933caf13690b43890ced58e251d38741641cd7bc0abe62719eefe13972a073",
+                                                 "attribution_kind":  "agent_generated",
+                                                 "agent_id":  "root.delivery_fixture_materializer",
+                                                 "task_id":  "materialize_delivery_project_fixture",
+                                                 "basis":  "The path is inside the harness-owned run, wiring, or release output set."
+                                             },
+                                             {
+                                                 "path":  "delivery-projects/module.axis-move-blocking-baseline/runs/20260724-commit-b1/logs/scenario_validate_02.stderr.log",
+                                                 "before_sha256":  null,
+                                                 "after_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                                                 "attribution_kind":  "agent_generated",
+                                                 "agent_id":  "root.delivery_fixture_materializer",
+                                                 "task_id":  "materialize_delivery_project_fixture",
+                                                 "basis":  "The path is inside the harness-owned run, wiring, or release output set."
+                                             },
+                                             {
+                                                 "path":  "delivery-projects/module.axis-move-blocking-baseline/runs/20260724-commit-b1/logs/scenario_validate_02.stdout.log",
+                                                 "before_sha256":  null,
+                                                 "after_sha256":  "f4933caf13690b43890ced58e251d38741641cd7bc0abe62719eefe13972a073",
+                                                 "attribution_kind":  "agent_generated",
+                                                 "agent_id":  "root.delivery_fixture_materializer",
+                                                 "task_id":  "materialize_delivery_project_fixture",
+                                                 "basis":  "The path is inside the harness-owned run, wiring, or release output set."
+                                             },
+                                             {
+                                                 "path":  "delivery-projects/module.axis-move-blocking-baseline/runs/20260724-commit-b1/project-check/compile_verify/stderr.log",
+                                                 "before_sha256":  null,
+                                                 "after_sha256":  "6b8e142643e2221a830a7906111d6f9e3f50c3a071767bcc4ac1cae5732aa30c",
+                                                 "attribution_kind":  "agent_generated",
+                                                 "agent_id":  "root.delivery_fixture_materializer",
+                                                 "task_id":  "materialize_delivery_project_fixture",
+                                                 "basis":  "The path is inside the harness-owned run, wiring, or release output set."
+                                             },
+                                             {
+                                                 "path":  "delivery-projects/module.axis-move-blocking-baseline/runs/20260724-commit-b1/project-check/compile_verify/stdout.log",
+                                                 "before_sha256":  null,
+                                                 "after_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                                                 "attribution_kind":  "agent_generated",
+                                                 "agent_id":  "root.delivery_fixture_materializer",
+                                                 "task_id":  "materialize_delivery_project_fixture",
+                                                 "basis":  "The path is inside the harness-owned run, wiring, or release output set."
+                                             },
+                                             {
+                                                 "path":  "delivery-projects/module.axis-move-blocking-baseline/runs/20260724-commit-b1/project-check/compile_verify/verification_report.json",
+                                                 "before_sha256":  null,
+                                                 "after_sha256":  "71f15839dd37828f21060af94e92bd455f12eedcc936cade492411131163530d",
+                                                 "attribution_kind":  "agent_generated",
+                                                 "agent_id":  "root.delivery_fixture_materializer",
+                                                 "task_id":  "materialize_delivery_project_fixture",
+                                                 "basis":  "The path is inside the harness-owned run, wiring, or release output set."
+                                             },
+                                             {
+                                                 "path":  "delivery-projects/module.axis-move-blocking-baseline/runs/20260724-commit-b1/project-check/no_board_gate/artifacts/board.log",
+                                                 "before_sha256":  null,
+                                                 "after_sha256":  "e468ec8fbbd773cdf9b0573fab7a27de2b935bbbb375e65b0a203fd586720a0b",
+                                                 "attribution_kind":  "agent_generated",
+                                                 "agent_id":  "root.delivery_fixture_materializer",
+                                                 "task_id":  "materialize_delivery_project_fixture",
+                                                 "basis":  "The path is inside the harness-owned run, wiring, or release output set."
+                                             },
+                                             {
+                                                 "path":  "delivery-projects/module.axis-move-blocking-baseline/runs/20260724-commit-b1/project-check/no_board_gate/artifacts/board_trace.jsonl",
+                                                 "before_sha256":  null,
+                                                 "after_sha256":  "26174a95fac05028648ed7235baa13e0485925943babec6eebb4384cf20f2dcb",
+                                                 "attribution_kind":  "agent_generated",
+                                                 "agent_id":  "root.delivery_fixture_materializer",
+                                                 "task_id":  "materialize_delivery_project_fixture",
+                                                 "basis":  "The path is inside the harness-owned run, wiring, or release output set."
+                                             },
+                                             {
+                                                 "path":  "delivery-projects/module.axis-move-blocking-baseline/runs/20260724-commit-b1/project-check/no_board_gate/artifacts/diff_report.json",
+                                                 "before_sha256":  null,
+                                                 "after_sha256":  "3e6d8125f60dc8eafe00ae4048ef5bc17f11ecff405827a3b7456e10f833db6e",
+                                                 "attribution_kind":  "agent_generated",
+                                                 "agent_id":  "root.delivery_fixture_materializer",
+                                                 "task_id":  "materialize_delivery_project_fixture",
+                                                 "basis":  "The path is inside the harness-owned run, wiring, or release output set."
+                                             },
+                                             {
+                                                 "path":  "delivery-projects/module.axis-move-blocking-baseline/runs/20260724-commit-b1/project-check/no_board_gate/artifacts/sil_trace.jsonl",
+                                                 "before_sha256":  null,
+                                                 "after_sha256":  "c3eb58fe1a8a1752fe34896e34e84f64c783d0cb35dd0c688f0e2cd39231d105",
+                                                 "attribution_kind":  "agent_generated",
+                                                 "agent_id":  "root.delivery_fixture_materializer",
+                                                 "task_id":  "materialize_delivery_project_fixture",
+                                                 "basis":  "The path is inside the harness-owned run, wiring, or release output set."
+                                             },
+                                             {
+                                                 "path":  "delivery-projects/module.axis-move-blocking-baseline/runs/20260724-commit-b1/project-check/no_board_gate/artifacts/tick_timing.jsonl",
+                                                 "before_sha256":  null,
+                                                 "after_sha256":  "b4f0e1ba8d8866807d726b00bb1a07121407ba80cfe45a988c04a3c972a4e2d8",
+                                                 "attribution_kind":  "agent_generated",
+                                                 "agent_id":  "root.delivery_fixture_materializer",
+                                                 "task_id":  "materialize_delivery_project_fixture",
+                                                 "basis":  "The path is inside the harness-owned run, wiring, or release output set."
+                                             },
+                                             {
+                                                 "path":  "delivery-projects/module.axis-move-blocking-baseline/runs/20260724-commit-b1/project-check/no_board_gate/artifacts/timing_report.json",
+                                                 "before_sha256":  null,
+                                                 "after_sha256":  "9d8dc94d27716a20e4ba9c7cd2ae5aaef2bc67bdc58605da115e5fef8fe3d10f",
+                                                 "attribution_kind":  "agent_generated",
+                                                 "agent_id":  "root.delivery_fixture_materializer",
+                                                 "task_id":  "materialize_delivery_project_fixture",
+                                                 "basis":  "The path is inside the harness-owned run, wiring, or release output set."
+                                             },
+                                             {
+                                                 "path":  "delivery-projects/module.axis-move-blocking-baseline/runs/20260724-commit-b1/project-check/no_board_gate/artifacts/virtual_board_meta.json",
+                                                 "before_sha256":  null,
+                                                 "after_sha256":  "62250cf21572019d5097050a6eaba8da95fdc40b96a00cfe09d415d5d29e6a23",
+                                                 "attribution_kind":  "agent_generated",
+                                                 "agent_id":  "root.delivery_fixture_materializer",
+                                                 "task_id":  "materialize_delivery_project_fixture",
+                                                 "basis":  "The path is inside the harness-owned run, wiring, or release output set."
+                                             },
+                                             {
+                                                 "path":  "delivery-projects/module.axis-move-blocking-baseline/runs/20260724-commit-b1/project-check/no_board_gate/report.json",
+                                                 "before_sha256":  null,
+                                                 "after_sha256":  "91f10ebcc13ad3b9d81bf862aec834eb9eb0d5d4f713fef2039488c4ca0320e4",
+                                                 "attribution_kind":  "agent_generated",
+                                                 "agent_id":  "root.delivery_fixture_materializer",
+                                                 "task_id":  "materialize_delivery_project_fixture",
+                                                 "basis":  "The path is inside the harness-owned run, wiring, or release output set."
+                                             },
+                                             {
+                                                 "path":  "delivery-projects/module.axis-move-blocking-baseline/runs/20260724-commit-b1/project-check/no_board_gate/stderr.log",
+                                                 "before_sha256":  null,
+                                                 "after_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                                                 "attribution_kind":  "agent_generated",
+                                                 "agent_id":  "root.delivery_fixture_materializer",
+                                                 "task_id":  "materialize_delivery_project_fixture",
+                                                 "basis":  "The path is inside the harness-owned run, wiring, or release output set."
+                                             },
+                                             {
+                                                 "path":  "delivery-projects/module.axis-move-blocking-baseline/runs/20260724-commit-b1/project-check/no_board_gate/stdout.log",
+                                                 "before_sha256":  null,
+                                                 "after_sha256":  "91f10ebcc13ad3b9d81bf862aec834eb9eb0d5d4f713fef2039488c4ca0320e4",
+                                                 "attribution_kind":  "agent_generated",
+                                                 "agent_id":  "root.delivery_fixture_materializer",
+                                                 "task_id":  "materialize_delivery_project_fixture",
+                                                 "basis":  "The path is inside the harness-owned run, wiring, or release output set."
+                                             },
+                                             {
+                                                 "path":  "delivery-projects/module.axis-move-blocking-baseline/runs/20260724-commit-b1/project-check/project_check_report.json",
+                                                 "before_sha256":  null,
+                                                 "after_sha256":  "0fe3c0e2a91d4166e6499c3cb1ed03c7c71bd3078af3ea8620afb23edb391281",
+                                                 "attribution_kind":  "agent_generated",
+                                                 "agent_id":  "root.delivery_fixture_materializer",
+                                                 "task_id":  "materialize_delivery_project_fixture",
+                                                 "basis":  "The path is inside the harness-owned run, wiring, or release output set."
+                                             },
+                                             {
+                                                 "path":  "delivery-projects/module.axis-move-blocking-baseline/runs/20260724-commit-b1/project-check/scenario_doctor/report.json",
+                                                 "before_sha256":  null,
+                                                 "after_sha256":  "61ea9eb663e32c314a102656700d6dc6c5e93ec9e31a532e6c57ed35cbedc22e",
+                                                 "attribution_kind":  "agent_generated",
+                                                 "agent_id":  "root.delivery_fixture_materializer",
+                                                 "task_id":  "materialize_delivery_project_fixture",
+                                                 "basis":  "The path is inside the harness-owned run, wiring, or release output set."
+                                             },
+                                             {
+                                                 "path":  "delivery-projects/module.axis-move-blocking-baseline/runs/20260724-commit-b1/project-check/scenario_doctor/stderr.log",
+                                                 "before_sha256":  null,
+                                                 "after_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                                                 "attribution_kind":  "agent_generated",
+                                                 "agent_id":  "root.delivery_fixture_materializer",
+                                                 "task_id":  "materialize_delivery_project_fixture",
+                                                 "basis":  "The path is inside the harness-owned run, wiring, or release output set."
+                                             },
+                                             {
+                                                 "path":  "delivery-projects/module.axis-move-blocking-baseline/runs/20260724-commit-b1/project-check/scenario_doctor/stdout.log",
+                                                 "before_sha256":  null,
+                                                 "after_sha256":  "61ea9eb663e32c314a102656700d6dc6c5e93ec9e31a532e6c57ed35cbedc22e",
+                                                 "attribution_kind":  "agent_generated",
+                                                 "agent_id":  "root.delivery_fixture_materializer",
+                                                 "task_id":  "materialize_delivery_project_fixture",
+                                                 "basis":  "The path is inside the harness-owned run, wiring, or release output set."
+                                             },
+                                             {
+                                                 "path":  "delivery-projects/module.axis-move-blocking-baseline/runs/20260724-commit-b1/project-check/sequence_lint/stderr.log",
+                                                 "before_sha256":  null,
+                                                 "after_sha256":  "728999c10e60afb50cff54eb2d03bc5efae72668b59d8508a6636581f3d70112",
+                                                 "attribution_kind":  "agent_generated",
+                                                 "agent_id":  "root.delivery_fixture_materializer",
+                                                 "task_id":  "materialize_delivery_project_fixture",
+                                                 "basis":  "The path is inside the harness-owned run, wiring, or release output set."
+                                             },
+                                             {
+                                                 "path":  "delivery-projects/module.axis-move-blocking-baseline/runs/20260724-commit-b1/project-check/sequence_lint/stdout.log",
+                                                 "before_sha256":  null,
+                                                 "after_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                                                 "attribution_kind":  "agent_generated",
+                                                 "agent_id":  "root.delivery_fixture_materializer",
+                                                 "task_id":  "materialize_delivery_project_fixture",
+                                                 "basis":  "The path is inside the harness-owned run, wiring, or release output set."
+                                             },
+                                             {
+                                                 "path":  "delivery-projects/module.axis-move-blocking-baseline/runs/20260724-commit-b1/result.json",
+                                                 "before_sha256":  null,
+                                                 "after_sha256":  "d9f8effa9fa2b7bb9da2e4406cd73f435d79863190e7ea3420818e767dab5167",
+                                                 "attribution_kind":  "agent_generated",
+                                                 "agent_id":  "root.delivery_fixture_materializer",
+                                                 "task_id":  "materialize_delivery_project_fixture",
+                                                 "basis":  "The path is inside the harness-owned run, wiring, or release output set."
+                                             },
+                                             {
+                                                 "path":  "delivery-projects/module.axis-move-blocking-baseline/runs/20260724-commit-b1/scenario-validation/01-normal.json",
+                                                 "before_sha256":  null,
+                                                 "after_sha256":  "f4933caf13690b43890ced58e251d38741641cd7bc0abe62719eefe13972a073",
+                                                 "attribution_kind":  "agent_generated",
+                                                 "agent_id":  "root.delivery_fixture_materializer",
+                                                 "task_id":  "materialize_delivery_project_fixture",
+                                                 "basis":  "The path is inside the harness-owned run, wiring, or release output set."
+                                             },
+                                             {
+                                                 "path":  "delivery-projects/module.axis-move-blocking-baseline/runs/20260724-commit-b1/scenario-validation/02-timeout.json",
+                                                 "before_sha256":  null,
+                                                 "after_sha256":  "f4933caf13690b43890ced58e251d38741641cd7bc0abe62719eefe13972a073",
+                                                 "attribution_kind":  "agent_generated",
+                                                 "agent_id":  "root.delivery_fixture_materializer",
+                                                 "task_id":  "materialize_delivery_project_fixture",
+                                                 "basis":  "The path is inside the harness-owned run, wiring, or release output set."
+                                             },
+                                             {
+                                                 "path":  "delivery-projects/module.axis-move-blocking-baseline/wiring/point-checks.json",
+                                                 "before_sha256":  "2bf02d561f48c2d02cec6b06e992366c8ef32e1b87fa9c4f7b889842b2fa0769",
+                                                 "after_sha256":  "dbe7b80d0f55d2a1e64ed6a6a9b0c8a04f8719b82308163ae3ac23bcaca1ecd0",
+                                                 "attribution_kind":  "agent_modified",
+                                                 "agent_id":  "root.delivery_fixture_materializer",
+                                                 "task_id":  "materialize_delivery_project_fixture",
+                                                 "basis":  "The path is inside the harness-owned run, wiring, or release output set."
+                                             }
+                                         ],
+                             "evidence_envelopes":  [
+                                                        {
+                                                            "path":  "delivery-projects/module.axis-move-blocking-baseline/runs/20260724-commit-b1/provenance.json",
+                                                            "reason":  "This document contains the attribution ledger and cannot recursively digest itself."
+                                                        },
+                                                        {
+                                                            "path":  "delivery-projects/module.axis-move-blocking-baseline/delivery-project.json",
+                                                            "reason":  "The project manifest externally binds the provenance digest after the ledger is closed."
+                                                        }
+                                                    ]
+                         }
+}

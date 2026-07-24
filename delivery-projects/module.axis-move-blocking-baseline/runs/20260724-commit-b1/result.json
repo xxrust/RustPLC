@@ -1,0 +1,244 @@
+{
+    "schema_version":  1,
+    "run_id":  "20260724-commit-b1",
+    "harness_execution_id":  "20260724-commit-b1",
+    "project_id":  "module.axis_move_blocking_baseline",
+    "harness_status":  "pass",
+    "delivery_status":  "blocked",
+    "freshness":  "same_run",
+    "error_code":  null,
+    "artifact_root":  "delivery-projects/module.axis-move-blocking-baseline/runs/20260724-commit-b1",
+    "git_head":  "5b0bbbbe301673447d1e9c3819dcdebaedc303f5",
+    "started_at_utc":  "2026-07-24T00:35:55.9685687Z",
+    "completed_at_utc":  "2026-07-24T00:35:59.4356530Z",
+    "elapsed_ms":  3467,
+    "inputs":  {
+                   "manifest":  "delivery-projects/module.axis-move-blocking-baseline/runs/20260724-commit-b1/input-manifest.json",
+                   "file_count":  6
+               },
+    "digests":  {
+                    "input_manifest_sha256":  "0de9e58f9548ee985a07f4fa55c2ae3f1f6ebe30f91137ce27701f9f704ac4e9",
+                    "source_set_sha256":  "68f1261c8b82f60f9d1e51a8f23715c7c0081f68b61e18afd779bf2b58c80129",
+                    "post_run_source_set_sha256":  "68f1261c8b82f60f9d1e51a8f23715c7c0081f68b61e18afd779bf2b58c80129",
+                    "input_set_sha256":  "4a274d5c6ba88502f374d3e5a587fe7bd88abb02b1d225d43655ad2b5b9cb74f",
+                    "post_run_input_set_sha256":  "4a274d5c6ba88502f374d3e5a587fe7bd88abb02b1d225d43655ad2b5b9cb74f"
+                },
+    "status":  {
+                   "harness_execution":  "pass",
+                   "acceptance":  "blocked",
+                   "delivery":  "blocked",
+                   "acceptance_pass":  10,
+                   "acceptance_blocked":  3,
+                   "acceptance_fail":  0,
+                   "implementation_completeness_percent":  78,
+                   "input_changed_during_run":  false
+               },
+    "steps":  [
+                  {
+                      "name":  "compile_verify",
+                      "classification":  "pass",
+                      "exit_code":  0,
+                      "stdout_log":  "delivery-projects/module.axis-move-blocking-baseline/runs/20260724-commit-b1/logs/compile_verify.stdout.log",
+                      "stderr_log":  "delivery-projects/module.axis-move-blocking-baseline/runs/20260724-commit-b1/logs/compile_verify.stderr.log",
+                      "artifacts":  [
+                                        "delivery-projects/module.axis-move-blocking-baseline/runs/20260724-commit-b1/compile/verification_report.json",
+                                        "delivery-projects/module.axis-move-blocking-baseline/runs/20260724-commit-b1/compile/ir_bundle.json"
+                                    ]
+                  },
+                  {
+                      "name":  "geometry_export",
+                      "classification":  "pass",
+                      "exit_code":  0,
+                      "stdout_log":  "delivery-projects/module.axis-move-blocking-baseline/runs/20260724-commit-b1/logs/geometry_export.stdout.log",
+                      "stderr_log":  "delivery-projects/module.axis-move-blocking-baseline/runs/20260724-commit-b1/logs/geometry_export.stderr.log",
+                      "artifacts":  [
+                                        "delivery-projects/module.axis-move-blocking-baseline/runs/20260724-commit-b1/compile/geometry.json",
+                                        "delivery-projects/module.axis-move-blocking-baseline/runs/20260724-commit-b1/compile/geometry-export-status.json"
+                                    ]
+                  },
+                  {
+                      "name":  "scenario_validate_01",
+                      "classification":  "pass",
+                      "exit_code":  0,
+                      "stdout_log":  "delivery-projects/module.axis-move-blocking-baseline/runs/20260724-commit-b1/logs/scenario_validate_01.stdout.log",
+                      "stderr_log":  "delivery-projects/module.axis-move-blocking-baseline/runs/20260724-commit-b1/logs/scenario_validate_01.stderr.log",
+                      "artifacts":  [
+
+                                    ]
+                  },
+                  {
+                      "name":  "scenario_validate_02",
+                      "classification":  "pass",
+                      "exit_code":  0,
+                      "stdout_log":  "delivery-projects/module.axis-move-blocking-baseline/runs/20260724-commit-b1/logs/scenario_validate_02.stdout.log",
+                      "stderr_log":  "delivery-projects/module.axis-move-blocking-baseline/runs/20260724-commit-b1/logs/scenario_validate_02.stderr.log",
+                      "artifacts":  [
+
+                                    ]
+                  },
+                  {
+                      "name":  "project_check",
+                      "classification":  "pass",
+                      "exit_code":  0,
+                      "stdout_log":  "delivery-projects/module.axis-move-blocking-baseline/runs/20260724-commit-b1/logs/project_check.stdout.log",
+                      "stderr_log":  "delivery-projects/module.axis-move-blocking-baseline/runs/20260724-commit-b1/logs/project_check.stderr.log",
+                      "artifacts":  [
+                                        "delivery-projects/module.axis-move-blocking-baseline/runs/20260724-commit-b1/project-check/project_check_report.json"
+                                    ]
+                  }
+              ],
+    "acceptance":  [
+                       {
+                           "id":  "AC-01",
+                           "status":  "pass",
+                           "basis":  "The project-local source snapshot and digest manifest exist.",
+                           "blocker_ids":  [
+
+                                           ]
+                       },
+                       {
+                           "id":  "AC-02",
+                           "status":  "pass",
+                           "basis":  "Parser, AST lowering, semantic analysis, and IR emission were invoked.",
+                           "blocker_ids":  [
+
+                                           ]
+                       },
+                       {
+                           "id":  "AC-03",
+                           "status":  "pass",
+                           "basis":  "Safety verification executed; project-specific coverage limitations remain explicit.",
+                           "blocker_ids":  null
+                       },
+                       {
+                           "id":  "AC-04",
+                           "status":  "pass",
+                           "basis":  "Liveness verification executed.",
+                           "blocker_ids":  [
+
+                                           ]
+                       },
+                       {
+                           "id":  "AC-05",
+                           "status":  "pass",
+                           "basis":  "Timing verification executed for the no-board model.",
+                           "blocker_ids":  [
+
+                                           ]
+                       },
+                       {
+                           "id":  "AC-06",
+                           "status":  "pass",
+                           "basis":  "Causality verification executed.",
+                           "blocker_ids":  [
+
+                                           ]
+                       },
+                       {
+                           "id":  "AC-07",
+                           "status":  "pass",
+                           "basis":  "Declared scenario validation commands must exit successfully; product gaps remain failed execution evidence.",
+                           "blocker_ids":  [
+
+                                           ]
+                       },
+                       {
+                           "id":  "AC-08",
+                           "status":  "pass",
+                           "basis":  "The nominal project-check pipeline must exit successfully; product gaps remain failed execution evidence.",
+                           "blocker_ids":  [
+
+                                           ]
+                       },
+                       {
+                           "id":  "AC-09",
+                           "status":  "blocked",
+                           "basis":  "Physical point checks require observed commissioning evidence.",
+                           "blocker_ids":  [
+                                               "GAP-PHYSICAL-POINT-CHECK"
+                                           ]
+                       },
+                       {
+                           "id":  "AC-10",
+                           "status":  "blocked",
+                           "basis":  "Required human holds have no attributable signatures.",
+                           "blocker_ids":  [
+
+                                           ]
+                       },
+                       {
+                           "id":  "AC-11",
+                           "status":  "blocked",
+                           "basis":  "Target-hardware timing evidence is absent.",
+                           "blocker_ids":  [
+                                               "GAP-HARDWARE-TIMING-EVIDENCE"
+                                           ]
+                       },
+                       {
+                           "id":  "AC-12",
+                           "status":  "pass",
+                           "basis":  "Semantic-twin geometry must be exported by the current compiler run; failure remains an explicit blocker.",
+                           "blocker_ids":  null
+                       },
+                       {
+                           "id":  "AC-13",
+                           "status":  "pass",
+                           "basis":  "Wiring points must have unique controller channels, aliases, and terminals; correct direction and safe-state metadata; and source-backed controller/device relation bindings.",
+                           "blocker_ids":  [
+
+                                           ]
+                       }
+                   ],
+    "known_gaps":  [
+                       {
+                           "id":  "GAP-AXIS-PHYSICAL-FEEDBACK",
+                           "layer":  "commissioning",
+                           "classification":  "evidence-gap",
+                           "summary":  "The no-board action lifecycle has no attributable physical drive or encoder observation."
+                       },
+                       {
+                           "id":  "GAP-HARDWARE-TIMING-EVIDENCE",
+                           "layer":  "deployment",
+                           "classification":  "evidence-gap",
+                           "summary":  "No target-hardware execution-time measurement is available."
+                       },
+                       {
+                           "id":  "GAP-PHYSICAL-POINT-CHECK",
+                           "layer":  "commissioning",
+                           "classification":  "evidence-gap",
+                           "summary":  "Axis command, enable, alarm, and feedback points have not been physically point-checked."
+                       }
+                   ],
+    "scenario_summary":  {
+                             "declared":  2,
+                             "passed":  2,
+                             "failed":  0,
+                             "records":  [
+                                             {
+                                                 "scenario_ref":  "source/scenarios/normal.yaml",
+                                                 "status":  "pass",
+                                                 "exit_code":  0,
+                                                 "artifact_ref":  "delivery-projects/module.axis-move-blocking-baseline/runs/20260724-commit-b1/scenario-validation/01-normal.json"
+                                             },
+                                             {
+                                                 "scenario_ref":  "source/scenarios/timeout.yaml",
+                                                 "status":  "pass",
+                                                 "exit_code":  0,
+                                                 "artifact_ref":  "delivery-projects/module.axis-move-blocking-baseline/runs/20260724-commit-b1/scenario-validation/02-timeout.json"
+                                             }
+                                         ]
+                         },
+    "attribution":  {
+                        "provenance_scope":  "delivery_fixture_materialization",
+                        "execution_unattended_verdict":  "proven",
+                        "source_authoring_verdict":  "not_proven",
+                        "unattended_verdict":  "not_proven",
+                        "human_intervention_detected":  false,
+                        "reason":  "Materialization execution is attributable, while source authoring provenance is not recorded by this run.",
+                        "evidence":  [
+                                         "delivery-projects/module.axis-move-blocking-baseline/runs/20260724-commit-b1/input-manifest.json",
+                                         "delivery-projects/module.axis-move-blocking-baseline/runs/20260724-commit-b1/agent-events.json",
+                                         "delivery-projects/module.axis-move-blocking-baseline/runs/20260724-commit-b1/provenance.json"
+                                     ]
+                    }
+}

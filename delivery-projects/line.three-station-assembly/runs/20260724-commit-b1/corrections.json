@@ -1,0 +1,15 @@
+{
+    "schema_version":  1,
+    "project_id":  "line.three_station_assembly",
+    "run_id":  "20260724-commit-b1",
+    "source_commit":  "5b0bbbbe301673447d1e9c3819dcdebaedc303f5",
+    "correction_count":  1,
+    "records":  [
+                    {
+                        "correction_id":  "COR-001",
+                        "status":  "verified_with_blocker",
+                        "anomaly_id":  "ANOM-001",
+                        "summary":  "Added a clean UTF-8 project-local system contract while preserving GAP-SOURCE-TEXT-ENCODING for the unchanged executable source."
+                    }
+                ]
+}

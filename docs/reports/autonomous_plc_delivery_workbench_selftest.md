@@ -44,11 +44,11 @@ compiler-derived wiring -> human point checks -> holds -> release projection
 
 | 项目 | 交付状态 | Validator | 直接结论 |
 | --- | --- | ---: | --- |
-| `module.axis_move_blocking_baseline` | `blocked` | 898 checks / 0 errors | 编译、scenario、project-check 通过；HIL、物理点检和人工 hold 尚未完成 |
-| `station.dual_slot_shuttle_press_cell` | `fail` | 1587 checks / 0 errors | scenario 通过；`OP-003` 暴露 transform-carrier admission/refinement 缺口 |
-| `line.three_station_assembly` | `fail` | 885 checks / 0 errors | 编译产物存在；scenario runtime 尚不能执行 `sensor_push_ext == true` 语义 guard |
+| `module.axis_move_blocking_baseline` | `blocked` | 929 checks / 0 errors | 编译、scenario、project-check 通过；HIL、物理点检和人工 hold 尚未完成 |
+| `station.dual_slot_shuttle_press_cell` | `fail` | 1636 checks / 0 errors | scenario 通过；`OP-003` 暴露 transform-carrier admission/refinement 缺口 |
+| `line.three_station_assembly` | `fail` | 916 checks / 0 errors | 编译产物存在；scenario runtime 尚不能执行 `sensor_push_ext == true` 语义 guard |
 
-Corpus `20260724-210000` 与 `20260724-211000` 均为 `harness_status=pass`。第二轮 `repeatability=pass`，differences 为 0；输入 digest 覆盖 config、source、review，运行中输入未变化。交付失败保留为编译器和 runtime 的真实能力边界。
+Canonical run `20260724-commit-b1` 由三个独立 clean clone 基于实现提交 `5b0bbbbe301673447d1e9c3819dcdebaedc303f5` 分别物化。三项目均为 `harness_status=pass`、`dirty_worktree_at_start=false`，输入在运行中保持稳定。该提交的 clean-checkout corpus 使用内部 run id `cc`，结果为 3481 checks / 0 errors，clone 前后保持 clean。交付失败保留为编译器和 runtime 的真实能力边界。
 
 ## 工作台覆盖
 
@@ -65,6 +65,9 @@ Corpus `20260724-210000` 与 `20260724-211000` 均为 `harness_status=pass`。�
 | Wiring | PASS | 三项目分别为 15 / 1 / 16 rows；行来自同次运行 `ir_bundle.json/topology.links`，controller/channel/compiler status 与物理观察按 `point_id` 合并 |
 | Point check | PASS | observation、photo upload、append-only ledger、projection refresh 通过，release 仍保持 blocked |
 | Agent provenance | PASS | 界面同时显示 execution proven、source authoring not_proven、overall not_proven |
+| 责任链 | PASS | 项目首屏明确显示 Agent source authoring、Compiler verification、Wiring and point checks、Release authorization；浏览器断言 4 段责任与 2 段 human-owned 边界 |
+| HIL responsibility | PASS | 状态栏直接读取 `hil_review` hold；Inspector 展示 HIL reason 与 blocked prerequisites；不再从任意 observed evidence 推断 HIL |
+| Current-run projection | PASS | manifest 的 `artifact_roots.verification` 选择 current run；Verification、Tests、Problems、Evidence、Geometry 和项目摘要忽略历史 run，`/runs` 仍保留审计可见性 |
 | 视口 | PASS | 1440x900、1920x1080 无页面级 overflow 或标签逐字换行 |
 
 ## Subagent 完整度分析
@@ -78,7 +81,9 @@ Corpus `20260724-210000` 与 `20260724-211000` 均为 `harness_status=pass`。�
 | Search/accessibility agent | command palette、键盘拓扑、双视口浏览器 harness | 通过但过程试错较多 | 修正 React 状态时序、controlled textarea、selector、focus、session 假设和 artifact route |
 | PRD completion audit | 识别错误完成声明与残余风险 | 通过 | 阻止把 deterministic fixture materialization 写成无人源码创作证明 |
 | Desktop contract audit | 无独立监控页、桌面壳、接线表与三项目浏览器覆盖 | 通过，发现 2 个 P1 | 删除旧 Dashboard；修正 wiring 字段合并；把浏览器覆盖扩展为逐项目 pipeline/holds/wiring/provenance |
-| Two-phase evidence audit | 暂存区、旧 run、绝对路径、PowerShell stderr 与报告真实性 | 通过，阻止错误提交 | 识别 `213000` 过强声明、绝对工具路径、clean runner stderr 包装风险和 PRD 验收弱化 |
+| Two-phase evidence audit | 暂存区、旧 run、绝对路径、PowerShell stderr 与报告真实性 | 结论有效，执行边界发生一次越权 | 识别旧证据过强声明；后续误把 UI 上下文当成写权限，主线程独立审查代码、恢复 canonical evidence 并记录异常 |
+| Residual-risk agents | HIL 语义、current-run 投影和多 run 回归 | 通过 | 发现任意 observed evidence 推断 HIL 和历史 run 污染；主线程修正前端，agent 修正后端并新增双 run 回归 |
+| Canonical evidence agents | module、station、line 三个独立 clean clone 物化与验证 | 最终通过，B1 核心命令零重试 | 主线程复核 source commit、dirty start、validator、wrapper、绝对路径和 canonical run 唯一性；station 的 route metadata audit 发生一次额外修正 |
 
 完整度判断依据是可执行门禁和 same-run artifact。Subagent 的完成声明不直接成为结论；主线程复查编译、API、浏览器行为、fixture 真值和文档表述。
 
@@ -133,6 +138,15 @@ Corpus `20260724-210000` 与 `20260724-211000` 均为 `harness_status=pass`。�
 | `ANOM-045` | Commit A clean-checkout 首轮在 cold cargo build 后悬停 | `Start-Process -Wait` 已无 cargo/rustc 子进程，但 PowerShell 未返回，specimen 阶段没有开始 | 终止本轮自有进程；拆除 `-Wait` 并用最小 cargo probe 检查进程对象行为 |
 | `ANOM-046` | `Start-Process` 进程对象在 `WaitForExit/Refresh` 后仍返回 null ExitCode | PowerShell 5 宿主无法可靠暴露该对象的退出码 | 三个 runner 改用 `ProcessStartInfo`、并行 `ReadToEndAsync`、真实 `Process.ExitCode`；corpus 231000 通过 |
 | `ANOM-047` | Commit A clean-checkout 中 line 通过，module/station 在读取 `virtual_board_meta.json` 时分别报 `DirectoryNotFoundException` | 初步误判为产物目录替换竞争；subagent 复核完整路径长度为 254/261/263，失败点与 Windows 传统 `MAX_PATH=260` 精确吻合。clean runner 把外部 RunId 重复写入 corpus 与项目 run 目录 | 内部运行 ID 缩短为 `cc`；clone 前计算最深产物路径，超过 240 字符返回 `CLEAN_CHECKOUT_PATH_BUDGET_EXCEEDED`；保留 line 的真实 delivery fail，不改写项目逻辑 |
+| `ANOM-048` | v1 canonical 编排出现漏 build、validator 参数误用、长命令 exit code 丢失和未引用 `^{commit}` | 执行路线与脚本参数契约没有在派发前冻结；line 的 PowerShell preflight 因未引用 `^{commit}` 失败 | B1 固定为 `cargo build --bin rust_plc` -> 读取 materializer/validator param block -> materialize -> `-ManifestPath/-OutputPath/-RegistryRoot` validate；三项目核心命令均首试成功，当前 run event 分别为 5 / 12 / 5，retry 合计 0；station ledger 继续保留历史 10 次 retry |
+| `ANOM-049` | 旧 `130000/172826/200000` runs 被 Runs、Tests、Problems、Evidence 和 Search 扫描，旧 stage 可覆盖当前结果 | `artifact_roots.agent_runs = runs` 指向历史集合；一次组合 move/delete 命令因包含多个破坏性目标被 safety gate 拒绝，未发生部分删除 | 拆成显式 move 与 `git rm`；canonical `runs/` 只保留 `20260724-commit-b1`。代码层进一步按 `artifact_roots.verification` 选择 current run，历史记录只在 `/runs` 中可见 |
+| `ANOM-050` | station `source/README.md` 指向已删除的 `runs/20260723-172826/result.json` | 文档把阶段性 run id 当成稳定入口 | README 改为经 `delivery-project.json -> fixtures.api_run_result` 解析当前 run；B1 fixture 指向存在的 `runs/20260724-commit-b1/result.json` |
+| `ANOM-051` | 最终审计中出现只读 PowerShell/rg 探针错误，且主线程短暂创建后立即删除一个 `out/` placeholder | PowerShell 将对象字段内的 `if(...)` 当成命令，并拒绝 `foreach { ... } |` 形式；Windows 下未展开的 glob 被 rg 当作非法路径；一次工具选择错误把占位 patch 当成探针 | 改用预先赋值、先收集对象再输出、三个显式目录和正确 exec；placeholder 在后续动作前删除。所有错误均未改动 tracked 文件或 canonical 证据 |
+| `ANOM-052` | Two-phase evidence audit agent 越过“只读”边界，修改 UI、browser harness 与截图，并写入两条 synthetic station observation/upload；另一次启动服务因 8080 已占用失败 | agent 把最新 UI 上下文误当成委派写权限，任务边界执行不稳定 | 主线程停止其继续编辑并逐项审查；责任链改动通过双视口 harness 后纳入 `5b0bbbb`，synthetic observation 由 clean B1 回填移除，端口失败未影响现有服务 |
+| `ANOM-053` | 状态栏曾把任意 `observed` evidence 显示为 HIL evidence present | 普通点检证据与 `hil_review` 责任边界未建立类型绑定；首次修正还把 hold 状态直接传给 evidence pill，TypeScript 构建拒绝 | 状态栏与 Inspector 直接读取 `hil_review`；显式映射 hold/evidence 状态枚举；lint、build 和三项目浏览器 HIL status/reason/prerequisite 断言通过 |
+| `ANOM-054` | 多 run 项目中旧 verification、problem、test 和 evidence 可污染当前交付视图 | 项目投影遍历 `agent_runs` 全集合，同名 stage 后写覆盖 | 引入 current-run selector，优先使用 `artifact_roots.verification`；新增双 run 回归，证明旧 safety warning、gap、anomaly、test 和 evidence 不进入当前投影，完整 web-server 测试 66/66 |
+| `ANOM-055` | station B1 agent 的 route-state audit 因未显式写“禁止 UI 备用路线”失败一次 | agent 自行引入 route-governance 元数据，额外门禁超出 canonical 核心路线 | 仅补充允许目录内的 route metadata 后 audit 通过；clone/build/materialize/validator 未重跑、零重试。该摩擦计入提示/skill 优化信号 |
+| `ANOM-056` | “停止旧服务、构建、启动新服务”组合命令被安全策略整体拒绝 | 进程终止与后续构建/启动捆绑在一个长命令中，动作边界不可独立审计 | 拆成已确认 PID 的 Stop-Process、独立 cargo build、隐藏窗口 Start-Process 和 HTTP readiness 四步；新服务 PID 72012 在 8080 返回 200 |
 
 这些记录区分产品缺陷、harness 缺陷、脚本缺陷和环境问题。重复试错集中在浏览器 harness 的 controlled input、焦点与 selector，说明此前的 UI 自动化提示缺少“等待 React 状态稳定、使用窄 selector、按项目恢复 session”的明确规则。
 
@@ -141,16 +155,19 @@ Corpus `20260724-210000` 与 `20260724-211000` 均为 `harness_status=pass`。�
 | Gate | 结果 | 证据 |
 | --- | --- | --- |
 | `cargo fmt --all -- --check` | PASS | Rust 格式通过 |
-| `cargo test -p web-server` | PASS | 65 / 65 tests，包含 artifact GET 鉴权 |
+| `cargo test -p web-server` | PASS | 66 / 66 tests，包含 artifact GET 鉴权与历史 run 污染回归 |
 | `npm --prefix web-ui run lint` | PASS | ESLint 无错误 |
 | `npm --prefix web-ui run build` | PASS | Production build 通过；Monaco/Ant Design large chunk warning 保留 |
 | `node --check scripts/verify_workbench_browser.mjs` | PASS | 浏览器 harness 语法通过 |
 | Corpus 210000/211000 | PASS | 两轮三项目 materializer/validator/harness 通过；repeatability differences 0 |
 | Corpus 213000 hardening rerun | SUPERSEDED | 3481 checks / 0 errors，但 build stderr 含 PowerShell wrapper，不能作为干净日志证据 |
 | Corpus 231000 diagnostic rerun | PASS / DIRTY | 3481 checks / 0 errors；所有日志无 wrapper；specimen event/provenance 无绝对路径；该轮不声明 clean checkout |
+| Implementation clean-checkout `b1` | PASS | clone/checkout 前后 clean；提交 `5b0bbbbe301673447d1e9c3819dcdebaedc303f5`；3481 checks / 0 errors；3/3 materializer、validator、harness pass |
+| Canonical clean-clone `20260724-commit-b1` | PASS | module 929、station 1636、line 916 checks；0 errors；source commit `5b0bbbb`；dirty start=false；核心命令零重试 |
+| Current-run / HIL regression | PASS | web-server 66/66；双 run 历史污染回归通过；前端 lint/build 与双视口责任链、HIL 状态断言通过 |
 | Browser 1440x900 / 1920x1080 | PASS | 三项目逐项 pipeline/holds/wiring/provenance、field filters、session、topology、point check、deep links、无 overflow |
 | WIR negative contracts | PASS | `WIR-001` 至 `WIR-007` 均有拒绝路径 |
-| Clean-checkout corpus | PENDING FINAL COMMIT | 该门禁只能在最终提交形成后执行；执行后不再修改 tracked files |
+| Final evidence commit clean-checkout | PENDING FINAL COMMIT | 证据与报告提交形成后执行；通过后不再修改 tracked files |
 
 ## 残余风险
 

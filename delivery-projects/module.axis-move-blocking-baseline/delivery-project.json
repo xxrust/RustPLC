@@ -3,22 +3,25 @@
     "project_id":  "module.axis_move_blocking_baseline",
     "title":  "Axis Move Blocking Baseline",
     "delivery_layer":  "module",
-    "source_commit":  "0474cfb54809189bd42055f58b8a565a1b6498a8",
+    "source_commit":  "5b0bbbbe301673447d1e9c3819dcdebaedc303f5",
     "source_entry":  "source/plc/main.plc",
     "system_contract":  "source/plc/main.system.md",
+    "scenario_roots":  [
+                           "source/scenarios"
+                       ],
     "delivery_status":  "blocked",
     "artifact_roots":  {
                            "agent_runs":  "runs",
-                           "verification":  "runs/20260724-130000",
+                           "verification":  "runs/20260724-commit-b1",
                            "wiring":  "wiring",
-                           "execution":  "runs/20260724-130000/project-check/no_board_gate/artifacts",
+                           "execution":  "runs/20260724-commit-b1/project-check/no_board_gate/artifacts",
                            "release":  "release"
                        },
     "evidence_summary":  {
-                             "acceptance_pass":  8,
+                             "acceptance_pass":  10,
                              "acceptance_blocked":  3,
                              "acceptance_fail":  0,
-                             "strict_acceptance_percent":  72.7,
+                             "strict_acceptance_percent":  76.9,
                              "implementation_completeness_percent":  78
                          },
     "evidence_bindings":  {
@@ -26,10 +29,10 @@
                                                    "artifact_ref":  "delivery-projects/module.axis-move-blocking-baseline/source/plc/main.plc",
                                                    "digest":  {
                                                                   "algorithm":  "sha256",
-                                                                  "value":  "9fa5a9fbe75da642466e11dfe02bc2744112acf72ab357b60e2cf6f59e9c447a",
+                                                                  "value":  "0f9e6d8401a9cb98a9dbb28db4d040ded16dddcd77773003b2edac28a8a7cce4",
                                                                   "normalization":  "utf8_lf"
                                                               },
-                                                   "source_commit":  "0474cfb54809189bd42055f58b8a565a1b6498a8",
+                                                   "source_commit":  "5b0bbbbe301673447d1e9c3819dcdebaedc303f5",
                                                    "freshness":  {
                                                                      "status":  "input_snapshot",
                                                                      "basis":  "Project-local source entry included in the same-run input manifest."
@@ -42,20 +45,20 @@
                                                                      "value":  "6cd8d5ab3a4bec471c87c5bbe605574d05a7f6d062c9897c1993ac6545e6d992",
                                                                      "normalization":  "utf8_lf"
                                                                  },
-                                                      "source_commit":  "0474cfb54809189bd42055f58b8a565a1b6498a8",
+                                                      "source_commit":  "5b0bbbbe301673447d1e9c3819dcdebaedc303f5",
                                                       "freshness":  {
                                                                         "status":  "input_snapshot",
                                                                         "basis":  "Project-local system contract included in the source snapshot."
                                                                     }
                                                   },
                               "authoritative_result":  {
-                                                           "artifact_ref":  "delivery-projects/module.axis-move-blocking-baseline/runs/20260724-130000/result.json",
+                                                           "artifact_ref":  "delivery-projects/module.axis-move-blocking-baseline/runs/20260724-commit-b1/result.json",
                                                            "digest":  {
                                                                           "algorithm":  "sha256",
-                                                                          "value":  "86485312e4f14b4ed07399f8633b04bc44d37397a436f6785f4082303063a3eb",
+                                                                          "value":  "d9f8effa9fa2b7bb9da2e4406cd73f435d79863190e7ea3420818e767dab5167",
                                                                           "normalization":  "utf8_lf"
                                                                       },
-                                                           "source_commit":  "0474cfb54809189bd42055f58b8a565a1b6498a8",
+                                                           "source_commit":  "5b0bbbbe301673447d1e9c3819dcdebaedc303f5",
                                                            "freshness":  {
                                                                              "status":  "same_run",
                                                                              "basis":  "Current materialization result."
@@ -68,67 +71,93 @@
                                                                            "value":  "1e5e618560734fb366a7c473bdd76857b0d9710512efbb6fbce1e30418736c87",
                                                                            "normalization":  "utf8_lf"
                                                                        },
-                                                            "source_commit":  "0474cfb54809189bd42055f58b8a565a1b6498a8",
+                                                            "source_commit":  "5b0bbbbe301673447d1e9c3819dcdebaedc303f5",
                                                             "freshness":  {
                                                                               "status":  "reviewed_post_run",
                                                                               "basis":  "Committed bounded completeness review."
                                                                           }
-                                                        }
+                                                        },
+                              "geometry_export":  {
+                                                      "artifact_ref":  "delivery-projects/module.axis-move-blocking-baseline/runs/20260724-commit-b1/compile/geometry-export-status.json",
+                                                      "digest":  {
+                                                                     "algorithm":  "sha256",
+                                                                     "value":  "2c81f4ef1255f5ba35fa0364dc0ccc708cfb4c5809d1411d15313352433211b6",
+                                                                     "normalization":  "utf8_lf"
+                                                                 },
+                                                      "source_commit":  "5b0bbbbe301673447d1e9c3819dcdebaedc303f5",
+                                                      "freshness":  {
+                                                                        "status":  "same_run",
+                                                                        "basis":  "Current-run geometry-export status; a failed export remains a blocker and never substitutes an empty graph."
+                                                                    }
+                                                  },
+                              "geometry":  {
+                                               "artifact_ref":  "delivery-projects/module.axis-move-blocking-baseline/runs/20260724-commit-b1/compile/geometry.json",
+                                               "digest":  {
+                                                              "algorithm":  "sha256",
+                                                              "value":  "05570a5f0a60fbbadea823371b3188926683abe752861de8c94a300b53987b81",
+                                                              "normalization":  "utf8_lf"
+                                                          },
+                                               "source_commit":  "5b0bbbbe301673447d1e9c3819dcdebaedc303f5",
+                                               "freshness":  {
+                                                                 "status":  "same_run",
+                                                                 "basis":  "Compiler-owned semantic-twin geometry from this run."
+                                                             }
+                                           }
                           },
     "fixtures":  {
                      "api_run_result":  {
-                                            "fixture_ref":  "runs/20260724-130000/result.json",
+                                            "fixture_ref":  "runs/20260724-commit-b1/result.json",
                                             "digest":  {
                                                            "algorithm":  "sha256",
-                                                           "value":  "86485312e4f14b4ed07399f8633b04bc44d37397a436f6785f4082303063a3eb",
+                                                           "value":  "d9f8effa9fa2b7bb9da2e4406cd73f435d79863190e7ea3420818e767dab5167",
                                                            "normalization":  "utf8_lf"
                                                        }
                                         },
                      "provenance":  {
-                                        "fixture_ref":  "runs/20260724-130000/provenance.json",
+                                        "fixture_ref":  "runs/20260724-commit-b1/provenance.json",
                                         "digest":  {
                                                        "algorithm":  "sha256",
-                                                       "value":  "20cdf9b649bb9849d82de2a65c39d7d588694f275ff37333733649a55bd3860d",
+                                                       "value":  "303a30a6872719d0257c83bda784b31c5905cb4ef332e02836f4197ae4a53b21",
                                                        "normalization":  "utf8_lf"
                                                    }
                                     },
                      "input_manifest":  {
-                                            "fixture_ref":  "runs/20260724-130000/input-manifest.json",
+                                            "fixture_ref":  "runs/20260724-commit-b1/input-manifest.json",
                                             "digest":  {
                                                            "algorithm":  "sha256",
-                                                           "value":  "e68dd0622a6293f5e10cc044e8ee125699b199fbc6821ee0bf2405dc5dbdea57",
+                                                           "value":  "0de9e58f9548ee985a07f4fa55c2ae3f1f6ebe30f91137ce27701f9f704ac4e9",
                                                            "normalization":  "utf8_lf"
                                                        }
                                         },
                      "anomalies":  {
-                                       "fixture_ref":  "runs/20260724-130000/anomalies.json",
+                                       "fixture_ref":  "runs/20260724-commit-b1/anomalies.json",
                                        "digest":  {
                                                       "algorithm":  "sha256",
-                                                      "value":  "b94a987b8398f35072c821c19596dcdc1fabd8e2d66431fb33960ff3d00c265c",
+                                                      "value":  "38fd9190236c67b7a3314d0234a811be9e38a6923c2f6d39da83c3cd89e3a473",
                                                       "normalization":  "utf8_lf"
                                                   }
                                    },
                      "corrections":  {
-                                         "fixture_ref":  "runs/20260724-130000/corrections.json",
+                                         "fixture_ref":  "runs/20260724-commit-b1/corrections.json",
                                          "digest":  {
                                                         "algorithm":  "sha256",
-                                                        "value":  "e9a6b4f44cddd0b1c68be8823014e804ee7ae7e6e227101df7747a83cfe2acbc",
+                                                        "value":  "3aee0af12fcae1a6c4b1257266339723b605a23efd972e0a117485c8b9a4aaff",
                                                         "normalization":  "utf8_lf"
                                                     }
                                      },
                      "compiler_stages":  {
-                                             "fixture_ref":  "runs/20260724-130000/compiler-stages.json",
+                                             "fixture_ref":  "runs/20260724-commit-b1/compiler-stages.json",
                                              "digest":  {
                                                             "algorithm":  "sha256",
-                                                            "value":  "07b71e06578a2f5ccbcdca0e8bc5e9a3852d79176b8cf8c069b0b1fa4e6516ce",
+                                                            "value":  "8b2ba4323d38692ebaf77c91e831b5325fc4659f639c0dd119515f31a2398a45",
                                                             "normalization":  "utf8_lf"
                                                         }
                                          },
                      "agent_events":  {
-                                          "fixture_ref":  "runs/20260724-130000/agent-events.json",
+                                          "fixture_ref":  "runs/20260724-commit-b1/agent-events.json",
                                           "digest":  {
                                                          "algorithm":  "sha256",
-                                                         "value":  "e5b20db4edf7ef3b8d8338c77c0744f00b296db068e13c5bb5fcd3e4801e6606",
+                                                         "value":  "9671de228e41790a160b6ea0ce5cd96ff7a0a0f20e5ada0328aadb247af9f100",
                                                          "normalization":  "utf8_lf"
                                                      }
                                       },
@@ -136,7 +165,7 @@
                                                  "fixture_ref":  "wiring/point-checks.json",
                                                  "digest":  {
                                                                 "algorithm":  "sha256",
-                                                                "value":  "2bf02d561f48c2d02cec6b06e992366c8ef32e1b87fa9c4f7b889842b2fa0769",
+                                                                "value":  "dbe7b80d0f55d2a1e64ed6a6a9b0c8a04f8719b82308163ae3ac23bcaca1ecd0",
                                                                 "normalization":  "utf8_lf"
                                                             }
                                              },
@@ -144,9 +173,25 @@
                                          "fixture_ref":  "release/human-holds.json",
                                          "digest":  {
                                                         "algorithm":  "sha256",
-                                                        "value":  "0b22fcaf5a401037fd0537992cc3d1513c60bdbb7ffa81c514f0d51dd9cc4524",
+                                                        "value":  "8815472e78ce3ab066b9127f41af3ec0f15c99d36172832fead76c44e0334119",
                                                         "normalization":  "utf8_lf"
                                                     }
-                                     }
+                                     },
+                     "geometry_export":  {
+                                             "fixture_ref":  "runs/20260724-commit-b1/compile/geometry-export-status.json",
+                                             "digest":  {
+                                                            "algorithm":  "sha256",
+                                                            "value":  "2c81f4ef1255f5ba35fa0364dc0ccc708cfb4c5809d1411d15313352433211b6",
+                                                            "normalization":  "utf8_lf"
+                                                        }
+                                         },
+                     "geometry":  {
+                                      "fixture_ref":  "runs/20260724-commit-b1/compile/geometry.json",
+                                      "digest":  {
+                                                     "algorithm":  "sha256",
+                                                     "value":  "05570a5f0a60fbbadea823371b3188926683abe752861de8c94a300b53987b81",
+                                                     "normalization":  "utf8_lf"
+                                                 }
+                                  }
                  }
 }

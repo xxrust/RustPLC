@@ -1,0 +1,8 @@
+Verification passed:
+  - Safety: 完备证明 (depth 27)
+    Coverage: bound 1/1, degraded 0, skipped 0
+  - Liveness: 通过
+  - Timing: 通过
+  - Causality: 通过
+verification_report: delivery-projects/line.three-station-assembly/runs/20260724-commit-b1/compile/verification_report.json
+ir_bundle: delivery-projects/line.three-station-assembly/runs/20260724-commit-b1/compile/ir_bundle.json

@@ -1,0 +1,248 @@
+{
+    "schema_version":  1,
+    "project_id":  "line.three_station_assembly",
+    "run_id":  "20260724-commit-b1",
+    "source_commit":  "5b0bbbbe301673447d1e9c3819dcdebaedc303f5",
+    "stages":  [
+                   {
+                       "stage":  "Parser",
+                       "status":  "verified",
+                       "diagnostics":  [
+
+                                       ],
+                       "evidence":  {
+                                        "artifact_ref":  "delivery-projects/line.three-station-assembly/runs/20260724-commit-b1/compile/verification_report.json",
+                                        "digest":  {
+                                                       "algorithm":  "sha256",
+                                                       "value":  "f1da1ea34090a14765bdb391af5d882965dfa80474f07f29769ac9fdfa36e173",
+                                                       "normalization":  "utf8_lf"
+                                                   },
+                                        "source_commit":  "5b0bbbbe301673447d1e9c3819dcdebaedc303f5",
+                                        "freshness":  {
+                                                          "status":  "same_run",
+                                                          "basis":  "Compiler-owned report from this run."
+                                                      }
+                                    }
+                   },
+                   {
+                       "stage":  "AST",
+                       "status":  "derived",
+                       "diagnostics":  [
+                                           "No standalone AST artifact is emitted."
+                                       ],
+                       "evidence":  {
+                                        "artifact_ref":  "delivery-projects/line.three-station-assembly/runs/20260724-commit-b1/compile/ir_bundle.json",
+                                        "digest":  {
+                                                       "algorithm":  "sha256",
+                                                       "value":  "13a14f66f16cfc566c6d5d232467d31a28956ee6ead33a8e4aa6eb73fc79df13",
+                                                       "normalization":  "utf8_lf"
+                                                   },
+                                        "source_commit":  "5b0bbbbe301673447d1e9c3819dcdebaedc303f5",
+                                        "freshness":  {
+                                                          "status":  "same_run",
+                                                          "basis":  "IR emission proves AST lowering was exercised."
+                                                      }
+                                    }
+                   },
+                   {
+                       "stage":  "Semantic",
+                       "status":  "verified",
+                       "diagnostics":  [
+
+                                       ],
+                       "evidence":  {
+                                        "artifact_ref":  "delivery-projects/line.three-station-assembly/runs/20260724-commit-b1/compile/ir_bundle.json",
+                                        "digest":  {
+                                                       "algorithm":  "sha256",
+                                                       "value":  "13a14f66f16cfc566c6d5d232467d31a28956ee6ead33a8e4aa6eb73fc79df13",
+                                                       "normalization":  "utf8_lf"
+                                                   },
+                                        "source_commit":  "5b0bbbbe301673447d1e9c3819dcdebaedc303f5",
+                                        "freshness":  {
+                                                          "status":  "same_run",
+                                                          "basis":  "Semantic lowering produced the current-run IR."
+                                                      }
+                                    }
+                   },
+                   {
+                       "stage":  "IR",
+                       "status":  "verified",
+                       "diagnostics":  [
+
+                                       ],
+                       "evidence":  {
+                                        "artifact_ref":  "delivery-projects/line.three-station-assembly/runs/20260724-commit-b1/compile/ir_bundle.json",
+                                        "digest":  {
+                                                       "algorithm":  "sha256",
+                                                       "value":  "13a14f66f16cfc566c6d5d232467d31a28956ee6ead33a8e4aa6eb73fc79df13",
+                                                       "normalization":  "utf8_lf"
+                                                   },
+                                        "source_commit":  "5b0bbbbe301673447d1e9c3819dcdebaedc303f5",
+                                        "freshness":  {
+                                                          "status":  "same_run",
+                                                          "basis":  "Current-run IR artifact."
+                                                      }
+                                    }
+                   },
+                   {
+                       "stage":  "Safety",
+                       "status":  "verified",
+                       "diagnostics":  [
+
+                                       ],
+                       "evidence":  {
+                                        "artifact_ref":  "delivery-projects/line.three-station-assembly/runs/20260724-commit-b1/compile/verification_report.json",
+                                        "digest":  {
+                                                       "algorithm":  "sha256",
+                                                       "value":  "f1da1ea34090a14765bdb391af5d882965dfa80474f07f29769ac9fdfa36e173",
+                                                       "normalization":  "utf8_lf"
+                                                   },
+                                        "source_commit":  "5b0bbbbe301673447d1e9c3819dcdebaedc303f5",
+                                        "freshness":  {
+                                                          "status":  "same_run",
+                                                          "basis":  "Safety section in compiler-owned report."
+                                                      }
+                                    }
+                   },
+                   {
+                       "stage":  "Liveness",
+                       "status":  "verified",
+                       "diagnostics":  [
+
+                                       ],
+                       "evidence":  {
+                                        "artifact_ref":  "delivery-projects/line.three-station-assembly/runs/20260724-commit-b1/compile/verification_report.json",
+                                        "digest":  {
+                                                       "algorithm":  "sha256",
+                                                       "value":  "f1da1ea34090a14765bdb391af5d882965dfa80474f07f29769ac9fdfa36e173",
+                                                       "normalization":  "utf8_lf"
+                                                   },
+                                        "source_commit":  "5b0bbbbe301673447d1e9c3819dcdebaedc303f5",
+                                        "freshness":  {
+                                                          "status":  "same_run",
+                                                          "basis":  "Liveness section in compiler-owned report."
+                                                      }
+                                    }
+                   },
+                   {
+                       "stage":  "Timing",
+                       "status":  "verified_with_blocker",
+                       "diagnostics":  [
+                                           "GAP-HARDWARE-TIMING-EVIDENCE"
+                                       ],
+                       "evidence":  {
+                                        "artifact_ref":  "delivery-projects/line.three-station-assembly/runs/20260724-commit-b1/compile/verification_report.json",
+                                        "digest":  {
+                                                       "algorithm":  "sha256",
+                                                       "value":  "f1da1ea34090a14765bdb391af5d882965dfa80474f07f29769ac9fdfa36e173",
+                                                       "normalization":  "utf8_lf"
+                                                   },
+                                        "source_commit":  "5b0bbbbe301673447d1e9c3819dcdebaedc303f5",
+                                        "freshness":  {
+                                                          "status":  "same_run",
+                                                          "basis":  "Formal timing is distinct from target-hardware timing."
+                                                      }
+                                    }
+                   },
+                   {
+                       "stage":  "Causality",
+                       "status":  "verified",
+                       "diagnostics":  [
+
+                                       ],
+                       "evidence":  {
+                                        "artifact_ref":  "delivery-projects/line.three-station-assembly/runs/20260724-commit-b1/compile/verification_report.json",
+                                        "digest":  {
+                                                       "algorithm":  "sha256",
+                                                       "value":  "f1da1ea34090a14765bdb391af5d882965dfa80474f07f29769ac9fdfa36e173",
+                                                       "normalization":  "utf8_lf"
+                                                   },
+                                        "source_commit":  "5b0bbbbe301673447d1e9c3819dcdebaedc303f5",
+                                        "freshness":  {
+                                                          "status":  "same_run",
+                                                          "basis":  "Causality section in compiler-owned report."
+                                                      }
+                                    }
+                   },
+                   {
+                       "stage":  "Runtime Bridge / Simulation",
+                       "status":  "failed",
+                       "diagnostics":  [
+                                           "GAP-SCENARIO-SEMANTIC-GUARD-SUPPORT"
+                                       ],
+                       "evidence":  {
+                                        "artifact_ref":  "delivery-projects/line.three-station-assembly/runs/20260724-commit-b1/project-check/project_check_report.json",
+                                        "digest":  {
+                                                       "algorithm":  "sha256",
+                                                       "value":  "0891f45381c0dc779e2e45ef5baf8c87d538c409634f6225c2b707d60cc1b062",
+                                                       "normalization":  "utf8_lf"
+                                                   },
+                                        "source_commit":  "5b0bbbbe301673447d1e9c3819dcdebaedc303f5",
+                                        "freshness":  {
+                                                          "status":  "same_run",
+                                                          "basis":  "Nominal project-check and no-board-gate evidence."
+                                                      }
+                                    }
+                   },
+                   {
+                       "stage":  "Process Model Check",
+                       "status":  "not_applicable",
+                       "diagnostics":  [
+                                           "No process model is declared by this project."
+                                       ],
+                       "evidence":  {
+                                        "artifact_ref":  "delivery-projects/line.three-station-assembly/source/plc/main.system.md",
+                                        "digest":  {
+                                                       "algorithm":  "sha256",
+                                                       "value":  "5879606c681251e3d02d08caa12169e7436a0071785c1233079cd48b9101a44f",
+                                                       "normalization":  "utf8_lf"
+                                                   },
+                                        "source_commit":  "5b0bbbbe301673447d1e9c3819dcdebaedc303f5",
+                                        "freshness":  {
+                                                          "status":  "input_snapshot",
+                                                          "basis":  "System contract defines this project boundary."
+                                                      }
+                                    }
+                   },
+                   {
+                       "stage":  "Intent Alignment",
+                       "status":  "not_exercised",
+                       "diagnostics":  [
+                                           "No intent-alignment contract is declared."
+                                       ],
+                       "evidence":  {
+                                        "artifact_ref":  "delivery-projects/line.three-station-assembly/source/plc/main.system.md",
+                                        "digest":  {
+                                                       "algorithm":  "sha256",
+                                                       "value":  "5879606c681251e3d02d08caa12169e7436a0071785c1233079cd48b9101a44f",
+                                                       "normalization":  "utf8_lf"
+                                                   },
+                                        "source_commit":  "5b0bbbbe301673447d1e9c3819dcdebaedc303f5",
+                                        "freshness":  {
+                                                          "status":  "input_snapshot",
+                                                          "basis":  "No alignment claim is made."
+                                                      }
+                                    }
+                   },
+                   {
+                       "stage":  "Codegen",
+                       "status":  "not_exercised",
+                       "diagnostics":  [
+                                           "No same-run codegen artifact exists."
+                                       ],
+                       "evidence":  {
+                                        "artifact_ref":  "delivery-projects/line.three-station-assembly/runs/20260724-commit-b1/anomalies.json",
+                                        "digest":  {
+                                                       "algorithm":  "sha256",
+                                                       "value":  "4c099847532747477f7cfe8117a326a3559d4fefc67442d4bd4b749594baa2bc",
+                                                       "normalization":  "utf8_lf"
+                                                   },
+                                        "source_commit":  "5b0bbbbe301673447d1e9c3819dcdebaedc303f5",
+                                        "freshness":  {
+                                                          "status":  "same_run",
+                                                          "basis":  "The run records codegen as not exercised."
+                                                      }
+                                    }
+                   }
+               ]
+}

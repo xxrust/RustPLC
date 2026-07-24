@@ -1,0 +1,587 @@
+{
+  "schema_version": 2,
+  "artifact_kind": "semantic_twin_geometry",
+  "source_path": "delivery-projects/module.axis-move-blocking-baseline/source/plc/main.plc",
+  "summary": {
+    "task_count": 2,
+    "step_count": 7,
+    "transition_count": 5,
+    "device_count": 2,
+    "resource_count": 0,
+    "timing_rule_count": 0,
+    "causality_chain_count": 0,
+    "observed_transition_count": 0,
+    "intent_mismatch_count": 0
+  },
+  "lanes": [
+    {
+      "id": "topology",
+      "kind": "topology",
+      "label": "Topology",
+      "position": 0
+    },
+    {
+      "id": "evidence",
+      "kind": "evidence",
+      "label": "Evidence",
+      "position": 1
+    },
+    {
+      "id": "task:fault",
+      "kind": "task",
+      "label": "fault",
+      "position": 2
+    },
+    {
+      "id": "task:main",
+      "kind": "task",
+      "label": "main",
+      "position": 3
+    }
+  ],
+  "nodes": [
+    {
+      "id": "task:fault",
+      "kind": "task",
+      "label": "fault",
+      "lane_id": "task:fault",
+      "views": [
+        "constellation",
+        "orbit"
+      ],
+      "evidence_status": "derived",
+      "attributes": {
+        "blocking_state": "ready",
+        "current_state": "fault.timeout",
+        "entry_state": "fault.timeout"
+      }
+    },
+    {
+      "id": "task:main",
+      "kind": "task",
+      "label": "main",
+      "lane_id": "task:main",
+      "views": [
+        "constellation",
+        "orbit"
+      ],
+      "evidence_status": "derived",
+      "attributes": {
+        "blocking_state": "ready",
+        "current_state": "main.enable_axis",
+        "entry_state": "main.enable_axis",
+        "pending_actions": "axis_move_relative:axis_x"
+      }
+    },
+    {
+      "id": "step:main.enable_axis",
+      "kind": "step",
+      "label": "enable_axis",
+      "lane_id": "task:main",
+      "views": [
+        "constellation",
+        "orbit"
+      ],
+      "evidence_status": "derived",
+      "attributes": {
+        "initial": "true"
+      }
+    },
+    {
+      "id": "step:main.move_axis",
+      "kind": "step",
+      "label": "move_axis",
+      "lane_id": "task:main",
+      "views": [
+        "constellation",
+        "orbit"
+      ],
+      "evidence_status": "derived"
+    },
+    {
+      "id": "step:main.move_done",
+      "kind": "step",
+      "label": "move_done",
+      "lane_id": "task:main",
+      "views": [
+        "constellation",
+        "orbit"
+      ],
+      "evidence_status": "derived"
+    },
+    {
+      "id": "step:fault.timeout",
+      "kind": "step",
+      "label": "timeout",
+      "lane_id": "task:fault",
+      "views": [
+        "constellation",
+        "orbit"
+      ],
+      "evidence_status": "derived"
+    },
+    {
+      "id": "step:fault.reject",
+      "kind": "step",
+      "label": "reject",
+      "lane_id": "task:fault",
+      "views": [
+        "constellation",
+        "orbit"
+      ],
+      "evidence_status": "derived"
+    },
+    {
+      "id": "step:fault.motion_fault",
+      "kind": "step",
+      "label": "motion_fault",
+      "lane_id": "task:fault",
+      "views": [
+        "constellation",
+        "orbit"
+      ],
+      "evidence_status": "derived"
+    },
+    {
+      "id": "step:fault.safety_fault",
+      "kind": "step",
+      "label": "safety_fault",
+      "lane_id": "task:fault",
+      "views": [
+        "constellation",
+        "orbit"
+      ],
+      "evidence_status": "derived"
+    },
+    {
+      "id": "device:Y0",
+      "kind": "device",
+      "label": "Y0",
+      "lane_id": "topology",
+      "views": [
+        "constellation"
+      ],
+      "evidence_status": "authored",
+      "attributes": {
+        "device_kind": "digital_output"
+      }
+    },
+    {
+      "id": "device:axis_x",
+      "kind": "device",
+      "label": "axis_x",
+      "lane_id": "topology",
+      "views": [
+        "constellation"
+      ],
+      "evidence_status": "authored",
+      "attributes": {
+        "device_kind": "stepper_motor"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "contains:main:enable_axis",
+      "kind": "contains",
+      "from": "task:main",
+      "to": "step:main.enable_axis",
+      "label": "contains",
+      "views": [
+        "constellation"
+      ],
+      "evidence_status": "derived"
+    },
+    {
+      "id": "contains:main:move_axis",
+      "kind": "contains",
+      "from": "task:main",
+      "to": "step:main.move_axis",
+      "label": "contains",
+      "views": [
+        "constellation"
+      ],
+      "evidence_status": "derived"
+    },
+    {
+      "id": "contains:main:move_done",
+      "kind": "contains",
+      "from": "task:main",
+      "to": "step:main.move_done",
+      "label": "contains",
+      "views": [
+        "constellation"
+      ],
+      "evidence_status": "derived"
+    },
+    {
+      "id": "contains:fault:timeout",
+      "kind": "contains",
+      "from": "task:fault",
+      "to": "step:fault.timeout",
+      "label": "contains",
+      "views": [
+        "constellation"
+      ],
+      "evidence_status": "derived"
+    },
+    {
+      "id": "contains:fault:reject",
+      "kind": "contains",
+      "from": "task:fault",
+      "to": "step:fault.reject",
+      "label": "contains",
+      "views": [
+        "constellation"
+      ],
+      "evidence_status": "derived"
+    },
+    {
+      "id": "contains:fault:motion_fault",
+      "kind": "contains",
+      "from": "task:fault",
+      "to": "step:fault.motion_fault",
+      "label": "contains",
+      "views": [
+        "constellation"
+      ],
+      "evidence_status": "derived"
+    },
+    {
+      "id": "contains:fault:safety_fault",
+      "kind": "contains",
+      "from": "task:fault",
+      "to": "step:fault.safety_fault",
+      "label": "contains",
+      "views": [
+        "constellation"
+      ],
+      "evidence_status": "derived"
+    },
+    {
+      "id": "topology-link:1",
+      "kind": "topology_link",
+      "from": "device:Y0",
+      "to": "device:axis_x",
+      "label": "electrical",
+      "views": [
+        "constellation"
+      ],
+      "evidence_status": "authored",
+      "attributes": {
+        "link_kind": "electrical",
+        "to_port": "enable"
+      }
+    },
+    {
+      "id": "transition:0",
+      "kind": "transition",
+      "from": "step:main.enable_axis",
+      "to": "step:main.move_axis",
+      "label": "always",
+      "views": [
+        "orbit",
+        "evidence"
+      ],
+      "evidence_status": "derived",
+      "attributes": {
+        "actions": "set axis_x on"
+      }
+    },
+    {
+      "id": "transition:1",
+      "kind": "transition",
+      "from": "step:main.move_axis",
+      "to": "step:main.move_done",
+      "label": "always",
+      "views": [
+        "orbit",
+        "evidence"
+      ],
+      "evidence_status": "derived",
+      "attributes": {
+        "actions": "axis_move_relative axis_x 20"
+      }
+    },
+    {
+      "id": "transition:2",
+      "kind": "transition",
+      "from": "step:fault.timeout",
+      "to": "step:fault.reject",
+      "label": "always",
+      "views": [
+        "orbit",
+        "evidence"
+      ],
+      "evidence_status": "derived",
+      "attributes": {
+        "actions": "log axis move timeout"
+      }
+    },
+    {
+      "id": "transition:3",
+      "kind": "transition",
+      "from": "step:fault.reject",
+      "to": "step:fault.motion_fault",
+      "label": "always",
+      "views": [
+        "orbit",
+        "evidence"
+      ],
+      "evidence_status": "derived",
+      "attributes": {
+        "actions": "log axis move reject"
+      }
+    },
+    {
+      "id": "transition:4",
+      "kind": "transition",
+      "from": "step:fault.motion_fault",
+      "to": "step:fault.safety_fault",
+      "label": "always",
+      "views": [
+        "orbit",
+        "evidence"
+      ],
+      "evidence_status": "derived",
+      "attributes": {
+        "actions": "log axis move motion fault"
+      }
+    }
+  ],
+  "overlays": {},
+  "narrative": {
+    "tasks": [
+      {
+        "task_id": "task:fault",
+        "label": "fault",
+        "entry_step_id": "step:fault.timeout",
+        "current_step_id": "step:fault.timeout",
+        "blocking_state": "ready",
+        "main_path_step_ids": [
+          "step:fault.timeout",
+          "step:fault.reject",
+          "step:fault.motion_fault",
+          "step:fault.safety_fault"
+        ],
+        "coverage": {
+          "uncovered_step_count": 4,
+          "trace_available": false,
+          "intent_available": false
+        },
+        "steps": [
+          {
+            "step_id": "step:fault.timeout",
+            "label": "timeout",
+            "index": 0,
+            "is_initial": true,
+            "is_current": true,
+            "outgoing": [
+              {
+                "transition_id": "transition:2",
+                "to_step_id": "step:fault.reject",
+                "to_step_label": "reject",
+                "guard_kind": "always",
+                "guard_label": "always",
+                "actions": [
+                  {
+                    "kind": "log",
+                    "label": "log axis move timeout"
+                  }
+                ],
+                "observed": false
+              }
+            ]
+          },
+          {
+            "step_id": "step:fault.reject",
+            "label": "reject",
+            "index": 1,
+            "is_initial": false,
+            "is_current": false,
+            "incoming_transition_ids": [
+              "transition:2"
+            ],
+            "outgoing": [
+              {
+                "transition_id": "transition:3",
+                "to_step_id": "step:fault.motion_fault",
+                "to_step_label": "motion_fault",
+                "guard_kind": "always",
+                "guard_label": "always",
+                "actions": [
+                  {
+                    "kind": "log",
+                    "label": "log axis move reject"
+                  }
+                ],
+                "observed": false
+              }
+            ]
+          },
+          {
+            "step_id": "step:fault.motion_fault",
+            "label": "motion_fault",
+            "index": 2,
+            "is_initial": false,
+            "is_current": false,
+            "incoming_transition_ids": [
+              "transition:3"
+            ],
+            "outgoing": [
+              {
+                "transition_id": "transition:4",
+                "to_step_id": "step:fault.safety_fault",
+                "to_step_label": "safety_fault",
+                "guard_kind": "always",
+                "guard_label": "always",
+                "actions": [
+                  {
+                    "kind": "log",
+                    "label": "log axis move motion fault"
+                  }
+                ],
+                "observed": false
+              }
+            ]
+          },
+          {
+            "step_id": "step:fault.safety_fault",
+            "label": "safety_fault",
+            "index": 3,
+            "is_initial": false,
+            "is_current": false,
+            "incoming_transition_ids": [
+              "transition:4"
+            ]
+          }
+        ]
+      },
+      {
+        "task_id": "task:main",
+        "label": "main",
+        "entry_step_id": "step:main.enable_axis",
+        "current_step_id": "step:main.enable_axis",
+        "blocking_state": "ready",
+        "pending_actions": [
+          "axis_move_relative:axis_x"
+        ],
+        "main_path_step_ids": [
+          "step:main.enable_axis",
+          "step:main.move_axis",
+          "step:main.move_done"
+        ],
+        "coverage": {
+          "uncovered_step_count": 1,
+          "trace_available": false,
+          "intent_available": false
+        },
+        "steps": [
+          {
+            "step_id": "step:main.enable_axis",
+            "label": "enable_axis",
+            "index": 0,
+            "is_initial": true,
+            "is_current": true,
+            "outgoing": [
+              {
+                "transition_id": "transition:0",
+                "to_step_id": "step:main.move_axis",
+                "to_step_label": "move_axis",
+                "guard_kind": "always",
+                "guard_label": "always",
+                "actions": [
+                  {
+                    "kind": "set",
+                    "label": "set axis_x on",
+                    "target_device_id": "device:axis_x",
+                    "target_port": "enable"
+                  }
+                ],
+                "observed": false
+              }
+            ],
+            "device_chains": [
+              {
+                "source_kind": "action_target",
+                "explanation": "set axis_x on",
+                "command_devices": [
+                  {
+                    "device_id": "device:Y0",
+                    "label": "Y0",
+                    "kind": "digital_output"
+                  }
+                ],
+                "actuator_devices": [
+                  {
+                    "device_id": "device:axis_x",
+                    "label": "axis_x",
+                    "kind": "stepper_motor"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "step_id": "step:main.move_axis",
+            "label": "move_axis",
+            "index": 1,
+            "is_initial": false,
+            "is_current": false,
+            "incoming_transition_ids": [
+              "transition:0"
+            ],
+            "outgoing": [
+              {
+                "transition_id": "transition:1",
+                "to_step_id": "step:main.move_done",
+                "to_step_label": "move_done",
+                "guard_kind": "always",
+                "guard_label": "always",
+                "actions": [
+                  {
+                    "kind": "axis_move_relative",
+                    "label": "axis_move_relative axis_x 20",
+                    "target_device_id": "device:axis_x",
+                    "target_port": "self"
+                  }
+                ],
+                "observed": false
+              }
+            ],
+            "device_chains": [
+              {
+                "source_kind": "action_target",
+                "explanation": "axis_move_relative axis_x 20",
+                "command_devices": [
+                  {
+                    "device_id": "device:Y0",
+                    "label": "Y0",
+                    "kind": "digital_output"
+                  }
+                ],
+                "actuator_devices": [
+                  {
+                    "device_id": "device:axis_x",
+                    "label": "axis_x",
+                    "kind": "stepper_motor"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "step_id": "step:main.move_done",
+            "label": "move_done",
+            "index": 2,
+            "is_initial": false,
+            "is_current": false,
+            "incoming_transition_ids": [
+              "transition:1"
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

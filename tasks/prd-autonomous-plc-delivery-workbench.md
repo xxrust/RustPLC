@@ -2,7 +2,7 @@
 
 ## Status
 
-Core workbench operational and self-tested on 2026-07-24. The desktop shell, exact three-project registry, evidence APIs, physical point checks, human holds, project-scoped compiler evidence, and corpus harness are operational. Full product completion remains open because file-level unattended source-authoring attribution, regulatory signature requirements, and a complete WCAG 2.1 AA audit are not yet proven. Clean-checkout proof is completed only after the final committed revision passes the clean-checkout corpus runner.
+Core workbench operational and self-tested on 2026-07-24. The desktop shell, exact three-project registry, evidence APIs, physical point checks, human holds, project-scoped compiler evidence, current-run projection, and corpus harness are operational. Canonical evidence comes from three independent clean clones of implementation commit `5b0bbbbe301673447d1e9c3819dcdebaedc303f5`; its clean-checkout corpus passed with 3481 checks and 0 errors. HIL status is bound to the `hil_review` hold, and the project overview exposes the Agent, compiler, physical-validation, and release responsibility chain. Full product completion remains open because file-level unattended source-authoring attribution, regulatory signature requirements, and a complete WCAG 2.1 AA audit are not yet proven. Final clean-checkout proof is completed only after the evidence commit passes the same runner.
 
 ## 1. Introduction
 

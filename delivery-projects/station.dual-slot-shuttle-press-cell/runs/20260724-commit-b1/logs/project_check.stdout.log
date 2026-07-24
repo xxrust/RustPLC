@@ -1,0 +1,160 @@
+{
+  "schema_version": 1,
+  "command": "project-check",
+  "output": "json",
+  "source_plc": "delivery-projects/station.dual-slot-shuttle-press-cell/source/rustplc.bundle.toml",
+  "scenario": "delivery-projects/station.dual-slot-shuttle-press-cell/source/scenarios/nominal_two_part.yaml",
+  "out_dir": "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260724-commit-b1/project-check",
+  "status": "fail",
+  "failed_steps": 1,
+  "steps": [
+    {
+      "name": "compile_verify",
+      "command": [
+        "target\\debug\\rust_plc.exe",
+        "delivery-projects/station.dual-slot-shuttle-press-cell/source/rustplc.bundle.toml",
+        "--report",
+        "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260724-commit-b1/project-check\\compile_verify\\verification_report.json",
+        "--no-print-ir"
+      ],
+      "status": "pass",
+      "exit_code": 0,
+      "stdout_log": "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260724-commit-b1/project-check\\compile_verify\\stdout.log",
+      "stderr_log": "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260724-commit-b1/project-check\\compile_verify\\stderr.log",
+      "report_json": "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260724-commit-b1/project-check\\compile_verify\\verification_report.json",
+      "artifacts_dir": null,
+      "intent_alignment_verdict": null,
+      "intent_alignment_primary_mismatch_kind": null,
+      "intent_alignment_blocker_kind": null,
+      "intent_alignment_comparator_version": null
+    },
+    {
+      "name": "sequence_lint",
+      "command": [
+        "target\\debug\\rust_plc.exe",
+        "sequence-lint",
+        "delivery-projects/station.dual-slot-shuttle-press-cell/source/rustplc.bundle.toml",
+        "--critical-wait-level",
+        "error"
+      ],
+      "status": "pass",
+      "exit_code": 0,
+      "stdout_log": "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260724-commit-b1/project-check\\sequence_lint\\stdout.log",
+      "stderr_log": "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260724-commit-b1/project-check\\sequence_lint\\stderr.log",
+      "report_json": null,
+      "artifacts_dir": null,
+      "intent_alignment_verdict": null,
+      "intent_alignment_primary_mismatch_kind": null,
+      "intent_alignment_blocker_kind": null,
+      "intent_alignment_comparator_version": null
+    },
+    {
+      "name": "state_proof_check",
+      "command": [
+        "target\\debug\\rust_plc.exe",
+        "state-proof-check",
+        "delivery-projects/station.dual-slot-shuttle-press-cell/source/rustplc.bundle.toml",
+        "--output",
+        "json"
+      ],
+      "status": "pass",
+      "exit_code": 0,
+      "stdout_log": "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260724-commit-b1/project-check\\state_proof_check\\stdout.log",
+      "stderr_log": "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260724-commit-b1/project-check\\state_proof_check\\stderr.log",
+      "report_json": "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260724-commit-b1/project-check\\state_proof_check\\report.json",
+      "artifacts_dir": null,
+      "intent_alignment_verdict": null,
+      "intent_alignment_primary_mismatch_kind": null,
+      "intent_alignment_blocker_kind": null,
+      "intent_alignment_comparator_version": null
+    },
+    {
+      "name": "process_model_check",
+      "command": [
+        "target\\debug\\rust_plc.exe",
+        "process-model-check",
+        "delivery-projects/station.dual-slot-shuttle-press-cell/source/rustplc.bundle.toml",
+        "--model",
+        "delivery-projects/station.dual-slot-shuttle-press-cell/source\\process_model\\process_operation_model.toml",
+        "--output",
+        "json"
+      ],
+      "status": "fail",
+      "exit_code": 1,
+      "stdout_log": "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260724-commit-b1/project-check\\process_model_check\\stdout.log",
+      "stderr_log": "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260724-commit-b1/project-check\\process_model_check\\stderr.log",
+      "report_json": "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260724-commit-b1/project-check\\process_model_check\\report.json",
+      "artifacts_dir": null,
+      "intent_alignment_verdict": null,
+      "intent_alignment_primary_mismatch_kind": null,
+      "intent_alignment_blocker_kind": null,
+      "intent_alignment_comparator_version": null
+    },
+    {
+      "name": "scenario_doctor",
+      "command": [
+        "target\\debug\\rust_plc.exe",
+        "scenario-doctor",
+        "delivery-projects/station.dual-slot-shuttle-press-cell/source/rustplc.bundle.toml",
+        "--scenario",
+        "delivery-projects/station.dual-slot-shuttle-press-cell/source/scenarios/nominal_two_part.yaml",
+        "--output",
+        "json"
+      ],
+      "status": "pass",
+      "exit_code": 0,
+      "stdout_log": "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260724-commit-b1/project-check\\scenario_doctor\\stdout.log",
+      "stderr_log": "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260724-commit-b1/project-check\\scenario_doctor\\stderr.log",
+      "report_json": "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260724-commit-b1/project-check\\scenario_doctor\\report.json",
+      "artifacts_dir": null,
+      "intent_alignment_verdict": null,
+      "intent_alignment_primary_mismatch_kind": null,
+      "intent_alignment_blocker_kind": null,
+      "intent_alignment_comparator_version": null
+    },
+    {
+      "name": "no_board_gate",
+      "command": [
+        "target\\debug\\rust_plc.exe",
+        "no-board-gate",
+        "delivery-projects/station.dual-slot-shuttle-press-cell/source/rustplc.bundle.toml",
+        "--scenario",
+        "delivery-projects/station.dual-slot-shuttle-press-cell/source/scenarios/nominal_two_part.yaml",
+        "--out-dir",
+        "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260724-commit-b1/project-check\\no_board_gate\\artifacts",
+        "--output",
+        "json"
+      ],
+      "status": "pass",
+      "exit_code": 0,
+      "stdout_log": "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260724-commit-b1/project-check\\no_board_gate\\stdout.log",
+      "stderr_log": "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260724-commit-b1/project-check\\no_board_gate\\stderr.log",
+      "report_json": "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260724-commit-b1/project-check\\no_board_gate\\report.json",
+      "artifacts_dir": "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260724-commit-b1/project-check\\no_board_gate\\artifacts",
+      "intent_alignment_verdict": null,
+      "intent_alignment_primary_mismatch_kind": null,
+      "intent_alignment_blocker_kind": null,
+      "intent_alignment_comparator_version": null
+    },
+    {
+      "name": "intent_alignment",
+      "command": [
+        "project-check.intent-alignment",
+        "--intent-contract",
+        "delivery-projects/station.dual-slot-shuttle-press-cell/source\\rustplc.bundle.intent_alignment.contract.json",
+        "--intent-evidence",
+        "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260724-commit-b1/project-check\\no_board_gate\\artifacts\\sil_trace.jsonl"
+      ],
+      "status": "pass",
+      "exit_code": 0,
+      "stdout_log": "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260724-commit-b1/project-check\\intent_alignment\\stdout.log",
+      "stderr_log": "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260724-commit-b1/project-check\\intent_alignment\\stderr.log",
+      "report_json": "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260724-commit-b1/project-check\\intent_alignment\\report.json",
+      "artifacts_dir": "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260724-commit-b1/project-check\\intent_alignment",
+      "intent_alignment_verdict": "aligned",
+      "intent_alignment_primary_mismatch_kind": null,
+      "intent_alignment_blocker_kind": null,
+      "intent_alignment_comparator_version": "phase-2.v1"
+    }
+  ]
+}

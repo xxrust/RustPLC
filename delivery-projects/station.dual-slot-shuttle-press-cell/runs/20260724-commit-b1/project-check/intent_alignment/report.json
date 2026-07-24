@@ -1,0 +1,24 @@
+{
+  "contract_identity": {
+    "contract_id": "dual-slot-shuttle-press-cell-cycle",
+    "contract_version": "phase-2.v1"
+  },
+  "evidence_identity": {
+    "kind": "inline_trace_jsonl",
+    "label": "inline_trace_jsonl"
+  },
+  "comparator_version": "phase-2.v1",
+  "cycle_window": {
+    "first_cycle_index": 0,
+    "last_cycle_index": 0,
+    "cycle_count": 1
+  },
+  "verdict": "aligned",
+  "primary_mismatch": null,
+  "mismatches": [],
+  "blocked_reason": null,
+  "blocker_kind": null,
+  "warnings": [
+    "CrossCycle: observed evidence only covers 1 cycle(s); cross-cycle comparison requires at least 2"
+  ]
+}

@@ -3,22 +3,25 @@
     "project_id":  "line.three_station_assembly",
     "title":  "Three-station Assembly Line",
     "delivery_layer":  "line",
-    "source_commit":  "0474cfb54809189bd42055f58b8a565a1b6498a8",
+    "source_commit":  "5b0bbbbe301673447d1e9c3819dcdebaedc303f5",
     "source_entry":  "source/plc/main.plc",
     "system_contract":  "source/plc/main.system.md",
+    "scenario_roots":  [
+                           "source/scenarios"
+                       ],
     "delivery_status":  "failed",
     "artifact_roots":  {
                            "agent_runs":  "runs",
-                           "verification":  "runs/20260724-130000",
+                           "verification":  "runs/20260724-commit-b1",
                            "wiring":  "wiring",
-                           "execution":  "runs/20260724-130000/project-check/no_board_gate/artifacts",
+                           "execution":  "runs/20260724-commit-b1/project-check/no_board_gate/artifacts",
                            "release":  "release"
                        },
     "evidence_summary":  {
-                             "acceptance_pass":  6,
+                             "acceptance_pass":  8,
                              "acceptance_blocked":  3,
                              "acceptance_fail":  2,
-                             "strict_acceptance_percent":  54.5,
+                             "strict_acceptance_percent":  61.5,
                              "implementation_completeness_percent":  74
                          },
     "evidence_bindings":  {
@@ -26,10 +29,10 @@
                                                    "artifact_ref":  "delivery-projects/line.three-station-assembly/source/plc/main.plc",
                                                    "digest":  {
                                                                   "algorithm":  "sha256",
-                                                                  "value":  "ae85388b533f8ba0619e0c3d7d8bbcff11cea72e729d2ebac8c7c0411138b9cd",
+                                                                  "value":  "d7c099f0b78d819611e1395aa92f06df5956edd1942376e46d5c07ae8d70de08",
                                                                   "normalization":  "utf8_lf"
                                                               },
-                                                   "source_commit":  "0474cfb54809189bd42055f58b8a565a1b6498a8",
+                                                   "source_commit":  "5b0bbbbe301673447d1e9c3819dcdebaedc303f5",
                                                    "freshness":  {
                                                                      "status":  "input_snapshot",
                                                                      "basis":  "Project-local source entry included in the same-run input manifest."
@@ -42,20 +45,20 @@
                                                                      "value":  "5879606c681251e3d02d08caa12169e7436a0071785c1233079cd48b9101a44f",
                                                                      "normalization":  "utf8_lf"
                                                                  },
-                                                      "source_commit":  "0474cfb54809189bd42055f58b8a565a1b6498a8",
+                                                      "source_commit":  "5b0bbbbe301673447d1e9c3819dcdebaedc303f5",
                                                       "freshness":  {
                                                                         "status":  "input_snapshot",
                                                                         "basis":  "Project-local system contract included in the source snapshot."
                                                                     }
                                                   },
                               "authoritative_result":  {
-                                                           "artifact_ref":  "delivery-projects/line.three-station-assembly/runs/20260724-130000/result.json",
+                                                           "artifact_ref":  "delivery-projects/line.three-station-assembly/runs/20260724-commit-b1/result.json",
                                                            "digest":  {
                                                                           "algorithm":  "sha256",
-                                                                          "value":  "77e9451e30635438b630220f3a54a9e2d2bd453034125243bb9266c763c9f195",
+                                                                          "value":  "8614d2a33499fb14278243a7d0ccabfa1ae7992a6501de8e44a5d397389eed27",
                                                                           "normalization":  "utf8_lf"
                                                                       },
-                                                           "source_commit":  "0474cfb54809189bd42055f58b8a565a1b6498a8",
+                                                           "source_commit":  "5b0bbbbe301673447d1e9c3819dcdebaedc303f5",
                                                            "freshness":  {
                                                                              "status":  "same_run",
                                                                              "basis":  "Current materialization result."
@@ -68,67 +71,93 @@
                                                                            "value":  "9b8260b9a81f663da2b2b18ab92b18863f7791b71011059fb26ddfd6baaf4e09",
                                                                            "normalization":  "utf8_lf"
                                                                        },
-                                                            "source_commit":  "0474cfb54809189bd42055f58b8a565a1b6498a8",
+                                                            "source_commit":  "5b0bbbbe301673447d1e9c3819dcdebaedc303f5",
                                                             "freshness":  {
                                                                               "status":  "reviewed_post_run",
                                                                               "basis":  "Committed bounded completeness review."
                                                                           }
-                                                        }
+                                                        },
+                              "geometry_export":  {
+                                                      "artifact_ref":  "delivery-projects/line.three-station-assembly/runs/20260724-commit-b1/compile/geometry-export-status.json",
+                                                      "digest":  {
+                                                                     "algorithm":  "sha256",
+                                                                     "value":  "a15170f6b0cc387d8fd947eaa4b334a30b7c79869b6923a148b27822a72ff949",
+                                                                     "normalization":  "utf8_lf"
+                                                                 },
+                                                      "source_commit":  "5b0bbbbe301673447d1e9c3819dcdebaedc303f5",
+                                                      "freshness":  {
+                                                                        "status":  "same_run",
+                                                                        "basis":  "Current-run geometry-export status; a failed export remains a blocker and never substitutes an empty graph."
+                                                                    }
+                                                  },
+                              "geometry":  {
+                                               "artifact_ref":  "delivery-projects/line.three-station-assembly/runs/20260724-commit-b1/compile/geometry.json",
+                                               "digest":  {
+                                                              "algorithm":  "sha256",
+                                                              "value":  "259a49f4bea47267e3eb0a54dbe6e2867de9f6dca16a498443d40b349bbbaea6",
+                                                              "normalization":  "utf8_lf"
+                                                          },
+                                               "source_commit":  "5b0bbbbe301673447d1e9c3819dcdebaedc303f5",
+                                               "freshness":  {
+                                                                 "status":  "same_run",
+                                                                 "basis":  "Compiler-owned semantic-twin geometry from this run."
+                                                             }
+                                           }
                           },
     "fixtures":  {
                      "api_run_result":  {
-                                            "fixture_ref":  "runs/20260724-130000/result.json",
+                                            "fixture_ref":  "runs/20260724-commit-b1/result.json",
                                             "digest":  {
                                                            "algorithm":  "sha256",
-                                                           "value":  "77e9451e30635438b630220f3a54a9e2d2bd453034125243bb9266c763c9f195",
+                                                           "value":  "8614d2a33499fb14278243a7d0ccabfa1ae7992a6501de8e44a5d397389eed27",
                                                            "normalization":  "utf8_lf"
                                                        }
                                         },
                      "provenance":  {
-                                        "fixture_ref":  "runs/20260724-130000/provenance.json",
+                                        "fixture_ref":  "runs/20260724-commit-b1/provenance.json",
                                         "digest":  {
                                                        "algorithm":  "sha256",
-                                                       "value":  "d1196009ef6b1ba70e8c1ca0135649385ce7d90eb5681570fa6c16715a5c90d4",
+                                                       "value":  "767fe0d66e31023903f75b01d3f1ac2f3c988d37a1994aecf690932f4ecb3e5b",
                                                        "normalization":  "utf8_lf"
                                                    }
                                     },
                      "input_manifest":  {
-                                            "fixture_ref":  "runs/20260724-130000/input-manifest.json",
+                                            "fixture_ref":  "runs/20260724-commit-b1/input-manifest.json",
                                             "digest":  {
                                                            "algorithm":  "sha256",
-                                                           "value":  "7e1b325769a160405d7dab33ee632c384aa4082f862ce868243be46575b40637",
+                                                           "value":  "eeebdb61ee718ada05ab58b7271797dd93958dd5a04c64797c2266c0ffb3fffc",
                                                            "normalization":  "utf8_lf"
                                                        }
                                         },
                      "anomalies":  {
-                                       "fixture_ref":  "runs/20260724-130000/anomalies.json",
+                                       "fixture_ref":  "runs/20260724-commit-b1/anomalies.json",
                                        "digest":  {
                                                       "algorithm":  "sha256",
-                                                      "value":  "03d02247571da276897328e442f960f622b8f48c2106e0cb201b67c78130ad39",
+                                                      "value":  "4c099847532747477f7cfe8117a326a3559d4fefc67442d4bd4b749594baa2bc",
                                                       "normalization":  "utf8_lf"
                                                   }
                                    },
                      "corrections":  {
-                                         "fixture_ref":  "runs/20260724-130000/corrections.json",
+                                         "fixture_ref":  "runs/20260724-commit-b1/corrections.json",
                                          "digest":  {
                                                         "algorithm":  "sha256",
-                                                        "value":  "70ea6dc104ef74949af1de41e61249668ea8f9b163efd43a5fdd0e134128231b",
+                                                        "value":  "d7ac1bba0ddb820e16418067babdf24ea086a3df0ba56605d3b2d3a7b2dc31f4",
                                                         "normalization":  "utf8_lf"
                                                     }
                                      },
                      "compiler_stages":  {
-                                             "fixture_ref":  "runs/20260724-130000/compiler-stages.json",
+                                             "fixture_ref":  "runs/20260724-commit-b1/compiler-stages.json",
                                              "digest":  {
                                                             "algorithm":  "sha256",
-                                                            "value":  "d56cea2a8f2d732dbcc44983a97467368d47939717e5049b13e110d96b08439f",
+                                                            "value":  "c36d09213ece4f85a77132220291204b92a8378b164c9f094f02c0526e99e99a",
                                                             "normalization":  "utf8_lf"
                                                         }
                                          },
                      "agent_events":  {
-                                          "fixture_ref":  "runs/20260724-130000/agent-events.json",
+                                          "fixture_ref":  "runs/20260724-commit-b1/agent-events.json",
                                           "digest":  {
                                                          "algorithm":  "sha256",
-                                                         "value":  "41c32c53307d62e8e834a9c4c9145c977573e59a0fd221b22fd9459c4aaf762c",
+                                                         "value":  "ff70d000fc3469cf749f2abdced213cea6507b060481a934a1dda07b979f8c3a",
                                                          "normalization":  "utf8_lf"
                                                      }
                                       },
@@ -136,7 +165,7 @@
                                                  "fixture_ref":  "wiring/point-checks.json",
                                                  "digest":  {
                                                                 "algorithm":  "sha256",
-                                                                "value":  "dcbb73c69ce7e3cb0816ac76d339cfb7e1c06e7e8e64819878754cfe53f00e87",
+                                                                "value":  "57687b77aa9cb14741a2037c558662bb8c09be3cdeb95b42410a4f9384de4fca",
                                                                 "normalization":  "utf8_lf"
                                                             }
                                              },
@@ -144,9 +173,25 @@
                                          "fixture_ref":  "release/human-holds.json",
                                          "digest":  {
                                                         "algorithm":  "sha256",
-                                                        "value":  "55210884913bbf87a5102abbd82e0f793e1137645e06af910d7d9bc98e3f48ab",
+                                                        "value":  "f8a730ce1dea6d78e1bbcc75fa39753b0f85a239465f0ed7f06c662a1fc56187",
                                                         "normalization":  "utf8_lf"
                                                     }
-                                     }
+                                     },
+                     "geometry_export":  {
+                                             "fixture_ref":  "runs/20260724-commit-b1/compile/geometry-export-status.json",
+                                             "digest":  {
+                                                            "algorithm":  "sha256",
+                                                            "value":  "a15170f6b0cc387d8fd947eaa4b334a30b7c79869b6923a148b27822a72ff949",
+                                                            "normalization":  "utf8_lf"
+                                                        }
+                                         },
+                     "geometry":  {
+                                      "fixture_ref":  "runs/20260724-commit-b1/compile/geometry.json",
+                                      "digest":  {
+                                                     "algorithm":  "sha256",
+                                                     "value":  "259a49f4bea47267e3eb0a54dbe6e2867de9f6dca16a498443d40b349bbbaea6",
+                                                     "normalization":  "utf8_lf"
+                                                 }
+                                  }
                  }
 }

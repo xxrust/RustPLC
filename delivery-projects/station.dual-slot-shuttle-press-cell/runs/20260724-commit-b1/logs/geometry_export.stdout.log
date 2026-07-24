@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "command": "geometry-export",
+  "source_plc": "delivery-projects/station.dual-slot-shuttle-press-cell/source/rustplc.bundle.toml",
+  "output_path": "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260724-commit-b1/compile/geometry.json",
+  "node_count": 152,
+  "edge_count": 210,
+  "observed_transition_count": 0
+}

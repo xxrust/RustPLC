@@ -1,0 +1,435 @@
+{
+    "schema_version":  2,
+    "project_id":  "line.three_station_assembly",
+    "run_id":  "20260724-commit-b1",
+    "source_commit":  "5b0bbbbe301673447d1e9c3819dcdebaedc303f5",
+    "git_base_commit":  "5b0bbbbe301673447d1e9c3819dcdebaedc303f5",
+    "dirty_worktree_at_start":  false,
+    "started_at_utc":  "2026-07-24T00:31:30.1080588Z",
+    "completed_at_utc":  "2026-07-24T00:31:34.2578940Z",
+    "elapsed_ms":  4150,
+    "model":  "deterministic_harness",
+    "provenance_scope":  "delivery_fixture_materialization",
+    "execution_unattended_verdict":  "proven",
+    "source_authoring_verdict":  "not_proven",
+    "unattended_verdict":  "not_proven",
+    "unattended_reason":  "Immutable inputs and harness outputs prove unattended materialization only; source authoring provenance is absent.",
+    "event_stream":  "delivery-projects/line.three-station-assembly/runs/20260724-commit-b1/agent-events.json",
+    "input_manifest":  {
+                           "artifact_ref":  "delivery-projects/line.three-station-assembly/runs/20260724-commit-b1/input-manifest.json",
+                           "digest":  {
+                                          "algorithm":  "sha256",
+                                          "value":  "eeebdb61ee718ada05ab58b7271797dd93958dd5a04c64797c2266c0ffb3fffc",
+                                          "normalization":  "utf8_lf"
+                                      },
+                           "source_commit":  "5b0bbbbe301673447d1e9c3819dcdebaedc303f5",
+                           "freshness":  {
+                                             "status":  "input_snapshot",
+                                             "basis":  "Immutable input snapshot captured before compiler execution."
+                                         }
+                       },
+    "models":  [
+                   {
+                       "role":  "materializer",
+                       "model":  "deterministic_harness",
+                       "status":  "recorded",
+                       "basis":  "PowerShell orchestrator identity, not an inferred chat model."
+                   }
+               ],
+    "agents":  [
+                   {
+                       "agent_id":  "root.delivery_fixture_materializer",
+                       "identity_kind":  "deterministic_orchestrator",
+                       "model":  "deterministic_harness",
+                       "role":  "materialize_and_validate"
+                   }
+               ],
+    "task_definitions":  [
+                             {
+                                 "task_id":  "materialize_delivery_project_fixture",
+                                 "agent_id":  "root.delivery_fixture_materializer",
+                                 "task_kind":  "materialization",
+                                 "definition_ref":  "delivery-projects/line.three-station-assembly/delivery-project.config.json",
+                                 "acceptance":  "Run all declared compiler/scenario/project gates, freeze evidence, and preserve failures."
+                             },
+                             {
+                                 "task_id":  "compile_verify",
+                                 "agent_id":  "root.delivery_fixture_materializer",
+                                 "task_kind":  "validation",
+                                 "phase":  "compile",
+                                 "tool":  "target/debug/rust_plc.exe",
+                                 "command":  "target/debug/rust_plc.exe delivery-projects/line.three-station-assembly/source/plc/main.plc --report delivery-projects/line.three-station-assembly/runs/20260724-commit-b1/compile/verification_report.json --ir-out delivery-projects/line.three-station-assembly/runs/20260724-commit-b1/compile/ir_bundle.json --no-print-ir"
+                             },
+                             {
+                                 "task_id":  "geometry_export",
+                                 "agent_id":  "root.delivery_fixture_materializer",
+                                 "task_kind":  "validation",
+                                 "phase":  "geometry",
+                                 "tool":  "target/debug/rust_plc.exe",
+                                 "command":  "target/debug/rust_plc.exe geometry-export delivery-projects/line.three-station-assembly/source/plc/main.plc --out delivery-projects/line.three-station-assembly/runs/20260724-commit-b1/compile/geometry.json --output json"
+                             },
+                             {
+                                 "task_id":  "scenario_validate_01",
+                                 "agent_id":  "root.delivery_fixture_materializer",
+                                 "task_kind":  "validation",
+                                 "phase":  "scenario_validation",
+                                 "tool":  "target/debug/rust_plc.exe",
+                                 "command":  "target/debug/rust_plc.exe scenario-validate delivery-projects/line.three-station-assembly/source/plc/main.plc --scenario delivery-projects/line.three-station-assembly/source/scenarios/normal.yaml --output json"
+                             },
+                             {
+                                 "task_id":  "scenario_validate_02",
+                                 "agent_id":  "root.delivery_fixture_materializer",
+                                 "task_kind":  "validation",
+                                 "phase":  "scenario_validation",
+                                 "tool":  "target/debug/rust_plc.exe",
+                                 "command":  "target/debug/rust_plc.exe scenario-validate delivery-projects/line.three-station-assembly/source/plc/main.plc --scenario delivery-projects/line.three-station-assembly/source/scenarios/timeout.yaml --output json"
+                             },
+                             {
+                                 "task_id":  "project_check",
+                                 "agent_id":  "root.delivery_fixture_materializer",
+                                 "task_kind":  "validation",
+                                 "phase":  "project_check",
+                                 "tool":  "target/debug/rust_plc.exe",
+                                 "command":  "target/debug/rust_plc.exe project-check delivery-projects/line.three-station-assembly/source/plc/main.plc --scenario delivery-projects/line.three-station-assembly/source/scenarios/normal.yaml --out-dir delivery-projects/line.three-station-assembly/runs/20260724-commit-b1/project-check --output json"
+                             }
+                         ],
+    "skills":  [
+                   {
+                       "name":  "agent-harness-project-standard",
+                       "version":  "agent-harness-project-standard-v1",
+                       "status":  "recorded_by_runner_contract"
+                   }
+               ],
+    "tool_versions":  [
+                          {
+                              "name":  "rust_plc",
+                              "version":  "0.1.0",
+                              "status":  "recorded_from_Cargo.toml"
+                          },
+                          {
+                              "name":  "fixture_materializer",
+                              "version":  "delivery-fixture-materializer-v4",
+                              "status":  "recorded"
+                          },
+                          {
+                              "name":  "PowerShell",
+                              "version":  "5.1.26100.7462",
+                              "status":  "recorded"
+                          },
+                          {
+                              "name":  "git",
+                              "version":  "git version 2.49.0.windows.1",
+                              "status":  "recorded"
+                          }
+                      ],
+    "file_attribution":  {
+                             "policy_version":  "rustplc-file-attribution-v1",
+                             "human_intervention_detected":  false,
+                             "summary":  {
+                                             "agent_generated":  30,
+                                             "agent_modified":  2,
+                                             "pre_existing_user_change":  0,
+                                             "human_intervention_detected":  0
+                                         },
+                             "records":  [
+                                             {
+                                                 "path":  "delivery-projects/line.three-station-assembly/release/human-holds.json",
+                                                 "before_sha256":  "55210884913bbf87a5102abbd82e0f793e1137645e06af910d7d9bc98e3f48ab",
+                                                 "after_sha256":  "f8a730ce1dea6d78e1bbcc75fa39753b0f85a239465f0ed7f06c662a1fc56187",
+                                                 "attribution_kind":  "agent_modified",
+                                                 "agent_id":  "root.delivery_fixture_materializer",
+                                                 "task_id":  "materialize_delivery_project_fixture",
+                                                 "basis":  "The path is inside the harness-owned run, wiring, or release output set."
+                                             },
+                                             {
+                                                 "path":  "delivery-projects/line.three-station-assembly/runs/20260724-commit-b1/agent-events.json",
+                                                 "before_sha256":  null,
+                                                 "after_sha256":  "ff70d000fc3469cf749f2abdced213cea6507b060481a934a1dda07b979f8c3a",
+                                                 "attribution_kind":  "agent_generated",
+                                                 "agent_id":  "root.delivery_fixture_materializer",
+                                                 "task_id":  "materialize_delivery_project_fixture",
+                                                 "basis":  "The path is inside the harness-owned run, wiring, or release output set."
+                                             },
+                                             {
+                                                 "path":  "delivery-projects/line.three-station-assembly/runs/20260724-commit-b1/anomalies.json",
+                                                 "before_sha256":  null,
+                                                 "after_sha256":  "4c099847532747477f7cfe8117a326a3559d4fefc67442d4bd4b749594baa2bc",
+                                                 "attribution_kind":  "agent_generated",
+                                                 "agent_id":  "root.delivery_fixture_materializer",
+                                                 "task_id":  "materialize_delivery_project_fixture",
+                                                 "basis":  "The path is inside the harness-owned run, wiring, or release output set."
+                                             },
+                                             {
+                                                 "path":  "delivery-projects/line.three-station-assembly/runs/20260724-commit-b1/compile/geometry.json",
+                                                 "before_sha256":  null,
+                                                 "after_sha256":  "259a49f4bea47267e3eb0a54dbe6e2867de9f6dca16a498443d40b349bbbaea6",
+                                                 "attribution_kind":  "agent_generated",
+                                                 "agent_id":  "root.delivery_fixture_materializer",
+                                                 "task_id":  "materialize_delivery_project_fixture",
+                                                 "basis":  "The path is inside the harness-owned run, wiring, or release output set."
+                                             },
+                                             {
+                                                 "path":  "delivery-projects/line.three-station-assembly/runs/20260724-commit-b1/compile/geometry-export-status.json",
+                                                 "before_sha256":  null,
+                                                 "after_sha256":  "a15170f6b0cc387d8fd947eaa4b334a30b7c79869b6923a148b27822a72ff949",
+                                                 "attribution_kind":  "agent_generated",
+                                                 "agent_id":  "root.delivery_fixture_materializer",
+                                                 "task_id":  "materialize_delivery_project_fixture",
+                                                 "basis":  "The path is inside the harness-owned run, wiring, or release output set."
+                                             },
+                                             {
+                                                 "path":  "delivery-projects/line.three-station-assembly/runs/20260724-commit-b1/compile/ir_bundle.json",
+                                                 "before_sha256":  null,
+                                                 "after_sha256":  "13a14f66f16cfc566c6d5d232467d31a28956ee6ead33a8e4aa6eb73fc79df13",
+                                                 "attribution_kind":  "agent_generated",
+                                                 "agent_id":  "root.delivery_fixture_materializer",
+                                                 "task_id":  "materialize_delivery_project_fixture",
+                                                 "basis":  "The path is inside the harness-owned run, wiring, or release output set."
+                                             },
+                                             {
+                                                 "path":  "delivery-projects/line.three-station-assembly/runs/20260724-commit-b1/compile/verification_report.json",
+                                                 "before_sha256":  null,
+                                                 "after_sha256":  "f1da1ea34090a14765bdb391af5d882965dfa80474f07f29769ac9fdfa36e173",
+                                                 "attribution_kind":  "agent_generated",
+                                                 "agent_id":  "root.delivery_fixture_materializer",
+                                                 "task_id":  "materialize_delivery_project_fixture",
+                                                 "basis":  "The path is inside the harness-owned run, wiring, or release output set."
+                                             },
+                                             {
+                                                 "path":  "delivery-projects/line.three-station-assembly/runs/20260724-commit-b1/compiler-stages.json",
+                                                 "before_sha256":  null,
+                                                 "after_sha256":  "c36d09213ece4f85a77132220291204b92a8378b164c9f094f02c0526e99e99a",
+                                                 "attribution_kind":  "agent_generated",
+                                                 "agent_id":  "root.delivery_fixture_materializer",
+                                                 "task_id":  "materialize_delivery_project_fixture",
+                                                 "basis":  "The path is inside the harness-owned run, wiring, or release output set."
+                                             },
+                                             {
+                                                 "path":  "delivery-projects/line.three-station-assembly/runs/20260724-commit-b1/corrections.json",
+                                                 "before_sha256":  null,
+                                                 "after_sha256":  "d7ac1bba0ddb820e16418067babdf24ea086a3df0ba56605d3b2d3a7b2dc31f4",
+                                                 "attribution_kind":  "agent_generated",
+                                                 "agent_id":  "root.delivery_fixture_materializer",
+                                                 "task_id":  "materialize_delivery_project_fixture",
+                                                 "basis":  "The path is inside the harness-owned run, wiring, or release output set."
+                                             },
+                                             {
+                                                 "path":  "delivery-projects/line.three-station-assembly/runs/20260724-commit-b1/input-manifest.json",
+                                                 "before_sha256":  null,
+                                                 "after_sha256":  "eeebdb61ee718ada05ab58b7271797dd93958dd5a04c64797c2266c0ffb3fffc",
+                                                 "attribution_kind":  "agent_generated",
+                                                 "agent_id":  "root.delivery_fixture_materializer",
+                                                 "task_id":  "materialize_delivery_project_fixture",
+                                                 "basis":  "The path is inside the harness-owned run, wiring, or release output set."
+                                             },
+                                             {
+                                                 "path":  "delivery-projects/line.three-station-assembly/runs/20260724-commit-b1/logs/compile_verify.stderr.log",
+                                                 "before_sha256":  null,
+                                                 "after_sha256":  "7ab408785ccec6c1aed15a971e1e70923a8b7353c5d7156bdaf2095deed77519",
+                                                 "attribution_kind":  "agent_generated",
+                                                 "agent_id":  "root.delivery_fixture_materializer",
+                                                 "task_id":  "materialize_delivery_project_fixture",
+                                                 "basis":  "The path is inside the harness-owned run, wiring, or release output set."
+                                             },
+                                             {
+                                                 "path":  "delivery-projects/line.three-station-assembly/runs/20260724-commit-b1/logs/compile_verify.stdout.log",
+                                                 "before_sha256":  null,
+                                                 "after_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                                                 "attribution_kind":  "agent_generated",
+                                                 "agent_id":  "root.delivery_fixture_materializer",
+                                                 "task_id":  "materialize_delivery_project_fixture",
+                                                 "basis":  "The path is inside the harness-owned run, wiring, or release output set."
+                                             },
+                                             {
+                                                 "path":  "delivery-projects/line.three-station-assembly/runs/20260724-commit-b1/logs/geometry_export.stderr.log",
+                                                 "before_sha256":  null,
+                                                 "after_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                                                 "attribution_kind":  "agent_generated",
+                                                 "agent_id":  "root.delivery_fixture_materializer",
+                                                 "task_id":  "materialize_delivery_project_fixture",
+                                                 "basis":  "The path is inside the harness-owned run, wiring, or release output set."
+                                             },
+                                             {
+                                                 "path":  "delivery-projects/line.three-station-assembly/runs/20260724-commit-b1/logs/geometry_export.stdout.log",
+                                                 "before_sha256":  null,
+                                                 "after_sha256":  "ba9af76bc7599a73cd0fa52f416c04c18181cc4600c90732c0cf859ae5200151",
+                                                 "attribution_kind":  "agent_generated",
+                                                 "agent_id":  "root.delivery_fixture_materializer",
+                                                 "task_id":  "materialize_delivery_project_fixture",
+                                                 "basis":  "The path is inside the harness-owned run, wiring, or release output set."
+                                             },
+                                             {
+                                                 "path":  "delivery-projects/line.three-station-assembly/runs/20260724-commit-b1/logs/project_check.stderr.log",
+                                                 "before_sha256":  null,
+                                                 "after_sha256":  "f74cb037895e8a94c72cbcebb5300d175f832024400c260748a5c9127a1f607a",
+                                                 "attribution_kind":  "agent_generated",
+                                                 "agent_id":  "root.delivery_fixture_materializer",
+                                                 "task_id":  "materialize_delivery_project_fixture",
+                                                 "basis":  "The path is inside the harness-owned run, wiring, or release output set."
+                                             },
+                                             {
+                                                 "path":  "delivery-projects/line.three-station-assembly/runs/20260724-commit-b1/logs/project_check.stdout.log",
+                                                 "before_sha256":  null,
+                                                 "after_sha256":  "0891f45381c0dc779e2e45ef5baf8c87d538c409634f6225c2b707d60cc1b062",
+                                                 "attribution_kind":  "agent_generated",
+                                                 "agent_id":  "root.delivery_fixture_materializer",
+                                                 "task_id":  "materialize_delivery_project_fixture",
+                                                 "basis":  "The path is inside the harness-owned run, wiring, or release output set."
+                                             },
+                                             {
+                                                 "path":  "delivery-projects/line.three-station-assembly/runs/20260724-commit-b1/logs/scenario_validate_01.stderr.log",
+                                                 "before_sha256":  null,
+                                                 "after_sha256":  "2e653eb0bed0461eded2f7aa63fab9677483b2ad4dcf872ed6584b1e428bd735",
+                                                 "attribution_kind":  "agent_generated",
+                                                 "agent_id":  "root.delivery_fixture_materializer",
+                                                 "task_id":  "materialize_delivery_project_fixture",
+                                                 "basis":  "The path is inside the harness-owned run, wiring, or release output set."
+                                             },
+                                             {
+                                                 "path":  "delivery-projects/line.three-station-assembly/runs/20260724-commit-b1/logs/scenario_validate_01.stdout.log",
+                                                 "before_sha256":  null,
+                                                 "after_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                                                 "attribution_kind":  "agent_generated",
+                                                 "agent_id":  "root.delivery_fixture_materializer",
+                                                 "task_id":  "materialize_delivery_project_fixture",
+                                                 "basis":  "The path is inside the harness-owned run, wiring, or release output set."
+                                             },
+                                             {
+                                                 "path":  "delivery-projects/line.three-station-assembly/runs/20260724-commit-b1/logs/scenario_validate_02.stderr.log",
+                                                 "before_sha256":  null,
+                                                 "after_sha256":  "2e653eb0bed0461eded2f7aa63fab9677483b2ad4dcf872ed6584b1e428bd735",
+                                                 "attribution_kind":  "agent_generated",
+                                                 "agent_id":  "root.delivery_fixture_materializer",
+                                                 "task_id":  "materialize_delivery_project_fixture",
+                                                 "basis":  "The path is inside the harness-owned run, wiring, or release output set."
+                                             },
+                                             {
+                                                 "path":  "delivery-projects/line.three-station-assembly/runs/20260724-commit-b1/logs/scenario_validate_02.stdout.log",
+                                                 "before_sha256":  null,
+                                                 "after_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                                                 "attribution_kind":  "agent_generated",
+                                                 "agent_id":  "root.delivery_fixture_materializer",
+                                                 "task_id":  "materialize_delivery_project_fixture",
+                                                 "basis":  "The path is inside the harness-owned run, wiring, or release output set."
+                                             },
+                                             {
+                                                 "path":  "delivery-projects/line.three-station-assembly/runs/20260724-commit-b1/project-check/compile_verify/stderr.log",
+                                                 "before_sha256":  null,
+                                                 "after_sha256":  "43095e61d267f77eb9c8caa59e44961f91a96a9f42a2a8551945c6b3f6934113",
+                                                 "attribution_kind":  "agent_generated",
+                                                 "agent_id":  "root.delivery_fixture_materializer",
+                                                 "task_id":  "materialize_delivery_project_fixture",
+                                                 "basis":  "The path is inside the harness-owned run, wiring, or release output set."
+                                             },
+                                             {
+                                                 "path":  "delivery-projects/line.three-station-assembly/runs/20260724-commit-b1/project-check/compile_verify/stdout.log",
+                                                 "before_sha256":  null,
+                                                 "after_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                                                 "attribution_kind":  "agent_generated",
+                                                 "agent_id":  "root.delivery_fixture_materializer",
+                                                 "task_id":  "materialize_delivery_project_fixture",
+                                                 "basis":  "The path is inside the harness-owned run, wiring, or release output set."
+                                             },
+                                             {
+                                                 "path":  "delivery-projects/line.three-station-assembly/runs/20260724-commit-b1/project-check/compile_verify/verification_report.json",
+                                                 "before_sha256":  null,
+                                                 "after_sha256":  "4899a0b5d6aee3c7f99eb5640563b6d06efba3f7a361ffea4f891e30a78770e3",
+                                                 "attribution_kind":  "agent_generated",
+                                                 "agent_id":  "root.delivery_fixture_materializer",
+                                                 "task_id":  "materialize_delivery_project_fixture",
+                                                 "basis":  "The path is inside the harness-owned run, wiring, or release output set."
+                                             },
+                                             {
+                                                 "path":  "delivery-projects/line.three-station-assembly/runs/20260724-commit-b1/project-check/no_board_gate/stderr.log",
+                                                 "before_sha256":  null,
+                                                 "after_sha256":  "cc35e687e277a8532e8a9276fbde00e094b4320b587173c7f1f089af8779236f",
+                                                 "attribution_kind":  "agent_generated",
+                                                 "agent_id":  "root.delivery_fixture_materializer",
+                                                 "task_id":  "materialize_delivery_project_fixture",
+                                                 "basis":  "The path is inside the harness-owned run, wiring, or release output set."
+                                             },
+                                             {
+                                                 "path":  "delivery-projects/line.three-station-assembly/runs/20260724-commit-b1/project-check/no_board_gate/stdout.log",
+                                                 "before_sha256":  null,
+                                                 "after_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                                                 "attribution_kind":  "agent_generated",
+                                                 "agent_id":  "root.delivery_fixture_materializer",
+                                                 "task_id":  "materialize_delivery_project_fixture",
+                                                 "basis":  "The path is inside the harness-owned run, wiring, or release output set."
+                                             },
+                                             {
+                                                 "path":  "delivery-projects/line.three-station-assembly/runs/20260724-commit-b1/project-check/project_check_report.json",
+                                                 "before_sha256":  null,
+                                                 "after_sha256":  "0891f45381c0dc779e2e45ef5baf8c87d538c409634f6225c2b707d60cc1b062",
+                                                 "attribution_kind":  "agent_generated",
+                                                 "agent_id":  "root.delivery_fixture_materializer",
+                                                 "task_id":  "materialize_delivery_project_fixture",
+                                                 "basis":  "The path is inside the harness-owned run, wiring, or release output set."
+                                             },
+                                             {
+                                                 "path":  "delivery-projects/line.three-station-assembly/runs/20260724-commit-b1/project-check/scenario_doctor/stderr.log",
+                                                 "before_sha256":  null,
+                                                 "after_sha256":  "b56daf3bc8e4beb6cbf3a8d1cae6075a420b6c811e00555991e165ad4c8b4f46",
+                                                 "attribution_kind":  "agent_generated",
+                                                 "agent_id":  "root.delivery_fixture_materializer",
+                                                 "task_id":  "materialize_delivery_project_fixture",
+                                                 "basis":  "The path is inside the harness-owned run, wiring, or release output set."
+                                             },
+                                             {
+                                                 "path":  "delivery-projects/line.three-station-assembly/runs/20260724-commit-b1/project-check/scenario_doctor/stdout.log",
+                                                 "before_sha256":  null,
+                                                 "after_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                                                 "attribution_kind":  "agent_generated",
+                                                 "agent_id":  "root.delivery_fixture_materializer",
+                                                 "task_id":  "materialize_delivery_project_fixture",
+                                                 "basis":  "The path is inside the harness-owned run, wiring, or release output set."
+                                             },
+                                             {
+                                                 "path":  "delivery-projects/line.three-station-assembly/runs/20260724-commit-b1/project-check/sequence_lint/stderr.log",
+                                                 "before_sha256":  null,
+                                                 "after_sha256":  "728999c10e60afb50cff54eb2d03bc5efae72668b59d8508a6636581f3d70112",
+                                                 "attribution_kind":  "agent_generated",
+                                                 "agent_id":  "root.delivery_fixture_materializer",
+                                                 "task_id":  "materialize_delivery_project_fixture",
+                                                 "basis":  "The path is inside the harness-owned run, wiring, or release output set."
+                                             },
+                                             {
+                                                 "path":  "delivery-projects/line.three-station-assembly/runs/20260724-commit-b1/project-check/sequence_lint/stdout.log",
+                                                 "before_sha256":  null,
+                                                 "after_sha256":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                                                 "attribution_kind":  "agent_generated",
+                                                 "agent_id":  "root.delivery_fixture_materializer",
+                                                 "task_id":  "materialize_delivery_project_fixture",
+                                                 "basis":  "The path is inside the harness-owned run, wiring, or release output set."
+                                             },
+                                             {
+                                                 "path":  "delivery-projects/line.three-station-assembly/runs/20260724-commit-b1/result.json",
+                                                 "before_sha256":  null,
+                                                 "after_sha256":  "8614d2a33499fb14278243a7d0ccabfa1ae7992a6501de8e44a5d397389eed27",
+                                                 "attribution_kind":  "agent_generated",
+                                                 "agent_id":  "root.delivery_fixture_materializer",
+                                                 "task_id":  "materialize_delivery_project_fixture",
+                                                 "basis":  "The path is inside the harness-owned run, wiring, or release output set."
+                                             },
+                                             {
+                                                 "path":  "delivery-projects/line.three-station-assembly/wiring/point-checks.json",
+                                                 "before_sha256":  "dcbb73c69ce7e3cb0816ac76d339cfb7e1c06e7e8e64819878754cfe53f00e87",
+                                                 "after_sha256":  "57687b77aa9cb14741a2037c558662bb8c09be3cdeb95b42410a4f9384de4fca",
+                                                 "attribution_kind":  "agent_modified",
+                                                 "agent_id":  "root.delivery_fixture_materializer",
+                                                 "task_id":  "materialize_delivery_project_fixture",
+                                                 "basis":  "The path is inside the harness-owned run, wiring, or release output set."
+                                             }
+                                         ],
+                             "evidence_envelopes":  [
+                                                        {
+                                                            "path":  "delivery-projects/line.three-station-assembly/runs/20260724-commit-b1/provenance.json",
+                                                            "reason":  "This document contains the attribution ledger and cannot recursively digest itself."
+                                                        },
+                                                        {
+                                                            "path":  "delivery-projects/line.three-station-assembly/delivery-project.json",
+                                                            "reason":  "The project manifest externally binds the provenance digest after the ledger is closed."
+                                                        }
+                                                    ]
+                         }
+}

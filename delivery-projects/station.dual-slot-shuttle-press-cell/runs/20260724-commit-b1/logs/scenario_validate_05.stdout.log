@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "command": "scenario-validate",
+  "output": "json",
+  "status": "pass",
+  "error_count": 0,
+  "warn_count": 0,
+  "issues": []
+}

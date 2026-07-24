@@ -1,0 +1,11 @@
+{
+    "schema_version":  1,
+    "project_id":  "station.dual_slot_shuttle_press_cell",
+    "run_id":  "20260724-commit-b1",
+    "status":  "pass",
+    "error_code":  null,
+    "exit_code":  0,
+    "geometry_artifact":  "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260724-commit-b1/compile/geometry.json",
+    "stdout_log":  "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260724-commit-b1/logs/geometry_export.stdout.log",
+    "stderr_log":  "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260724-commit-b1/logs/geometry_export.stderr.log"
+}

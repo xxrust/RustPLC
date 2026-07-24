@@ -1,7 +1,0 @@
-Verification passed:
-  - Safety: 完备证明 (depth 3)
-    Coverage: bound 1/1, degraded 0, skipped 0
-  - Liveness: 通过
-  - Timing: 通过
-  - Causality: 通过
-verification_report: delivery-projects/module.axis-move-blocking-baseline/runs/20260724-130000/project-check\compile_verify\verification_report.json

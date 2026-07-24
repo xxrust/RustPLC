@@ -1,7 +1,7 @@
 {
     "schema_version":  1,
     "project_id":  "line.three_station_assembly",
-    "source_commit":  "0474cfb54809189bd42055f58b8a565a1b6498a8",
+    "source_commit":  "5b0bbbbe301673447d1e9c3819dcdebaedc303f5",
     "release_status":  "blocked",
     "holds":  [
                   {

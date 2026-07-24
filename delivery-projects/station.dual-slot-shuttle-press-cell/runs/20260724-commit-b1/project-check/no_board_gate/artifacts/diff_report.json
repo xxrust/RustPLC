@@ -1,0 +1,10 @@
+{
+  "is_match": true,
+  "sil_events": 49,
+  "board_events": 49,
+  "first_mismatch_tick": null,
+  "mismatch_type": null,
+  "mismatch_index": null,
+  "context_window": 3,
+  "context": []
+}

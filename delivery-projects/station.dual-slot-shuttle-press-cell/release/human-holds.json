@@ -1,7 +1,7 @@
 {
     "schema_version":  1,
     "project_id":  "station.dual_slot_shuttle_press_cell",
-    "source_commit":  "0474cfb54809189bd42055f58b8a565a1b6498a8",
+    "source_commit":  "5b0bbbbe301673447d1e9c3819dcdebaedc303f5",
     "release_status":  "blocked",
     "holds":  [
                   {
@@ -9,31 +9,30 @@
                       "required_role":  "electrical_engineer",
                       "status":  "human_action_required",
                       "signature":  null,
-                      "reason":  "No physical wiring review is recorded."
+                      "reason":  "No attributable wiring review is recorded."
                   },
                   {
                       "hold_id":  "point_check_completion",
                       "required_role":  "commissioning_engineer",
                       "status":  "human_action_required",
                       "signature":  null,
-                      "reason":  "All 16 declared controller points still require observed point-check evidence."
+                      "reason":  "Physical point checks are incomplete."
                   },
                   {
                       "hold_id":  "safety_review",
                       "required_role":  "safety_reviewer",
                       "status":  "human_action_required",
                       "signature":  null,
-                      "reason":  "Formal safety verification passed, but no attributable human safety review is recorded."
+                      "reason":  "Compiler verification does not replace human safety review."
                   },
                   {
                       "hold_id":  "hil_review",
                       "required_role":  "commissioning_engineer",
                       "status":  "blocked",
                       "signature":  null,
-                      "reason":  "Target hardware timing and executable fault-injection evidence are missing.",
+                      "reason":  "Target hardware timing and HIL evidence are absent.",
                       "blocker_ids":  [
-                                          "GAP-HARDWARE-TIMING-EVIDENCE",
-                                          "GAP-SIM-FAULT-INJECTION"
+                                          "GAP-HARDWARE-TIMING-EVIDENCE"
                                       ]
                   },
                   {
@@ -41,17 +40,7 @@
                       "required_role":  "release_approver",
                       "status":  "blocked",
                       "signature":  null,
-                      "reason":  "Five hard acceptance criteria remain blocked and prerequisite human holds are incomplete."
+                      "reason":  "Prerequisite holds and delivery blockers remain open."
                   }
-              ],
-    "artifact_ref":  "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260723-172826/result.json",
-    "digest":  {
-                   "algorithm":  "sha256",
-                   "value":  "f0829779d1a0294dd580fef80e5958908a38d09c57790f7c7eebbd257abe3fd1",
-                   "normalization":  "utf8_lf"
-               },
-    "freshness":  {
-                      "status":  "same_run",
-                      "basis":  "Release holds are derived from the committed blocked result; no signatures are synthesized."
-                  }
+              ]
 }

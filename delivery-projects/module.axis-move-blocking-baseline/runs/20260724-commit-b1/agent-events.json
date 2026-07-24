@@ -1,0 +1,124 @@
+{
+    "schema_version":  1,
+    "project_id":  "module.axis_move_blocking_baseline",
+    "run_id":  "20260724-commit-b1",
+    "provenance_scope":  "delivery_fixture_materialization",
+    "attribution_state":  "deterministic_harness_observed",
+    "execution_unattended_verdict":  "proven",
+    "source_authoring_verdict":  "not_proven",
+    "unattended_verdict":  "not_proven",
+    "records":  [
+                    {
+                        "schema_version":  1,
+                        "event_id":  "EVT-001",
+                        "project_id":  "module.axis_move_blocking_baseline",
+                        "agent_id":  "root.delivery_fixture_materializer",
+                        "attribution_state":  "tool_observed",
+                        "sequence":  1,
+                        "started_at":  "2026-07-24T00:35:56.1462498Z",
+                        "completed_at":  "2026-07-24T00:35:58.0533608Z",
+                        "duration_ms":  1902,
+                        "phase":  "compile",
+                        "task":  "compile_verify",
+                        "tool":  "target/debug/rust_plc.exe",
+                        "action":  "target/debug/rust_plc.exe delivery-projects/module.axis-move-blocking-baseline/source/plc/main.plc --report delivery-projects/module.axis-move-blocking-baseline/runs/20260724-commit-b1/compile/verification_report.json --ir-out delivery-projects/module.axis-move-blocking-baseline/runs/20260724-commit-b1/compile/ir_bundle.json --no-print-ir",
+                        "result":  "pass",
+                        "exit_code":  0,
+                        "retry_index":  0,
+                        "route":  "public_cli",
+                        "artifact_refs":  [
+                                              "delivery-projects/module.axis-move-blocking-baseline/runs/20260724-commit-b1/compile/verification_report.json",
+                                              "delivery-projects/module.axis-move-blocking-baseline/runs/20260724-commit-b1/compile/ir_bundle.json"
+                                          ]
+                    },
+                    {
+                        "schema_version":  1,
+                        "event_id":  "EVT-002",
+                        "project_id":  "module.axis_move_blocking_baseline",
+                        "agent_id":  "root.delivery_fixture_materializer",
+                        "attribution_state":  "tool_observed",
+                        "sequence":  2,
+                        "started_at":  "2026-07-24T00:35:58.0700087Z",
+                        "completed_at":  "2026-07-24T00:35:58.2507525Z",
+                        "duration_ms":  180,
+                        "phase":  "geometry",
+                        "task":  "geometry_export",
+                        "tool":  "target/debug/rust_plc.exe",
+                        "action":  "target/debug/rust_plc.exe geometry-export delivery-projects/module.axis-move-blocking-baseline/source/plc/main.plc --out delivery-projects/module.axis-move-blocking-baseline/runs/20260724-commit-b1/compile/geometry.json --output json",
+                        "result":  "pass",
+                        "exit_code":  0,
+                        "retry_index":  0,
+                        "route":  "public_cli",
+                        "artifact_refs":  [
+                                              "delivery-projects/module.axis-move-blocking-baseline/runs/20260724-commit-b1/compile/geometry.json",
+                                              "delivery-projects/module.axis-move-blocking-baseline/runs/20260724-commit-b1/compile/geometry-export-status.json"
+                                          ]
+                    },
+                    {
+                        "schema_version":  1,
+                        "event_id":  "EVT-003",
+                        "project_id":  "module.axis_move_blocking_baseline",
+                        "agent_id":  "root.delivery_fixture_materializer",
+                        "attribution_state":  "tool_observed",
+                        "sequence":  3,
+                        "started_at":  "2026-07-24T00:35:58.2712818Z",
+                        "completed_at":  "2026-07-24T00:35:58.4732025Z",
+                        "duration_ms":  200,
+                        "phase":  "scenario_validation",
+                        "task":  "scenario_validate_01",
+                        "tool":  "target/debug/rust_plc.exe",
+                        "action":  "target/debug/rust_plc.exe scenario-validate delivery-projects/module.axis-move-blocking-baseline/source/plc/main.plc --scenario delivery-projects/module.axis-move-blocking-baseline/source/scenarios/normal.yaml --output json",
+                        "result":  "pass",
+                        "exit_code":  0,
+                        "retry_index":  0,
+                        "route":  "public_cli",
+                        "artifact_refs":  [
+
+                                          ]
+                    },
+                    {
+                        "schema_version":  1,
+                        "event_id":  "EVT-004",
+                        "project_id":  "module.axis_move_blocking_baseline",
+                        "agent_id":  "root.delivery_fixture_materializer",
+                        "attribution_state":  "tool_observed",
+                        "sequence":  4,
+                        "started_at":  "2026-07-24T00:35:58.4823303Z",
+                        "completed_at":  "2026-07-24T00:35:58.6817369Z",
+                        "duration_ms":  199,
+                        "phase":  "scenario_validation",
+                        "task":  "scenario_validate_02",
+                        "tool":  "target/debug/rust_plc.exe",
+                        "action":  "target/debug/rust_plc.exe scenario-validate delivery-projects/module.axis-move-blocking-baseline/source/plc/main.plc --scenario delivery-projects/module.axis-move-blocking-baseline/source/scenarios/timeout.yaml --output json",
+                        "result":  "pass",
+                        "exit_code":  0,
+                        "retry_index":  0,
+                        "route":  "public_cli",
+                        "artifact_refs":  [
+
+                                          ]
+                    },
+                    {
+                        "schema_version":  1,
+                        "event_id":  "EVT-005",
+                        "project_id":  "module.axis_move_blocking_baseline",
+                        "agent_id":  "root.delivery_fixture_materializer",
+                        "attribution_state":  "tool_observed",
+                        "sequence":  5,
+                        "started_at":  "2026-07-24T00:35:58.6908436Z",
+                        "completed_at":  "2026-07-24T00:35:59.1982370Z",
+                        "duration_ms":  506,
+                        "phase":  "project_check",
+                        "task":  "project_check",
+                        "tool":  "target/debug/rust_plc.exe",
+                        "action":  "target/debug/rust_plc.exe project-check delivery-projects/module.axis-move-blocking-baseline/source/plc/main.plc --scenario delivery-projects/module.axis-move-blocking-baseline/source/scenarios/normal.yaml --out-dir delivery-projects/module.axis-move-blocking-baseline/runs/20260724-commit-b1/project-check --output json",
+                        "result":  "pass",
+                        "exit_code":  0,
+                        "retry_index":  0,
+                        "route":  "public_cli",
+                        "artifact_refs":  [
+                                              "delivery-projects/module.axis-move-blocking-baseline/runs/20260724-commit-b1/project-check/project_check_report.json"
+                                          ]
+                    }
+                ]
+}

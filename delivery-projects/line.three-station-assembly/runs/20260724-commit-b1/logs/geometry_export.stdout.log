@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "command": "geometry-export",
+  "source_plc": "delivery-projects/line.three-station-assembly/source/plc/main.plc",
+  "output_path": "delivery-projects/line.three-station-assembly/runs/20260724-commit-b1/compile/geometry.json",
+  "node_count": 74,
+  "edge_count": 121,
+  "observed_transition_count": 0
+}

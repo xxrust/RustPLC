@@ -1,215 +1,319 @@
 {
-    "schema_version":  1,
+    "schema_version":  2,
     "project_id":  "station.dual_slot_shuttle_press_cell",
-    "source_commit":  "0474cfb54809189bd42055f58b8a565a1b6498a8",
+    "source_commit":  "5b0bbbbe301673447d1e9c3819dcdebaedc303f5",
     "status":  "human_action_required",
     "summary":  {
                     "declared_points":  16,
+                    "compiler_derived_points":  16,
                     "verified_points":  0,
                     "blocked_points":  0,
                     "human_action_required_points":  16
                 },
+    "validation_summary":  {
+                               "status":  "pass",
+                               "error_count":  0,
+                               "checked_rules":  [
+                                                     "duplicate_channel",
+                                                     "duplicate_alias",
+                                                     "duplicate_terminal",
+                                                     "direction_mismatch",
+                                                     "unresolved_alias",
+                                                     "unbound_port",
+                                                     "missing_safe_state"
+                                                 ]
+                           },
+    "diagnostics":  [
+
+                    ],
+    "evidence_sources":  {
+                             "controller":  [
+                                                {
+                                                    "artifact_ref":  "delivery-projects/station.dual-slot-shuttle-press-cell/source/00_topology/controller.plc",
+                                                    "digest":  {
+                                                                   "algorithm":  "sha256",
+                                                                   "value":  "30f9060668cd8f1c9c1d39c7a37f6378a7eb51f2122a1fd49104753d0ba7ac74",
+                                                                   "normalization":  "utf8_lf"
+                                                               },
+                                                    "source_commit":  "5b0bbbbe301673447d1e9c3819dcdebaedc303f5",
+                                                    "freshness":  {
+                                                                      "status":  "input_snapshot",
+                                                                      "basis":  "Source artifact declares the project controller or controller I/O aliases."
+                                                                  }
+                                                }
+                                            ],
+                             "devices":  [
+                                             {
+                                                 "artifact_ref":  "delivery-projects/station.dual-slot-shuttle-press-cell/source/00_topology/controller.plc",
+                                                 "digest":  {
+                                                                "algorithm":  "sha256",
+                                                                "value":  "30f9060668cd8f1c9c1d39c7a37f6378a7eb51f2122a1fd49104753d0ba7ac74",
+                                                                "normalization":  "utf8_lf"
+                                                            },
+                                                 "source_commit":  "5b0bbbbe301673447d1e9c3819dcdebaedc303f5",
+                                                 "freshness":  {
+                                                                   "status":  "input_snapshot",
+                                                                   "basis":  "Source artifact declares one or more topology devices."
+                                                               }
+                                             },
+                                             {
+                                                 "artifact_ref":  "delivery-projects/station.dual-slot-shuttle-press-cell/source/00_topology/devices.plc",
+                                                 "digest":  {
+                                                                "algorithm":  "sha256",
+                                                                "value":  "241b8dc58192cdba84ea566ce3f5c1d6f3b23fbd9cd68a89886ebec40115547c",
+                                                                "normalization":  "utf8_lf"
+                                                            },
+                                                 "source_commit":  "5b0bbbbe301673447d1e9c3819dcdebaedc303f5",
+                                                 "freshness":  {
+                                                                   "status":  "input_snapshot",
+                                                                   "basis":  "Source artifact declares one or more topology devices."
+                                                               }
+                                             }
+                                         ],
+                             "connections":  [
+                                                 {
+                                                     "artifact_ref":  "delivery-projects/station.dual-slot-shuttle-press-cell/source/00_topology/connections.plc",
+                                                     "digest":  {
+                                                                    "algorithm":  "sha256",
+                                                                    "value":  "3804e13e47ecb59017b0046a03bbaeaac4a255a55166da17ecb25f0fedc783c3",
+                                                                    "normalization":  "utf8_lf"
+                                                                },
+                                                     "source_commit":  "5b0bbbbe301673447d1e9c3819dcdebaedc303f5",
+                                                     "freshness":  {
+                                                                       "status":  "input_snapshot",
+                                                                       "basis":  "Source artifact declares topology relations used to bind controller points and device terminals."
+                                                                   }
+                                                 }
+                                             ],
+                             "compiler_ir":  [
+                                                 {
+                                                     "artifact_ref":  "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260724-commit-b1/compile/ir_bundle.json",
+                                                     "digest":  {
+                                                                    "algorithm":  "sha256",
+                                                                    "value":  "5a1a097d465aba913a5e4702e88ecc228b4098f81d220d811a86c042f4890222",
+                                                                    "normalization":  "utf8_lf"
+                                                                },
+                                                     "source_commit":  "5b0bbbbe301673447d1e9c3819dcdebaedc303f5",
+                                                     "freshness":  {
+                                                                       "status":  "same_run",
+                                                                       "basis":  "Authoritative wiring row set derived from the current compile/ir_bundle.json topology.links projection."
+                                                                   }
+                                                 }
+                                             ]
+                         },
+    "expected_vs_derived":  {
+                                "expected_count":  16,
+                                "derived_count":  16,
+                                "contract":  "config is expected metadata/audit input; points are authoritative compiler-derived topology links"
+                            },
     "points":  [
                    {
+                       "wire_id":  "wire:X0:start_button.out",
                        "point_id":  "plc_main.X0",
                        "alias":  "start_cycle_cmd",
                        "direction":  "input",
                        "device_terminal":  "start_button.out",
+                       "signal_type":  "digital",
                        "safe_state":  null,
                        "status":  "human_action_required",
                        "measurement":  null,
-                       "photo_ref":  null
+                       "photo_ref":  null,
+                       "evidence_source":  "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260724-commit-b1/compile/ir_bundle.json"
                    },
                    {
+                       "wire_id":  "wire:X1:reset_button.out",
                        "point_id":  "plc_main.X1",
                        "alias":  "reset_fault_cmd",
                        "direction":  "input",
                        "device_terminal":  "reset_button.out",
+                       "signal_type":  "digital",
                        "safe_state":  null,
                        "status":  "human_action_required",
                        "measurement":  null,
-                       "photo_ref":  null
+                       "photo_ref":  null,
+                       "evidence_source":  "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260724-commit-b1/compile/ir_bundle.json"
                    },
                    {
+                       "wire_id":  "wire:X2:safety_chain.out",
                        "point_id":  "plc_main.X2",
                        "alias":  "safety_healthy_fb",
                        "direction":  "input",
                        "device_terminal":  "safety_chain.out",
+                       "signal_type":  "digital",
                        "safe_state":  null,
                        "status":  "human_action_required",
                        "measurement":  null,
-                       "photo_ref":  null
+                       "photo_ref":  null,
+                       "evidence_source":  "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260724-commit-b1/compile/ir_bundle.json"
                    },
                    {
-                       "point_id":  "plc_main.X3",
-                       "alias":  "press_extended_fb",
-                       "direction":  "input",
-                       "device_terminal":  "sensor_press_extended.out",
-                       "safe_state":  null,
-                       "status":  "human_action_required",
-                       "measurement":  null,
-                       "photo_ref":  null
-                   },
-                   {
-                       "point_id":  "plc_main.X4",
-                       "alias":  "press_retracted_fb",
-                       "direction":  "input",
-                       "device_terminal":  "sensor_press_retracted.out",
-                       "safe_state":  null,
-                       "status":  "human_action_required",
-                       "measurement":  null,
-                       "photo_ref":  null
-                   },
-                   {
+                       "wire_id":  "wire:X5:raw_material_available.out",
                        "point_id":  "plc_main.X5",
                        "alias":  "raw_material_available_fb",
                        "direction":  "input",
                        "device_terminal":  "raw_material_available.out",
+                       "signal_type":  "digital",
                        "safe_state":  null,
                        "status":  "human_action_required",
                        "measurement":  null,
-                       "photo_ref":  null
+                       "photo_ref":  null,
+                       "evidence_source":  "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260724-commit-b1/compile/ir_bundle.json"
                    },
                    {
+                       "wire_id":  "wire:X6:good_out_capacity.out",
                        "point_id":  "plc_main.X6",
                        "alias":  "good_out_capacity_fb",
                        "direction":  "input",
                        "device_terminal":  "good_out_capacity.out",
+                       "signal_type":  "digital",
                        "safe_state":  null,
                        "status":  "human_action_required",
                        "measurement":  null,
-                       "photo_ref":  null
+                       "photo_ref":  null,
+                       "evidence_source":  "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260724-commit-b1/compile/ir_bundle.json"
                    },
                    {
+                       "wire_id":  "wire:X7:residual_present.out",
                        "point_id":  "plc_main.X7",
                        "alias":  "residual_present_fb",
                        "direction":  "input",
                        "device_terminal":  "residual_present.out",
+                       "signal_type":  "digital",
                        "safe_state":  null,
                        "status":  "human_action_required",
                        "measurement":  null,
-                       "photo_ref":  null
+                       "photo_ref":  null,
+                       "evidence_source":  "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260724-commit-b1/compile/ir_bundle.json"
                    },
                    {
+                       "wire_id":  "wire:X8:operator_empty_confirm.out",
                        "point_id":  "plc_main.X8",
                        "alias":  "operator_empty_confirm_cmd",
                        "direction":  "input",
                        "device_terminal":  "operator_empty_confirm.out",
+                       "signal_type":  "digital",
                        "safe_state":  null,
                        "status":  "human_action_required",
                        "measurement":  null,
-                       "photo_ref":  null
+                       "photo_ref":  null,
+                       "evidence_source":  "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260724-commit-b1/compile/ir_bundle.json"
                    },
                    {
+                       "wire_id":  "wire:Y0:valve_press.coil",
                        "point_id":  "plc_main.Y0",
                        "alias":  "press_cmd",
                        "direction":  "output",
                        "device_terminal":  "valve_press.coil",
+                       "signal_type":  "digital",
                        "safe_state":  "off",
                        "status":  "human_action_required",
                        "measurement":  null,
-                       "photo_ref":  null
+                       "photo_ref":  null,
+                       "evidence_source":  "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260724-commit-b1/compile/ir_bundle.json"
                    },
                    {
+                       "wire_id":  "wire:X3:sensor_press_extended.out",
+                       "point_id":  "plc_main.X3",
+                       "alias":  "press_extended_fb",
+                       "direction":  "input",
+                       "device_terminal":  "sensor_press_extended.out",
+                       "signal_type":  "digital",
+                       "safe_state":  null,
+                       "status":  "human_action_required",
+                       "measurement":  null,
+                       "photo_ref":  null,
+                       "evidence_source":  "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260724-commit-b1/compile/ir_bundle.json"
+                   },
+                   {
+                       "wire_id":  "wire:X4:sensor_press_retracted.out",
+                       "point_id":  "plc_main.X4",
+                       "alias":  "press_retracted_fb",
+                       "direction":  "input",
+                       "device_terminal":  "sensor_press_retracted.out",
+                       "signal_type":  "digital",
+                       "safe_state":  null,
+                       "status":  "human_action_required",
+                       "measurement":  null,
+                       "photo_ref":  null,
+                       "evidence_source":  "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260724-commit-b1/compile/ir_bundle.json"
+                   },
+                   {
+                       "wire_id":  "wire:Y1:ready_lamp.coil",
                        "point_id":  "plc_main.Y1",
                        "alias":  "ready_lamp_cmd",
                        "direction":  "output",
                        "device_terminal":  "ready_lamp.coil",
+                       "signal_type":  "digital",
                        "safe_state":  "off",
                        "status":  "human_action_required",
                        "measurement":  null,
-                       "photo_ref":  null
+                       "photo_ref":  null,
+                       "evidence_source":  "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260724-commit-b1/compile/ir_bundle.json"
                    },
                    {
+                       "wire_id":  "wire:Y2:running_lamp.coil",
                        "point_id":  "plc_main.Y2",
                        "alias":  "running_lamp_cmd",
                        "direction":  "output",
                        "device_terminal":  "running_lamp.coil",
+                       "signal_type":  "digital",
                        "safe_state":  "off",
                        "status":  "human_action_required",
                        "measurement":  null,
-                       "photo_ref":  null
+                       "photo_ref":  null,
+                       "evidence_source":  "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260724-commit-b1/compile/ir_bundle.json"
                    },
                    {
+                       "wire_id":  "wire:Y3:fault_lamp.coil",
                        "point_id":  "plc_main.Y3",
                        "alias":  "fault_lamp_cmd",
                        "direction":  "output",
                        "device_terminal":  "fault_lamp.coil",
+                       "signal_type":  "digital",
                        "safe_state":  "off",
                        "status":  "human_action_required",
                        "measurement":  null,
-                       "photo_ref":  null
+                       "photo_ref":  null,
+                       "evidence_source":  "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260724-commit-b1/compile/ir_bundle.json"
                    },
                    {
+                       "wire_id":  "wire:Y4:reject_lamp.coil",
                        "point_id":  "plc_main.Y4",
                        "alias":  "reject_lamp_cmd",
                        "direction":  "output",
                        "device_terminal":  "reject_lamp.coil",
+                       "signal_type":  "digital",
                        "safe_state":  "off",
                        "status":  "human_action_required",
                        "measurement":  null,
-                       "photo_ref":  null
+                       "photo_ref":  null,
+                       "evidence_source":  "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260724-commit-b1/compile/ir_bundle.json"
                    },
                    {
+                       "wire_id":  "wire:Y5:fault_buzzer.coil",
                        "point_id":  "plc_main.Y5",
                        "alias":  "buzzer_cmd",
                        "direction":  "output",
                        "device_terminal":  "fault_buzzer.coil",
+                       "signal_type":  "digital",
                        "safe_state":  "off",
                        "status":  "human_action_required",
                        "measurement":  null,
-                       "photo_ref":  null
+                       "photo_ref":  null,
+                       "evidence_source":  "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260724-commit-b1/compile/ir_bundle.json"
                    },
                    {
+                       "wire_id":  "wire:Y6:axis_shuttle.enable",
                        "point_id":  "plc_main.Y6",
                        "alias":  "axis_enable_cmd",
                        "direction":  "output",
                        "device_terminal":  "axis_shuttle.enable",
+                       "signal_type":  "digital",
                        "safe_state":  "off",
                        "status":  "human_action_required",
                        "measurement":  null,
-                       "photo_ref":  null
+                       "photo_ref":  null,
+                       "evidence_source":  "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260724-commit-b1/compile/ir_bundle.json"
                    }
-               ],
-    "evidence_sources":  {
-                             "controller":  {
-                                                "artifact_ref":  "delivery-projects/station.dual-slot-shuttle-press-cell/source/00_topology/controller.plc",
-                                                "digest":  {
-                                                               "algorithm":  "sha256",
-                                                               "value":  "30f9060668cd8f1c9c1d39c7a37f6378a7eb51f2122a1fd49104753d0ba7ac74",
-                                                               "normalization":  "utf8_lf"
-                                                           },
-                                                "source_commit":  "0474cfb54809189bd42055f58b8a565a1b6498a8",
-                                                "freshness":  {
-                                                                  "status":  "input_snapshot",
-                                                                  "basis":  "Project-local controller source."
-                                                              }
-                                            },
-                             "devices":  {
-                                             "artifact_ref":  "delivery-projects/station.dual-slot-shuttle-press-cell/source/00_topology/devices.plc",
-                                             "digest":  {
-                                                            "algorithm":  "sha256",
-                                                            "value":  "241b8dc58192cdba84ea566ce3f5c1d6f3b23fbd9cd68a89886ebec40115547c",
-                                                            "normalization":  "utf8_lf"
-                                                        },
-                                             "source_commit":  "0474cfb54809189bd42055f58b8a565a1b6498a8",
-                                             "freshness":  {
-                                                               "status":  "input_snapshot",
-                                                               "basis":  "Project-local device source."
-                                                           }
-                                         },
-                             "connections":  {
-                                                 "artifact_ref":  "delivery-projects/station.dual-slot-shuttle-press-cell/source/00_topology/connections.plc",
-                                                 "digest":  {
-                                                                "algorithm":  "sha256",
-                                                                "value":  "3804e13e47ecb59017b0046a03bbaeaac4a255a55166da17ecb25f0fedc783c3",
-                                                                "normalization":  "utf8_lf"
-                                                            },
-                                                 "source_commit":  "0474cfb54809189bd42055f58b8a565a1b6498a8",
-                                                 "freshness":  {
-                                                                   "status":  "input_snapshot",
-                                                                   "basis":  "Project-local topology relations."
-                                                               }
-                                             }
-                         }
+               ]
 }

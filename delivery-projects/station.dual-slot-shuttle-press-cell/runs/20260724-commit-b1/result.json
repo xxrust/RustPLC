@@ -1,0 +1,395 @@
+{
+    "schema_version":  1,
+    "run_id":  "20260724-commit-b1",
+    "harness_execution_id":  "20260724-commit-b1",
+    "project_id":  "station.dual_slot_shuttle_press_cell",
+    "harness_status":  "pass",
+    "delivery_status":  "fail",
+    "freshness":  "same_run",
+    "error_code":  null,
+    "artifact_root":  "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260724-commit-b1",
+    "git_head":  "5b0bbbbe301673447d1e9c3819dcdebaedc303f5",
+    "started_at_utc":  "2026-07-24T00:35:45.1944042Z",
+    "completed_at_utc":  "2026-07-24T00:36:05.6564573Z",
+    "elapsed_ms":  20462,
+    "inputs":  {
+                   "manifest":  "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260724-commit-b1/input-manifest.json",
+                   "file_count":  45
+               },
+    "digests":  {
+                    "input_manifest_sha256":  "d8e23032845c5b63701341ce34f9a99bf4f66a2291d7c5cc5fed683cbc6fe046",
+                    "source_set_sha256":  "a1398cf41a7648afefaadd154bc55f6753a268fd5cc6a174a93ce3b1348375c2",
+                    "post_run_source_set_sha256":  "a1398cf41a7648afefaadd154bc55f6753a268fd5cc6a174a93ce3b1348375c2",
+                    "input_set_sha256":  "969c80fdddde410f50dd0f4011db1706c3a039e65ddcdd7f6286119003a4902b",
+                    "post_run_input_set_sha256":  "969c80fdddde410f50dd0f4011db1706c3a039e65ddcdd7f6286119003a4902b"
+                },
+    "status":  {
+                   "harness_execution":  "pass",
+                   "acceptance":  "failed",
+                   "delivery":  "failed",
+                   "acceptance_pass":  9,
+                   "acceptance_blocked":  3,
+                   "acceptance_fail":  1,
+                   "implementation_completeness_percent":  84,
+                   "input_changed_during_run":  false
+               },
+    "steps":  [
+                  {
+                      "name":  "compile_verify",
+                      "classification":  "pass",
+                      "exit_code":  0,
+                      "stdout_log":  "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260724-commit-b1/logs/compile_verify.stdout.log",
+                      "stderr_log":  "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260724-commit-b1/logs/compile_verify.stderr.log",
+                      "artifacts":  [
+                                        "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260724-commit-b1/compile/verification_report.json",
+                                        "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260724-commit-b1/compile/ir_bundle.json"
+                                    ]
+                  },
+                  {
+                      "name":  "geometry_export",
+                      "classification":  "pass",
+                      "exit_code":  0,
+                      "stdout_log":  "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260724-commit-b1/logs/geometry_export.stdout.log",
+                      "stderr_log":  "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260724-commit-b1/logs/geometry_export.stderr.log",
+                      "artifacts":  [
+                                        "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260724-commit-b1/compile/geometry.json",
+                                        "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260724-commit-b1/compile/geometry-export-status.json"
+                                    ]
+                  },
+                  {
+                      "name":  "scenario_validate_01",
+                      "classification":  "pass",
+                      "exit_code":  0,
+                      "stdout_log":  "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260724-commit-b1/logs/scenario_validate_01.stdout.log",
+                      "stderr_log":  "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260724-commit-b1/logs/scenario_validate_01.stderr.log",
+                      "artifacts":  [
+
+                                    ]
+                  },
+                  {
+                      "name":  "scenario_validate_02",
+                      "classification":  "pass",
+                      "exit_code":  0,
+                      "stdout_log":  "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260724-commit-b1/logs/scenario_validate_02.stdout.log",
+                      "stderr_log":  "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260724-commit-b1/logs/scenario_validate_02.stderr.log",
+                      "artifacts":  [
+
+                                    ]
+                  },
+                  {
+                      "name":  "scenario_validate_03",
+                      "classification":  "pass",
+                      "exit_code":  0,
+                      "stdout_log":  "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260724-commit-b1/logs/scenario_validate_03.stdout.log",
+                      "stderr_log":  "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260724-commit-b1/logs/scenario_validate_03.stderr.log",
+                      "artifacts":  [
+
+                                    ]
+                  },
+                  {
+                      "name":  "scenario_validate_04",
+                      "classification":  "pass",
+                      "exit_code":  0,
+                      "stdout_log":  "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260724-commit-b1/logs/scenario_validate_04.stdout.log",
+                      "stderr_log":  "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260724-commit-b1/logs/scenario_validate_04.stderr.log",
+                      "artifacts":  [
+
+                                    ]
+                  },
+                  {
+                      "name":  "scenario_validate_05",
+                      "classification":  "pass",
+                      "exit_code":  0,
+                      "stdout_log":  "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260724-commit-b1/logs/scenario_validate_05.stdout.log",
+                      "stderr_log":  "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260724-commit-b1/logs/scenario_validate_05.stderr.log",
+                      "artifacts":  [
+
+                                    ]
+                  },
+                  {
+                      "name":  "scenario_validate_06",
+                      "classification":  "pass",
+                      "exit_code":  0,
+                      "stdout_log":  "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260724-commit-b1/logs/scenario_validate_06.stdout.log",
+                      "stderr_log":  "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260724-commit-b1/logs/scenario_validate_06.stderr.log",
+                      "artifacts":  [
+
+                                    ]
+                  },
+                  {
+                      "name":  "scenario_validate_07",
+                      "classification":  "pass",
+                      "exit_code":  0,
+                      "stdout_log":  "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260724-commit-b1/logs/scenario_validate_07.stdout.log",
+                      "stderr_log":  "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260724-commit-b1/logs/scenario_validate_07.stderr.log",
+                      "artifacts":  [
+
+                                    ]
+                  },
+                  {
+                      "name":  "scenario_validate_08",
+                      "classification":  "pass",
+                      "exit_code":  0,
+                      "stdout_log":  "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260724-commit-b1/logs/scenario_validate_08.stdout.log",
+                      "stderr_log":  "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260724-commit-b1/logs/scenario_validate_08.stderr.log",
+                      "artifacts":  [
+
+                                    ]
+                  },
+                  {
+                      "name":  "scenario_validate_09",
+                      "classification":  "pass",
+                      "exit_code":  0,
+                      "stdout_log":  "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260724-commit-b1/logs/scenario_validate_09.stdout.log",
+                      "stderr_log":  "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260724-commit-b1/logs/scenario_validate_09.stderr.log",
+                      "artifacts":  [
+
+                                    ]
+                  },
+                  {
+                      "name":  "project_check",
+                      "classification":  "known_gap",
+                      "exit_code":  1,
+                      "stdout_log":  "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260724-commit-b1/logs/project_check.stdout.log",
+                      "stderr_log":  "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260724-commit-b1/logs/project_check.stderr.log",
+                      "artifacts":  [
+                                        "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260724-commit-b1/project-check/project_check_report.json"
+                                    ],
+                      "gap_ids":  [
+                                      "GAP-PROCESS-TRANSFORM-CARRIER"
+                                  ]
+                  }
+              ],
+    "acceptance":  [
+                       {
+                           "id":  "AC-01",
+                           "status":  "pass",
+                           "basis":  "The project-local source snapshot and digest manifest exist.",
+                           "blocker_ids":  [
+
+                                           ]
+                       },
+                       {
+                           "id":  "AC-02",
+                           "status":  "pass",
+                           "basis":  "Parser, AST lowering, semantic analysis, and IR emission were invoked.",
+                           "blocker_ids":  [
+
+                                           ]
+                       },
+                       {
+                           "id":  "AC-03",
+                           "status":  "pass",
+                           "basis":  "Safety verification executed; project-specific coverage limitations remain explicit.",
+                           "blocker_ids":  null
+                       },
+                       {
+                           "id":  "AC-04",
+                           "status":  "pass",
+                           "basis":  "Liveness verification executed.",
+                           "blocker_ids":  [
+
+                                           ]
+                       },
+                       {
+                           "id":  "AC-05",
+                           "status":  "pass",
+                           "basis":  "Timing verification executed for the no-board model.",
+                           "blocker_ids":  [
+
+                                           ]
+                       },
+                       {
+                           "id":  "AC-06",
+                           "status":  "pass",
+                           "basis":  "Causality verification executed.",
+                           "blocker_ids":  [
+
+                                           ]
+                       },
+                       {
+                           "id":  "AC-07",
+                           "status":  "pass",
+                           "basis":  "Declared scenario validation commands must exit successfully; product gaps remain failed execution evidence.",
+                           "blocker_ids":  [
+                                               "GAP-SIM-FAULT-INJECTION"
+                                           ]
+                       },
+                       {
+                           "id":  "AC-08",
+                           "status":  "fail",
+                           "basis":  "The nominal project-check pipeline must exit successfully; product gaps remain failed execution evidence.",
+                           "blocker_ids":  [
+                                               "GAP-PROCESS-TRANSFORM-CARRIER"
+                                           ]
+                       },
+                       {
+                           "id":  "AC-09",
+                           "status":  "blocked",
+                           "basis":  "Physical point checks require observed commissioning evidence.",
+                           "blocker_ids":  [
+                                               "GAP-PHYSICAL-POINT-CHECK"
+                                           ]
+                       },
+                       {
+                           "id":  "AC-10",
+                           "status":  "blocked",
+                           "basis":  "Required human holds have no attributable signatures.",
+                           "blocker_ids":  [
+
+                                           ]
+                       },
+                       {
+                           "id":  "AC-11",
+                           "status":  "blocked",
+                           "basis":  "Target-hardware timing evidence is absent.",
+                           "blocker_ids":  [
+                                               "GAP-HARDWARE-TIMING-EVIDENCE"
+                                           ]
+                       },
+                       {
+                           "id":  "AC-12",
+                           "status":  "pass",
+                           "basis":  "Semantic-twin geometry must be exported by the current compiler run; failure remains an explicit blocker.",
+                           "blocker_ids":  null
+                       },
+                       {
+                           "id":  "AC-13",
+                           "status":  "pass",
+                           "basis":  "Wiring points must have unique controller channels, aliases, and terminals; correct direction and safe-state metadata; and source-backed controller/device relation bindings.",
+                           "blocker_ids":  [
+
+                                           ]
+                       }
+                   ],
+    "known_gaps":  [
+                       {
+                           "id":  "GAP-PROCESS-TRANSFORM-CARRIER",
+                           "layer":  "process-model-check",
+                           "classification":  "code-gap",
+                           "summary":  "Process-model refinement still reports OP-003 for transform-carrier capability."
+                       },
+                       {
+                           "id":  "GAP-SIM-FAULT-INJECTION",
+                           "layer":  "sim-plc scenario driver",
+                           "classification":  "code-gap",
+                           "summary":  "Axis and cylinder fault scenarios cannot causally inject every project-level runtime fault."
+                       },
+                       {
+                           "id":  "GAP-TRACE-DOCTOR-BUNDLE",
+                           "layer":  "trace-doctor source loading",
+                           "classification":  "code-gap",
+                           "summary":  "trace-doctor does not yet consume the bundle source through the same loader as intent-doctor."
+                       },
+                       {
+                           "id":  "GAP-CROSS-CYCLE-EVIDENCE",
+                           "layer":  "intent evidence",
+                           "classification":  "evidence-gap",
+                           "summary":  "The observed evidence covers one finite batch and does not prove a second in-process cycle."
+                       },
+                       {
+                           "id":  "GAP-HARDWARE-TIMING-EVIDENCE",
+                           "layer":  "runtime budget and deployment timing",
+                           "classification":  "evidence-gap",
+                           "summary":  "No target-hardware execution-time measurement is available."
+                       },
+                       {
+                           "id":  "GAP-RESIDUAL-TOKEN-INJECTION",
+                           "layer":  "runtime workpiece initialization",
+                           "classification":  "code-gap",
+                           "summary":  "Runtime cannot seed an exact pre-existing workpiece token at an arbitrary site."
+                       },
+                       {
+                           "id":  "GAP-HMI-TRANSPORT-BINDING",
+                           "layer":  "deployment operator feedback binding",
+                           "classification":  "integration-gap",
+                           "summary":  "PLC status and fault producers lack a target HMI register or transport binding."
+                       },
+                       {
+                           "id":  "GAP-EXTERNAL-REINIT-INTENT-SCHEMA",
+                           "layer":  "intent contract cycle semantics",
+                           "classification":  "schema-gap",
+                           "summary":  "The intent contract cannot express a finite batch that requires external replenishment and runtime recreation."
+                       },
+                       {
+                           "id":  "GAP-PHYSICAL-POINT-CHECK",
+                           "layer":  "commissioning",
+                           "classification":  "evidence-gap",
+                           "summary":  "The declared controller points have not been physically point-checked."
+                       }
+                   ],
+    "scenario_summary":  {
+                             "declared":  9,
+                             "passed":  9,
+                             "failed":  0,
+                             "records":  [
+                                             {
+                                                 "scenario_ref":  "source/scenarios/startup_self_check.yaml",
+                                                 "status":  "pass",
+                                                 "exit_code":  0,
+                                                 "artifact_ref":  "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260724-commit-b1/scenario-validation/01-startup_self_check.json"
+                                             },
+                                             {
+                                                 "scenario_ref":  "source/scenarios/nominal_two_part.yaml",
+                                                 "status":  "pass",
+                                                 "exit_code":  0,
+                                                 "artifact_ref":  "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260724-commit-b1/scenario-validation/02-nominal_two_part.json"
+                                             },
+                                             {
+                                                 "scenario_ref":  "source/scenarios/axis_timeout_recovery.yaml",
+                                                 "status":  "pass",
+                                                 "exit_code":  0,
+                                                 "artifact_ref":  "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260724-commit-b1/scenario-validation/03-axis_timeout_recovery.json"
+                                             },
+                                             {
+                                                 "scenario_ref":  "source/scenarios/axis_safety_fault.yaml",
+                                                 "status":  "pass",
+                                                 "exit_code":  0,
+                                                 "artifact_ref":  "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260724-commit-b1/scenario-validation/04-axis_safety_fault.json"
+                                             },
+                                             {
+                                                 "scenario_ref":  "source/scenarios/cylinder_timeout.yaml",
+                                                 "status":  "pass",
+                                                 "exit_code":  0,
+                                                 "artifact_ref":  "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260724-commit-b1/scenario-validation/05-cylinder_timeout.json"
+                                             },
+                                             {
+                                                 "scenario_ref":  "source/scenarios/illegal_start.yaml",
+                                                 "status":  "pass",
+                                                 "exit_code":  0,
+                                                 "artifact_ref":  "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260724-commit-b1/scenario-validation/06-illegal_start.json"
+                                             },
+                                             {
+                                                 "scenario_ref":  "source/scenarios/start_while_faulted.yaml",
+                                                 "status":  "pass",
+                                                 "exit_code":  0,
+                                                 "artifact_ref":  "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260724-commit-b1/scenario-validation/07-start_while_faulted.json"
+                                             },
+                                             {
+                                                 "scenario_ref":  "source/scenarios/start_while_running.yaml",
+                                                 "status":  "pass",
+                                                 "exit_code":  0,
+                                                 "artifact_ref":  "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260724-commit-b1/scenario-validation/08-start_while_running.json"
+                                             },
+                                             {
+                                                 "scenario_ref":  "source/scenarios/residual_manual_assist.yaml",
+                                                 "status":  "pass",
+                                                 "exit_code":  0,
+                                                 "artifact_ref":  "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260724-commit-b1/scenario-validation/09-residual_manual_assist.json"
+                                             }
+                                         ]
+                         },
+    "attribution":  {
+                        "provenance_scope":  "delivery_fixture_materialization",
+                        "execution_unattended_verdict":  "proven",
+                        "source_authoring_verdict":  "not_proven",
+                        "unattended_verdict":  "not_proven",
+                        "human_intervention_detected":  false,
+                        "reason":  "Materialization execution is attributable, while source authoring provenance is not recorded by this run.",
+                        "evidence":  [
+                                         "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260724-commit-b1/input-manifest.json",
+                                         "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260724-commit-b1/agent-events.json",
+                                         "delivery-projects/station.dual-slot-shuttle-press-cell/runs/20260724-commit-b1/provenance.json"
+                                     ]
+                    }
+}

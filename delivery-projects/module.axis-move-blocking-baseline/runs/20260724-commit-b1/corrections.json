@@ -1,0 +1,21 @@
+{
+    "schema_version":  1,
+    "project_id":  "module.axis_move_blocking_baseline",
+    "run_id":  "20260724-commit-b1",
+    "source_commit":  "5b0bbbbe301673447d1e9c3819dcdebaedc303f5",
+    "correction_count":  2,
+    "records":  [
+                    {
+                        "correction_id":  "COR-001",
+                        "status":  "verified",
+                        "anomaly_id":  "ANOM-001",
+                        "summary":  "Added purpose metadata to the project-local axis declaration; compile and scenario-init pass against the snapshot."
+                    },
+                    {
+                        "correction_id":  "COR-002",
+                        "status":  "verified",
+                        "anomaly_id":  "ANOM-002",
+                        "summary":  "Added an explicit axis enable step before the blocking move and reran compile/project-check."
+                    }
+                ]
+}

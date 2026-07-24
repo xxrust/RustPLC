@@ -51,7 +51,7 @@
   </header>
 
   <div class="metrics">
-    <div class="metric"><strong>65 / 65</strong><span>Web server tests</span></div>
+    <div class="metric"><strong>66 / 66</strong><span>Web server tests</span></div>
     <div class="metric"><strong>3481 / 0</strong><span>Corpus checks / errors</span></div>
     <div class="metric"><strong>3</strong><span>Formal projects</span></div>
     <div class="metric"><strong>2</strong><span>Repeat runs</span></div>
@@ -88,12 +88,12 @@ compiler-derived wiring -&gt; human point checks -&gt; holds -&gt; release</code
     <table>
       <thead><tr><th>项目</th><th>状态</th><th>Validator</th><th>直接结论</th></tr></thead>
       <tbody>
-        <tr><td><code>module.axis_move_blocking_baseline</code></td><td class="warn">blocked</td><td>898 / 0</td><td>编译、scenario、project-check 通过；HIL、物理点检和人工 hold 待完成</td></tr>
-        <tr><td><code>station.dual_slot_shuttle_press_cell</code></td><td class="fail">fail</td><td>1587 / 0</td><td><code>OP-003</code> 暴露 transform-carrier admission/refinement 缺口</td></tr>
-        <tr><td><code>line.three_station_assembly</code></td><td class="fail">fail</td><td>885 / 0</td><td>scenario runtime 尚不能执行 <code>sensor_push_ext == true</code> 语义 guard</td></tr>
+        <tr><td><code>module.axis_move_blocking_baseline</code></td><td class="warn">blocked</td><td>929 / 0</td><td>编译、scenario、project-check 通过；HIL、物理点检和人工 hold 待完成</td></tr>
+        <tr><td><code>station.dual_slot_shuttle_press_cell</code></td><td class="fail">fail</td><td>1636 / 0</td><td><code>OP-003</code> 暴露 transform-carrier admission/refinement 缺口</td></tr>
+        <tr><td><code>line.three_station_assembly</code></td><td class="fail">fail</td><td>916 / 0</td><td>scenario runtime 尚不能执行 <code>sensor_push_ext == true</code> 语义 guard</td></tr>
       </tbody>
     </table>
-    <p class="note"><code>20260724-210000</code> 与 <code>20260724-211000</code> 均为 harness pass。第二轮 repeatability pass，differences 0。交付 fail 保留为编译器能力证据。</p>
+    <p class="note">Canonical run <code>20260724-commit-b1</code> 由三个独立 clean clone 基于实现提交 <code>5b0bbbbe301673447d1e9c3819dcdebaedc303f5</code> 分别物化。该提交的 clean-checkout corpus 为 3481 checks / 0 errors，clone 前后保持 clean。交付 fail 保留为编译器能力证据。</p>
   </section>
 
   <section>
@@ -110,6 +110,9 @@ compiler-derived wiring -&gt; human point checks -&gt; holds -&gt; release</code
         <tr><td>Topology</td><td class="ok">PASS</td><td>真实 geometry；键盘节点/边与文本证据状态</td></tr>
         <tr><td>Wiring</td><td class="ok">PASS</td><td>三项目 15 / 1 / 16 rows；IR topology links 与物理观察按 point_id 合并</td></tr>
         <tr><td>Provenance</td><td class="ok">PASS</td><td>execution proven；source authoring 与 overall not_proven</td></tr>
+        <tr><td>责任链</td><td class="ok">PASS</td><td>Agent authoring、compiler verification、physical validation、release authorization 四段责任与证据链</td></tr>
+        <tr><td>HIL responsibility</td><td class="ok">PASS</td><td>状态栏绑定 hil_review；Inspector 展示 reason 与 blocked prerequisites</td></tr>
+        <tr><td>Current-run projection</td><td class="ok">PASS</td><td>项目投影只消费 manifest 指定的 current run；历史 run 仅保留审计入口</td></tr>
         <tr><td>双视口</td><td class="ok">PASS</td><td>1440x900、1920x1080 无页面级 overflow</td></tr>
       </tbody>
     </table>
@@ -127,7 +130,9 @@ compiler-derived wiring -&gt; human point checks -&gt; holds -&gt; release</code
         <tr><td>Search/accessibility agent</td><td class="warn">通过，过程试错较多</td><td>修正 React 时序、controlled input、selector、focus、session 假设</td></tr>
         <tr><td>PRD completion audit</td><td class="ok">通过</td><td>阻止把 fixture materialization 写成无人源码创作证明</td></tr>
         <tr><td>Desktop contract audit</td><td class="warn">通过，发现 2 个 P1</td><td>修正 wiring 合并并把浏览器断言扩展到三项目</td></tr>
-        <tr><td>Two-phase evidence audit</td><td class="warn">通过，阻止错误提交</td><td>发现 213000 过强声明、绝对路径和 clean runner stderr 风险</td></tr>
+        <tr><td>Two-phase evidence audit</td><td class="warn">结论有效，发生一次越权</td><td>识别旧证据过强声明；后续越过只读边界，主线程独立审查并恢复 canonical evidence</td></tr>
+        <tr><td>Residual-risk agents</td><td class="ok">通过</td><td>修正 HIL 误绑定与历史 run 污染，新增双 run 回归</td></tr>
+        <tr><td>Canonical evidence agents</td><td class="ok">B1 核心命令零重试</td><td>三 clean clone 复核 commit、dirty start、validator、wrapper、绝对路径与唯一 run</td></tr>
       </tbody>
     </table>
   </section>
@@ -145,7 +150,7 @@ compiler-derived wiring -&gt; human point checks -&gt; holds -&gt; release</code
         <tr><td>A-06</td><td>真实 exit 1 曾被投影为 blocked</td><td>保留 delivery fail 与 gap code</td></tr>
         <tr><td>A-07</td><td>Canonical run 有 7 次语法试错</td><td>记录 retry/long-search，归因到 skill/prompt 缺口</td></tr>
         <tr><td>A-08</td><td>PowerShell path、stderr、参数、插值反复失败</td><td>统一 contained path、native process 与显式插值契约</td></tr>
-        <tr><td>A-09</td><td>Backend 中间态 borrow 错误</td><td>编译探针定位，64 tests 最终通过</td></tr>
+        <tr><td>A-09</td><td>Backend 中间态 borrow 错误</td><td>编译探针定位，后续完整回归持续通过</td></tr>
         <tr><td>A-10</td><td>浏览器连接旧 binary</td><td>确认 PID、重建、重启最新服务</td></tr>
         <tr><td>A-11</td><td>Windows binary 锁住 Cargo 输出</td><td>停止已确认进程后重建</td></tr>
         <tr><td>A-12</td><td>Validator 硬编码 registry</td><td>增加显式仓库内 RegistryRoot</td></tr>
@@ -184,6 +189,15 @@ compiler-derived wiring -&gt; human point checks -&gt; holds -&gt; release</code
         <tr><td>A-45</td><td>Commit A clean run 在 cold cargo build 后悬停</td><td>终止本轮自有进程，移除 Start-Process -Wait 并运行最小探针</td></tr>
         <tr><td>A-46</td><td>Start-Process 对象返回 null ExitCode</td><td>改用 ProcessStartInfo、异步读流和真实 Process.ExitCode；231000 通过</td></tr>
         <tr><td>A-47</td><td>clean-checkout 的 module/station 产物路径达到 261/263 字符，越过 Windows MAX_PATH</td><td>初步竞争条件判断被 subagent 的 254/261/263 路径证据纠正；内部 run id 缩为 cc，并增加 240 字符路径预算门禁</td></tr>
+        <tr><td>A-48</td><td>v1 agents 出现漏 build、validator 参数误用、未引用 ^{commit} 和 exit code 读取试错</td><td>B1 固定 build、读参数、materialize、validator；三项目核心命令零重试，历史 retry 保留</td></tr>
+        <tr><td>A-49</td><td>旧 runs 污染项目投影；组合 move/delete 被 safety gate 拒绝</td><td>拆成显式 move/git rm；current-run selector 阻止历史 stage、test、problem 和 evidence 覆盖当前结果</td></tr>
+        <tr><td>A-50</td><td>Station README 指向已删除 172826 run</td><td>改为经 delivery-project.json 的 fixtures.api_run_result 解析当前 B1 run</td></tr>
+        <tr><td>A-51</td><td>只读 PowerShell/rg 探针与一次 placeholder 工具选择错误</td><td>改用预先赋值、先收集对象、显式目录和正确 exec；未改动 tracked 文件或 canonical 证据</td></tr>
+        <tr><td>A-52</td><td>审计 agent 越过只读边界并写入 synthetic observation；8080 启动冲突</td><td>主线程独立审查，责任链通过后纳入；clean B1 移除 synthetic 物理记录，现有服务继续使用</td></tr>
+        <tr><td>A-53</td><td>任意 observed evidence 被误显示为 HIL evidence</td><td>绑定 hil_review，显式映射 hold/evidence 状态；build 与浏览器断言通过</td></tr>
+        <tr><td>A-54</td><td>历史 run 可覆盖 Verification/Tests/Problems/Evidence/Geometry</td><td>引入 current-run selector 和双 run 回归；web-server 66/66</td></tr>
+        <tr><td>A-55</td><td>Station B1 route metadata audit 因缺少 UI fallback 禁止项失败一次</td><td>只补 route metadata；canonical 核心命令未重跑且零重试</td></tr>
+        <tr><td>A-56</td><td>停止、构建、启动服务的组合命令被安全策略拒绝</td><td>拆成确认 PID、独立 build、隐藏启动和 HTTP readiness；PID 72012 在 8080 返回 200</td></tr>
       </tbody>
     </table>
     <p class="note">浏览器 harness 的集中试错说明旧提示缺少三条规则：等待 React 受控状态稳定、使用窄 selector、按项目恢复 session。修正后的 harness 已把这些规则固化为断言。</p>
@@ -195,15 +209,18 @@ compiler-derived wiring -&gt; human point checks -&gt; holds -&gt; release</code
       <thead><tr><th>Gate</th><th>结果</th><th>证据</th></tr></thead>
       <tbody>
         <tr><td><code>cargo fmt --all -- --check</code></td><td class="ok">PASS</td><td>Rust 格式通过</td></tr>
-        <tr><td><code>cargo test -p web-server</code></td><td class="ok">PASS</td><td>65 / 65，包含 artifact GET 鉴权</td></tr>
+        <tr><td><code>cargo test -p web-server</code></td><td class="ok">PASS</td><td>66 / 66，包含 artifact GET 鉴权与历史 run 污染回归</td></tr>
         <tr><td><code>npm --prefix web-ui run lint</code></td><td class="ok">PASS</td><td>ESLint 无错误</td></tr>
         <tr><td><code>npm --prefix web-ui run build</code></td><td class="ok">PASS</td><td>Production build 通过，large chunk warning 保留</td></tr>
         <tr><td>Corpus 210000/211000</td><td class="ok">PASS</td><td>3/3 projects，repeatability differences 0</td></tr>
         <tr><td>Corpus 213000 hardening</td><td class="warn">SUPERSEDED</td><td>3481 checks / 0 errors，但 build stderr 含 PowerShell wrapper</td></tr>
         <tr><td>Corpus 231000 diagnostic</td><td class="ok">PASS / DIRTY</td><td>3481 checks / 0 errors；全日志无 wrapper；event/provenance 无绝对路径</td></tr>
+        <tr><td>Implementation clean-checkout b1</td><td class="ok">PASS</td><td><code>5b0bbbb</code>；clone 前后 clean；3481 checks / 0 errors</td></tr>
+        <tr><td>Canonical clean clones B1</td><td class="ok">PASS</td><td>929 / 1636 / 916 checks；0 errors；dirty start=false；核心命令零重试</td></tr>
+        <tr><td>Current-run / HIL regression</td><td class="ok">PASS</td><td>web-server 66/66；双 run 污染回归、责任链和 HIL browser assertions 通过</td></tr>
         <tr><td>Browser 1440/1920</td><td class="ok">PASS</td><td>三项目逐项 pipeline、holds、wiring、provenance，另含 filters、session、topology、deep links</td></tr>
         <tr><td>WIR-001 至 WIR-007</td><td class="ok">PASS</td><td>所有负向契约均有拒绝路径</td></tr>
-        <tr><td>Clean-checkout corpus</td><td class="warn">PENDING FINAL COMMIT</td><td>最终提交形成后执行，随后不再修改 tracked files</td></tr>
+        <tr><td>Final evidence commit clean-checkout</td><td class="warn">PENDING FINAL COMMIT</td><td>证据与报告提交形成后执行，随后不再修改 tracked files</td></tr>
       </tbody>
     </table>
   </section>

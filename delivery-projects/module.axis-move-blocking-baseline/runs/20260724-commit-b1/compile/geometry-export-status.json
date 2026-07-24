@@ -1,0 +1,11 @@
+{
+    "schema_version":  1,
+    "project_id":  "module.axis_move_blocking_baseline",
+    "run_id":  "20260724-commit-b1",
+    "status":  "pass",
+    "error_code":  null,
+    "exit_code":  0,
+    "geometry_artifact":  "delivery-projects/module.axis-move-blocking-baseline/runs/20260724-commit-b1/compile/geometry.json",
+    "stdout_log":  "delivery-projects/module.axis-move-blocking-baseline/runs/20260724-commit-b1/logs/geometry_export.stdout.log",
+    "stderr_log":  "delivery-projects/module.axis-move-blocking-baseline/runs/20260724-commit-b1/logs/geometry_export.stderr.log"
+}

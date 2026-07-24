@@ -1,25 +1,111 @@
 {
-    "schema_version":  1,
+    "schema_version":  2,
     "project_id":  "module.axis_move_blocking_baseline",
-    "source_commit":  "0474cfb54809189bd42055f58b8a565a1b6498a8",
+    "source_commit":  "5b0bbbbe301673447d1e9c3819dcdebaedc303f5",
     "status":  "human_action_required",
     "summary":  {
                     "declared_points":  1,
+                    "compiler_derived_points":  1,
                     "verified_points":  0,
                     "blocked_points":  0,
                     "human_action_required_points":  1
                 },
+    "validation_summary":  {
+                               "status":  "pass",
+                               "error_count":  0,
+                               "checked_rules":  [
+                                                     "duplicate_channel",
+                                                     "duplicate_alias",
+                                                     "duplicate_terminal",
+                                                     "direction_mismatch",
+                                                     "unresolved_alias",
+                                                     "unbound_port",
+                                                     "missing_safe_state"
+                                                 ]
+                           },
+    "diagnostics":  [
+
+                    ],
+    "evidence_sources":  {
+                             "controller":  [
+                                                {
+                                                    "artifact_ref":  "delivery-projects/module.axis-move-blocking-baseline/source/plc/main.plc",
+                                                    "digest":  {
+                                                                   "algorithm":  "sha256",
+                                                                   "value":  "0f9e6d8401a9cb98a9dbb28db4d040ded16dddcd77773003b2edac28a8a7cce4",
+                                                                   "normalization":  "utf8_lf"
+                                                               },
+                                                    "source_commit":  "5b0bbbbe301673447d1e9c3819dcdebaedc303f5",
+                                                    "freshness":  {
+                                                                      "status":  "input_snapshot",
+                                                                      "basis":  "Source artifact declares the project controller or controller I/O aliases."
+                                                                  }
+                                                }
+                                            ],
+                             "devices":  [
+                                             {
+                                                 "artifact_ref":  "delivery-projects/module.axis-move-blocking-baseline/source/plc/main.plc",
+                                                 "digest":  {
+                                                                "algorithm":  "sha256",
+                                                                "value":  "0f9e6d8401a9cb98a9dbb28db4d040ded16dddcd77773003b2edac28a8a7cce4",
+                                                                "normalization":  "utf8_lf"
+                                                            },
+                                                 "source_commit":  "5b0bbbbe301673447d1e9c3819dcdebaedc303f5",
+                                                 "freshness":  {
+                                                                   "status":  "input_snapshot",
+                                                                   "basis":  "Source artifact declares one or more topology devices."
+                                                               }
+                                             }
+                                         ],
+                             "connections":  [
+                                                 {
+                                                     "artifact_ref":  "delivery-projects/module.axis-move-blocking-baseline/source/plc/main.plc",
+                                                     "digest":  {
+                                                                    "algorithm":  "sha256",
+                                                                    "value":  "0f9e6d8401a9cb98a9dbb28db4d040ded16dddcd77773003b2edac28a8a7cce4",
+                                                                    "normalization":  "utf8_lf"
+                                                                },
+                                                     "source_commit":  "5b0bbbbe301673447d1e9c3819dcdebaedc303f5",
+                                                     "freshness":  {
+                                                                       "status":  "input_snapshot",
+                                                                       "basis":  "Source artifact declares topology relations used to bind controller points and device terminals."
+                                                                   }
+                                                 }
+                                             ],
+                             "compiler_ir":  [
+                                                 {
+                                                     "artifact_ref":  "delivery-projects/module.axis-move-blocking-baseline/runs/20260724-commit-b1/compile/ir_bundle.json",
+                                                     "digest":  {
+                                                                    "algorithm":  "sha256",
+                                                                    "value":  "c3e8efb4b1103a607219a2de9525b647bbb6079cfadd17280ea4d7071078a143",
+                                                                    "normalization":  "utf8_lf"
+                                                                },
+                                                     "source_commit":  "5b0bbbbe301673447d1e9c3819dcdebaedc303f5",
+                                                     "freshness":  {
+                                                                       "status":  "same_run",
+                                                                       "basis":  "Authoritative wiring row set derived from the current compile/ir_bundle.json topology.links projection."
+                                                                   }
+                                                 }
+                                             ]
+                         },
+    "expected_vs_derived":  {
+                                "expected_count":  1,
+                                "derived_count":  1,
+                                "contract":  "config is expected metadata/audit input; points are authoritative compiler-derived topology links"
+                            },
     "points":  [
                    {
+                       "wire_id":  "wire:Y0:axis_x.enable",
                        "point_id":  "plc_main.Y0",
                        "alias":  "axis_enable",
                        "direction":  "output",
                        "device_terminal":  "axis_x.enable",
-                       "signal_type":  "analog",
+                       "signal_type":  "digital",
                        "safe_state":  "off",
                        "status":  "human_action_required",
                        "measurement":  null,
-                       "photo_ref":  null
+                       "photo_ref":  null,
+                       "evidence_source":  "delivery-projects/module.axis-move-blocking-baseline/runs/20260724-commit-b1/compile/ir_bundle.json"
                    }
                ]
 }

@@ -107,7 +107,7 @@ cargo run -p web-server
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run_delivery_project_corpus.ps1
 ```
 
-本次验收 corpus 为 `20260724-210000` 和 `20260724-211000`。两轮 harness 均通过，第二轮 repeatability differences 为 0。完整门禁、Subagent 完整度和异常修正记录见 [自测报告](docs/reports/autonomous_plc_delivery_workbench_selftest.md)。
+当前 canonical 证据为 `runs/20260724-commit-b1`，由三个独立 clean clone 基于实现提交 `5b0bbbbe301673447d1e9c3819dcdebaedc303f5` 分别物化。module、station、line validator 分别为 `929 / 1636 / 916 checks`，均为 0 errors，三项目均为 `dirty_worktree_at_start=false`；该提交的 clean-checkout corpus 为 `3481 checks / 0 errors`，clone 前后保持 clean。完整门禁、Subagent 完整度和异常修正记录见 [自测报告](docs/reports/autonomous_plc_delivery_workbench_selftest.md)。
 
 可复制的异常、修正和执行链同时记录在 [Markdown 报告](docs/reports/autonomous_plc_delivery_workbench_selftest.md)。
 

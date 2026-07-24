@@ -1,0 +1,4973 @@
+{
+  "schema_version": 2,
+  "artifact_kind": "semantic_twin_geometry",
+  "source_path": "delivery-projects/line.three-station-assembly/source/plc/main.plc",
+  "summary": {
+    "task_count": 5,
+    "step_count": 26,
+    "transition_count": 35,
+    "device_count": 34,
+    "resource_count": 0,
+    "timing_rule_count": 1,
+    "causality_chain_count": 8,
+    "observed_transition_count": 0,
+    "intent_mismatch_count": 0
+  },
+  "lanes": [
+    {
+      "id": "topology",
+      "kind": "topology",
+      "label": "Topology",
+      "position": 0
+    },
+    {
+      "id": "evidence",
+      "kind": "evidence",
+      "label": "Evidence",
+      "position": 1
+    },
+    {
+      "id": "task:cycle",
+      "kind": "task",
+      "label": "cycle",
+      "position": 2
+    },
+    {
+      "id": "task:eject_bad",
+      "kind": "task",
+      "label": "eject_bad",
+      "position": 3
+    },
+    {
+      "id": "task:eject_good",
+      "kind": "task",
+      "label": "eject_good",
+      "position": 4
+    },
+    {
+      "id": "task:fault_handler",
+      "kind": "task",
+      "label": "fault_handler",
+      "position": 5
+    },
+    {
+      "id": "task:ready",
+      "kind": "task",
+      "label": "ready",
+      "position": 6
+    }
+  ],
+  "nodes": [
+    {
+      "id": "task:cycle",
+      "kind": "task",
+      "label": "cycle",
+      "lane_id": "task:cycle",
+      "views": [
+        "constellation",
+        "orbit"
+      ],
+      "evidence_status": "derived",
+      "attributes": {
+        "blocking_state": "ready",
+        "current_state": "cycle.push_out",
+        "entry_state": "cycle.push_out",
+        "timers": "cycle.push_out.timeout_1:800ms, cycle.press_down.timeout_1:500ms, cycle.press_up.timeout_1:500ms, cycle.check_quality.timeout_1:1000ms"
+      }
+    },
+    {
+      "id": "task:eject_bad",
+      "kind": "task",
+      "label": "eject_bad",
+      "lane_id": "task:eject_bad",
+      "views": [
+        "constellation",
+        "orbit"
+      ],
+      "evidence_status": "derived",
+      "attributes": {
+        "blocking_state": "ready",
+        "current_state": "eject_bad.reject_out",
+        "entry_state": "eject_bad.reject_out",
+        "timers": "eject_bad.reject_out.timeout_1:500ms, eject_bad.retract_all_bad.parallel_1_branch_2.timeout_1:800ms"
+      }
+    },
+    {
+      "id": "task:eject_good",
+      "kind": "task",
+      "label": "eject_good",
+      "lane_id": "task:eject_good",
+      "views": [
+        "constellation",
+        "orbit"
+      ],
+      "evidence_status": "derived",
+      "attributes": {
+        "blocking_state": "ready",
+        "current_state": "eject_good.eject_out",
+        "entry_state": "eject_good.eject_out",
+        "timers": "eject_good.eject_out.timeout_1:500ms, eject_good.retract_all_good.parallel_1_branch_2.timeout_1:800ms"
+      }
+    },
+    {
+      "id": "task:fault_handler",
+      "kind": "task",
+      "label": "fault_handler",
+      "lane_id": "task:fault_handler",
+      "views": [
+        "constellation",
+        "orbit"
+      ],
+      "evidence_status": "derived",
+      "attributes": {
+        "blocking_state": "ready",
+        "current_state": "fault_handler.safe_retract",
+        "entry_state": "fault_handler.safe_retract"
+      }
+    },
+    {
+      "id": "task:ready",
+      "kind": "task",
+      "label": "ready",
+      "lane_id": "task:ready",
+      "views": [
+        "constellation",
+        "orbit"
+      ],
+      "evidence_status": "derived",
+      "attributes": {
+        "blocking_state": "ready",
+        "current_state": "ready.wait_start",
+        "entry_state": "ready.wait_start"
+      }
+    },
+    {
+      "id": "step:cycle.push_out",
+      "kind": "step",
+      "label": "push_out",
+      "lane_id": "task:cycle",
+      "views": [
+        "constellation",
+        "orbit"
+      ],
+      "evidence_status": "derived",
+      "attributes": {
+        "initial": "true"
+      }
+    },
+    {
+      "id": "step:cycle.press_down",
+      "kind": "step",
+      "label": "press_down",
+      "lane_id": "task:cycle",
+      "views": [
+        "constellation",
+        "orbit"
+      ],
+      "evidence_status": "derived"
+    },
+    {
+      "id": "step:cycle.press_up",
+      "kind": "step",
+      "label": "press_up",
+      "lane_id": "task:cycle",
+      "views": [
+        "constellation",
+        "orbit"
+      ],
+      "evidence_status": "derived"
+    },
+    {
+      "id": "step:cycle.check_quality",
+      "kind": "step",
+      "label": "check_quality",
+      "lane_id": "task:cycle",
+      "views": [
+        "constellation",
+        "orbit"
+      ],
+      "evidence_status": "derived"
+    },
+    {
+      "id": "step:cycle.route_part",
+      "kind": "step",
+      "label": "route_part",
+      "lane_id": "task:cycle",
+      "views": [
+        "constellation",
+        "orbit"
+      ],
+      "evidence_status": "derived"
+    },
+    {
+      "id": "step:eject_good.eject_out",
+      "kind": "step",
+      "label": "eject_out",
+      "lane_id": "task:eject_good",
+      "views": [
+        "constellation",
+        "orbit"
+      ],
+      "evidence_status": "derived"
+    },
+    {
+      "id": "step:eject_good.retract_all_good",
+      "kind": "step",
+      "label": "retract_all_good",
+      "lane_id": "task:eject_good",
+      "views": [
+        "constellation",
+        "orbit"
+      ],
+      "evidence_status": "derived"
+    },
+    {
+      "id": "step:eject_good.good_done",
+      "kind": "step",
+      "label": "good_done",
+      "lane_id": "task:eject_good",
+      "views": [
+        "constellation",
+        "orbit"
+      ],
+      "evidence_status": "derived"
+    },
+    {
+      "id": "step:eject_bad.reject_out",
+      "kind": "step",
+      "label": "reject_out",
+      "lane_id": "task:eject_bad",
+      "views": [
+        "constellation",
+        "orbit"
+      ],
+      "evidence_status": "derived"
+    },
+    {
+      "id": "step:eject_bad.retract_all_bad",
+      "kind": "step",
+      "label": "retract_all_bad",
+      "lane_id": "task:eject_bad",
+      "views": [
+        "constellation",
+        "orbit"
+      ],
+      "evidence_status": "derived"
+    },
+    {
+      "id": "step:eject_bad.bad_done",
+      "kind": "step",
+      "label": "bad_done",
+      "lane_id": "task:eject_bad",
+      "views": [
+        "constellation",
+        "orbit"
+      ],
+      "evidence_status": "derived"
+    },
+    {
+      "id": "step:fault_handler.safe_retract",
+      "kind": "step",
+      "label": "safe_retract",
+      "lane_id": "task:fault_handler",
+      "views": [
+        "constellation",
+        "orbit"
+      ],
+      "evidence_status": "derived"
+    },
+    {
+      "id": "step:fault_handler.alarm",
+      "kind": "step",
+      "label": "alarm",
+      "lane_id": "task:fault_handler",
+      "views": [
+        "constellation",
+        "orbit"
+      ],
+      "evidence_status": "derived"
+    },
+    {
+      "id": "step:ready.wait_start",
+      "kind": "step",
+      "label": "wait_start",
+      "lane_id": "task:ready",
+      "views": [
+        "constellation",
+        "orbit"
+      ],
+      "evidence_status": "derived"
+    },
+    {
+      "id": "step:eject_good.retract_all_good__parallel_1_fork",
+      "kind": "step",
+      "label": "retract_all_good__parallel_1_fork",
+      "lane_id": "task:eject_good",
+      "views": [
+        "constellation",
+        "orbit"
+      ],
+      "evidence_status": "derived"
+    },
+    {
+      "id": "step:eject_good.retract_all_good__parallel_1_join",
+      "kind": "step",
+      "label": "retract_all_good__parallel_1_join",
+      "lane_id": "task:eject_good",
+      "views": [
+        "constellation",
+        "orbit"
+      ],
+      "evidence_status": "derived"
+    },
+    {
+      "id": "step:eject_good.retract_all_good__parallel_1_branch_1_active",
+      "kind": "step",
+      "label": "retract_all_good__parallel_1_branch_1_active",
+      "lane_id": "task:eject_good",
+      "views": [
+        "constellation",
+        "orbit"
+      ],
+      "evidence_status": "derived"
+    },
+    {
+      "id": "step:eject_good.retract_all_good__parallel_1_branch_1_done",
+      "kind": "step",
+      "label": "retract_all_good__parallel_1_branch_1_done",
+      "lane_id": "task:eject_good",
+      "views": [
+        "constellation",
+        "orbit"
+      ],
+      "evidence_status": "derived"
+    },
+    {
+      "id": "step:eject_good.retract_all_good__parallel_1_branch_2_active",
+      "kind": "step",
+      "label": "retract_all_good__parallel_1_branch_2_active",
+      "lane_id": "task:eject_good",
+      "views": [
+        "constellation",
+        "orbit"
+      ],
+      "evidence_status": "derived"
+    },
+    {
+      "id": "step:eject_good.retract_all_good__parallel_1_branch_2_done",
+      "kind": "step",
+      "label": "retract_all_good__parallel_1_branch_2_done",
+      "lane_id": "task:eject_good",
+      "views": [
+        "constellation",
+        "orbit"
+      ],
+      "evidence_status": "derived"
+    },
+    {
+      "id": "step:eject_bad.retract_all_bad__parallel_1_fork",
+      "kind": "step",
+      "label": "retract_all_bad__parallel_1_fork",
+      "lane_id": "task:eject_bad",
+      "views": [
+        "constellation",
+        "orbit"
+      ],
+      "evidence_status": "derived"
+    },
+    {
+      "id": "step:eject_bad.retract_all_bad__parallel_1_join",
+      "kind": "step",
+      "label": "retract_all_bad__parallel_1_join",
+      "lane_id": "task:eject_bad",
+      "views": [
+        "constellation",
+        "orbit"
+      ],
+      "evidence_status": "derived"
+    },
+    {
+      "id": "step:eject_bad.retract_all_bad__parallel_1_branch_1_active",
+      "kind": "step",
+      "label": "retract_all_bad__parallel_1_branch_1_active",
+      "lane_id": "task:eject_bad",
+      "views": [
+        "constellation",
+        "orbit"
+      ],
+      "evidence_status": "derived"
+    },
+    {
+      "id": "step:eject_bad.retract_all_bad__parallel_1_branch_1_done",
+      "kind": "step",
+      "label": "retract_all_bad__parallel_1_branch_1_done",
+      "lane_id": "task:eject_bad",
+      "views": [
+        "constellation",
+        "orbit"
+      ],
+      "evidence_status": "derived"
+    },
+    {
+      "id": "step:eject_bad.retract_all_bad__parallel_1_branch_2_active",
+      "kind": "step",
+      "label": "retract_all_bad__parallel_1_branch_2_active",
+      "lane_id": "task:eject_bad",
+      "views": [
+        "constellation",
+        "orbit"
+      ],
+      "evidence_status": "derived"
+    },
+    {
+      "id": "step:eject_bad.retract_all_bad__parallel_1_branch_2_done",
+      "kind": "step",
+      "label": "retract_all_bad__parallel_1_branch_2_done",
+      "lane_id": "task:eject_bad",
+      "views": [
+        "constellation",
+        "orbit"
+      ],
+      "evidence_status": "derived"
+    },
+    {
+      "id": "device:X0",
+      "kind": "device",
+      "label": "X0",
+      "lane_id": "topology",
+      "views": [
+        "constellation"
+      ],
+      "evidence_status": "authored",
+      "attributes": {
+        "device_kind": "digital_input"
+      }
+    },
+    {
+      "id": "device:X1",
+      "kind": "device",
+      "label": "X1",
+      "lane_id": "topology",
+      "views": [
+        "constellation"
+      ],
+      "evidence_status": "authored",
+      "attributes": {
+        "device_kind": "digital_input"
+      }
+    },
+    {
+      "id": "device:X11",
+      "kind": "device",
+      "label": "X11",
+      "lane_id": "topology",
+      "views": [
+        "constellation"
+      ],
+      "evidence_status": "authored",
+      "attributes": {
+        "device_kind": "digital_input"
+      }
+    },
+    {
+      "id": "device:X2",
+      "kind": "device",
+      "label": "X2",
+      "lane_id": "topology",
+      "views": [
+        "constellation"
+      ],
+      "evidence_status": "authored",
+      "attributes": {
+        "device_kind": "digital_input"
+      }
+    },
+    {
+      "id": "device:X3",
+      "kind": "device",
+      "label": "X3",
+      "lane_id": "topology",
+      "views": [
+        "constellation"
+      ],
+      "evidence_status": "authored",
+      "attributes": {
+        "device_kind": "digital_input"
+      }
+    },
+    {
+      "id": "device:X4",
+      "kind": "device",
+      "label": "X4",
+      "lane_id": "topology",
+      "views": [
+        "constellation"
+      ],
+      "evidence_status": "authored",
+      "attributes": {
+        "device_kind": "digital_input"
+      }
+    },
+    {
+      "id": "device:X5",
+      "kind": "device",
+      "label": "X5",
+      "lane_id": "topology",
+      "views": [
+        "constellation"
+      ],
+      "evidence_status": "authored",
+      "attributes": {
+        "device_kind": "digital_input"
+      }
+    },
+    {
+      "id": "device:X6",
+      "kind": "device",
+      "label": "X6",
+      "lane_id": "topology",
+      "views": [
+        "constellation"
+      ],
+      "evidence_status": "authored",
+      "attributes": {
+        "device_kind": "digital_input"
+      }
+    },
+    {
+      "id": "device:X7",
+      "kind": "device",
+      "label": "X7",
+      "lane_id": "topology",
+      "views": [
+        "constellation"
+      ],
+      "evidence_status": "authored",
+      "attributes": {
+        "device_kind": "digital_input"
+      }
+    },
+    {
+      "id": "device:X8",
+      "kind": "device",
+      "label": "X8",
+      "lane_id": "topology",
+      "views": [
+        "constellation"
+      ],
+      "evidence_status": "authored",
+      "attributes": {
+        "device_kind": "digital_input"
+      }
+    },
+    {
+      "id": "device:X9",
+      "kind": "device",
+      "label": "X9",
+      "lane_id": "topology",
+      "views": [
+        "constellation"
+      ],
+      "evidence_status": "authored",
+      "attributes": {
+        "device_kind": "digital_input"
+      }
+    },
+    {
+      "id": "device:Y0",
+      "kind": "device",
+      "label": "Y0",
+      "lane_id": "topology",
+      "views": [
+        "constellation"
+      ],
+      "evidence_status": "authored",
+      "attributes": {
+        "device_kind": "digital_output"
+      }
+    },
+    {
+      "id": "device:Y1",
+      "kind": "device",
+      "label": "Y1",
+      "lane_id": "topology",
+      "views": [
+        "constellation"
+      ],
+      "evidence_status": "authored",
+      "attributes": {
+        "device_kind": "digital_output"
+      }
+    },
+    {
+      "id": "device:Y2",
+      "kind": "device",
+      "label": "Y2",
+      "lane_id": "topology",
+      "views": [
+        "constellation"
+      ],
+      "evidence_status": "authored",
+      "attributes": {
+        "device_kind": "digital_output"
+      }
+    },
+    {
+      "id": "device:Y3",
+      "kind": "device",
+      "label": "Y3",
+      "lane_id": "topology",
+      "views": [
+        "constellation"
+      ],
+      "evidence_status": "authored",
+      "attributes": {
+        "device_kind": "digital_output"
+      }
+    },
+    {
+      "id": "device:cyl_eject",
+      "kind": "device",
+      "label": "cyl_eject",
+      "lane_id": "topology",
+      "views": [
+        "constellation"
+      ],
+      "evidence_status": "authored",
+      "attributes": {
+        "device_kind": "cylinder"
+      }
+    },
+    {
+      "id": "device:cyl_press",
+      "kind": "device",
+      "label": "cyl_press",
+      "lane_id": "topology",
+      "views": [
+        "constellation"
+      ],
+      "evidence_status": "authored",
+      "attributes": {
+        "device_kind": "cylinder"
+      }
+    },
+    {
+      "id": "device:cyl_push",
+      "kind": "device",
+      "label": "cyl_push",
+      "lane_id": "topology",
+      "views": [
+        "constellation"
+      ],
+      "evidence_status": "authored",
+      "attributes": {
+        "device_kind": "cylinder"
+      }
+    },
+    {
+      "id": "device:cyl_reject",
+      "kind": "device",
+      "label": "cyl_reject",
+      "lane_id": "topology",
+      "views": [
+        "constellation"
+      ],
+      "evidence_status": "authored",
+      "attributes": {
+        "device_kind": "cylinder"
+      }
+    },
+    {
+      "id": "device:sensor_eject_ext",
+      "kind": "device",
+      "label": "sensor_eject_ext",
+      "lane_id": "topology",
+      "views": [
+        "constellation"
+      ],
+      "evidence_status": "authored",
+      "attributes": {
+        "device_kind": "sensor"
+      }
+    },
+    {
+      "id": "device:sensor_eject_ret",
+      "kind": "device",
+      "label": "sensor_eject_ret",
+      "lane_id": "topology",
+      "views": [
+        "constellation"
+      ],
+      "evidence_status": "authored",
+      "attributes": {
+        "device_kind": "sensor"
+      }
+    },
+    {
+      "id": "device:sensor_press_ext",
+      "kind": "device",
+      "label": "sensor_press_ext",
+      "lane_id": "topology",
+      "views": [
+        "constellation"
+      ],
+      "evidence_status": "authored",
+      "attributes": {
+        "device_kind": "sensor"
+      }
+    },
+    {
+      "id": "device:sensor_press_ret",
+      "kind": "device",
+      "label": "sensor_press_ret",
+      "lane_id": "topology",
+      "views": [
+        "constellation"
+      ],
+      "evidence_status": "authored",
+      "attributes": {
+        "device_kind": "sensor"
+      }
+    },
+    {
+      "id": "device:sensor_push_ext",
+      "kind": "device",
+      "label": "sensor_push_ext",
+      "lane_id": "topology",
+      "views": [
+        "constellation"
+      ],
+      "evidence_status": "authored",
+      "attributes": {
+        "device_kind": "sensor"
+      }
+    },
+    {
+      "id": "device:sensor_push_ret",
+      "kind": "device",
+      "label": "sensor_push_ret",
+      "lane_id": "topology",
+      "views": [
+        "constellation"
+      ],
+      "evidence_status": "authored",
+      "attributes": {
+        "device_kind": "sensor"
+      }
+    },
+    {
+      "id": "device:sensor_quality_ng",
+      "kind": "device",
+      "label": "sensor_quality_ng",
+      "lane_id": "topology",
+      "views": [
+        "constellation"
+      ],
+      "evidence_status": "authored",
+      "attributes": {
+        "device_kind": "sensor"
+      }
+    },
+    {
+      "id": "device:sensor_quality_ok",
+      "kind": "device",
+      "label": "sensor_quality_ok",
+      "lane_id": "topology",
+      "views": [
+        "constellation"
+      ],
+      "evidence_status": "authored",
+      "attributes": {
+        "device_kind": "sensor"
+      }
+    },
+    {
+      "id": "device:sensor_reject_ext",
+      "kind": "device",
+      "label": "sensor_reject_ext",
+      "lane_id": "topology",
+      "views": [
+        "constellation"
+      ],
+      "evidence_status": "authored",
+      "attributes": {
+        "device_kind": "sensor"
+      }
+    },
+    {
+      "id": "device:sensor_reject_ret",
+      "kind": "device",
+      "label": "sensor_reject_ret",
+      "lane_id": "topology",
+      "views": [
+        "constellation"
+      ],
+      "evidence_status": "authored",
+      "attributes": {
+        "device_kind": "sensor"
+      }
+    },
+    {
+      "id": "device:start_button",
+      "kind": "device",
+      "label": "start_button",
+      "lane_id": "topology",
+      "views": [
+        "constellation"
+      ],
+      "evidence_status": "authored",
+      "attributes": {
+        "device_kind": "sensor"
+      }
+    },
+    {
+      "id": "device:valve_eject",
+      "kind": "device",
+      "label": "valve_eject",
+      "lane_id": "topology",
+      "views": [
+        "constellation"
+      ],
+      "evidence_status": "authored",
+      "attributes": {
+        "device_kind": "solenoid_valve"
+      }
+    },
+    {
+      "id": "device:valve_press",
+      "kind": "device",
+      "label": "valve_press",
+      "lane_id": "topology",
+      "views": [
+        "constellation"
+      ],
+      "evidence_status": "authored",
+      "attributes": {
+        "device_kind": "solenoid_valve"
+      }
+    },
+    {
+      "id": "device:valve_push",
+      "kind": "device",
+      "label": "valve_push",
+      "lane_id": "topology",
+      "views": [
+        "constellation"
+      ],
+      "evidence_status": "authored",
+      "attributes": {
+        "device_kind": "solenoid_valve"
+      }
+    },
+    {
+      "id": "device:valve_reject",
+      "kind": "device",
+      "label": "valve_reject",
+      "lane_id": "topology",
+      "views": [
+        "constellation"
+      ],
+      "evidence_status": "authored",
+      "attributes": {
+        "device_kind": "solenoid_valve"
+      }
+    },
+    {
+      "id": "timing-rule:0",
+      "kind": "timing_rule",
+      "label": "must_complete_within 10000ms",
+      "lane_id": "evidence",
+      "views": [
+        "evidence"
+      ],
+      "evidence_status": "verified",
+      "attributes": {
+        "duration_ms": "10000",
+        "reason": "三工位装配线节拍要求：完整循环（推料+压装+检测+出料）必须在 10 秒内完成",
+        "relation": "must_complete_within"
+      }
+    },
+    {
+      "id": "causality:0",
+      "kind": "causality_chain",
+      "label": "causality 1",
+      "lane_id": "evidence",
+      "views": [
+        "evidence"
+      ],
+      "evidence_status": "verified",
+      "attributes": {
+        "reason": "推料缸伸出应能被传感器检测"
+      }
+    },
+    {
+      "id": "causality:1",
+      "kind": "causality_chain",
+      "label": "causality 2",
+      "lane_id": "evidence",
+      "views": [
+        "evidence"
+      ],
+      "evidence_status": "verified",
+      "attributes": {
+        "reason": "推料缸缩回应能被传感器检测"
+      }
+    },
+    {
+      "id": "causality:2",
+      "kind": "causality_chain",
+      "label": "causality 3",
+      "lane_id": "evidence",
+      "views": [
+        "evidence"
+      ],
+      "evidence_status": "verified",
+      "attributes": {
+        "reason": "压装缸伸出应能被传感器检测"
+      }
+    },
+    {
+      "id": "causality:3",
+      "kind": "causality_chain",
+      "label": "causality 4",
+      "lane_id": "evidence",
+      "views": [
+        "evidence"
+      ],
+      "evidence_status": "verified",
+      "attributes": {
+        "reason": "压装缸缩回应能被传感器检测"
+      }
+    },
+    {
+      "id": "causality:4",
+      "kind": "causality_chain",
+      "label": "causality 5",
+      "lane_id": "evidence",
+      "views": [
+        "evidence"
+      ],
+      "evidence_status": "verified",
+      "attributes": {
+        "reason": "出料缸伸出应能被传感器检测"
+      }
+    },
+    {
+      "id": "causality:5",
+      "kind": "causality_chain",
+      "label": "causality 6",
+      "lane_id": "evidence",
+      "views": [
+        "evidence"
+      ],
+      "evidence_status": "verified",
+      "attributes": {
+        "reason": "出料缸缩回应能被传感器检测"
+      }
+    },
+    {
+      "id": "causality:6",
+      "kind": "causality_chain",
+      "label": "causality 7",
+      "lane_id": "evidence",
+      "views": [
+        "evidence"
+      ],
+      "evidence_status": "verified",
+      "attributes": {
+        "reason": "废品缸伸出应能被传感器检测"
+      }
+    },
+    {
+      "id": "causality:7",
+      "kind": "causality_chain",
+      "label": "causality 8",
+      "lane_id": "evidence",
+      "views": [
+        "evidence"
+      ],
+      "evidence_status": "verified",
+      "attributes": {
+        "reason": "废品缸缩回应能被传感器检测"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "contains:cycle:push_out",
+      "kind": "contains",
+      "from": "task:cycle",
+      "to": "step:cycle.push_out",
+      "label": "contains",
+      "views": [
+        "constellation"
+      ],
+      "evidence_status": "derived"
+    },
+    {
+      "id": "contains:cycle:press_down",
+      "kind": "contains",
+      "from": "task:cycle",
+      "to": "step:cycle.press_down",
+      "label": "contains",
+      "views": [
+        "constellation"
+      ],
+      "evidence_status": "derived"
+    },
+    {
+      "id": "contains:cycle:press_up",
+      "kind": "contains",
+      "from": "task:cycle",
+      "to": "step:cycle.press_up",
+      "label": "contains",
+      "views": [
+        "constellation"
+      ],
+      "evidence_status": "derived"
+    },
+    {
+      "id": "contains:cycle:check_quality",
+      "kind": "contains",
+      "from": "task:cycle",
+      "to": "step:cycle.check_quality",
+      "label": "contains",
+      "views": [
+        "constellation"
+      ],
+      "evidence_status": "derived"
+    },
+    {
+      "id": "contains:cycle:route_part",
+      "kind": "contains",
+      "from": "task:cycle",
+      "to": "step:cycle.route_part",
+      "label": "contains",
+      "views": [
+        "constellation"
+      ],
+      "evidence_status": "derived"
+    },
+    {
+      "id": "contains:eject_good:eject_out",
+      "kind": "contains",
+      "from": "task:eject_good",
+      "to": "step:eject_good.eject_out",
+      "label": "contains",
+      "views": [
+        "constellation"
+      ],
+      "evidence_status": "derived"
+    },
+    {
+      "id": "contains:eject_good:retract_all_good",
+      "kind": "contains",
+      "from": "task:eject_good",
+      "to": "step:eject_good.retract_all_good",
+      "label": "contains",
+      "views": [
+        "constellation"
+      ],
+      "evidence_status": "derived"
+    },
+    {
+      "id": "contains:eject_good:good_done",
+      "kind": "contains",
+      "from": "task:eject_good",
+      "to": "step:eject_good.good_done",
+      "label": "contains",
+      "views": [
+        "constellation"
+      ],
+      "evidence_status": "derived"
+    },
+    {
+      "id": "contains:eject_bad:reject_out",
+      "kind": "contains",
+      "from": "task:eject_bad",
+      "to": "step:eject_bad.reject_out",
+      "label": "contains",
+      "views": [
+        "constellation"
+      ],
+      "evidence_status": "derived"
+    },
+    {
+      "id": "contains:eject_bad:retract_all_bad",
+      "kind": "contains",
+      "from": "task:eject_bad",
+      "to": "step:eject_bad.retract_all_bad",
+      "label": "contains",
+      "views": [
+        "constellation"
+      ],
+      "evidence_status": "derived"
+    },
+    {
+      "id": "contains:eject_bad:bad_done",
+      "kind": "contains",
+      "from": "task:eject_bad",
+      "to": "step:eject_bad.bad_done",
+      "label": "contains",
+      "views": [
+        "constellation"
+      ],
+      "evidence_status": "derived"
+    },
+    {
+      "id": "contains:fault_handler:safe_retract",
+      "kind": "contains",
+      "from": "task:fault_handler",
+      "to": "step:fault_handler.safe_retract",
+      "label": "contains",
+      "views": [
+        "constellation"
+      ],
+      "evidence_status": "derived"
+    },
+    {
+      "id": "contains:fault_handler:alarm",
+      "kind": "contains",
+      "from": "task:fault_handler",
+      "to": "step:fault_handler.alarm",
+      "label": "contains",
+      "views": [
+        "constellation"
+      ],
+      "evidence_status": "derived"
+    },
+    {
+      "id": "contains:ready:wait_start",
+      "kind": "contains",
+      "from": "task:ready",
+      "to": "step:ready.wait_start",
+      "label": "contains",
+      "views": [
+        "constellation"
+      ],
+      "evidence_status": "derived"
+    },
+    {
+      "id": "contains:eject_good:retract_all_good__parallel_1_fork",
+      "kind": "contains",
+      "from": "task:eject_good",
+      "to": "step:eject_good.retract_all_good__parallel_1_fork",
+      "label": "contains",
+      "views": [
+        "constellation"
+      ],
+      "evidence_status": "derived"
+    },
+    {
+      "id": "contains:eject_good:retract_all_good__parallel_1_join",
+      "kind": "contains",
+      "from": "task:eject_good",
+      "to": "step:eject_good.retract_all_good__parallel_1_join",
+      "label": "contains",
+      "views": [
+        "constellation"
+      ],
+      "evidence_status": "derived"
+    },
+    {
+      "id": "contains:eject_good:retract_all_good__parallel_1_branch_1_active",
+      "kind": "contains",
+      "from": "task:eject_good",
+      "to": "step:eject_good.retract_all_good__parallel_1_branch_1_active",
+      "label": "contains",
+      "views": [
+        "constellation"
+      ],
+      "evidence_status": "derived"
+    },
+    {
+      "id": "contains:eject_good:retract_all_good__parallel_1_branch_1_done",
+      "kind": "contains",
+      "from": "task:eject_good",
+      "to": "step:eject_good.retract_all_good__parallel_1_branch_1_done",
+      "label": "contains",
+      "views": [
+        "constellation"
+      ],
+      "evidence_status": "derived"
+    },
+    {
+      "id": "contains:eject_good:retract_all_good__parallel_1_branch_2_active",
+      "kind": "contains",
+      "from": "task:eject_good",
+      "to": "step:eject_good.retract_all_good__parallel_1_branch_2_active",
+      "label": "contains",
+      "views": [
+        "constellation"
+      ],
+      "evidence_status": "derived"
+    },
+    {
+      "id": "contains:eject_good:retract_all_good__parallel_1_branch_2_done",
+      "kind": "contains",
+      "from": "task:eject_good",
+      "to": "step:eject_good.retract_all_good__parallel_1_branch_2_done",
+      "label": "contains",
+      "views": [
+        "constellation"
+      ],
+      "evidence_status": "derived"
+    },
+    {
+      "id": "contains:eject_bad:retract_all_bad__parallel_1_fork",
+      "kind": "contains",
+      "from": "task:eject_bad",
+      "to": "step:eject_bad.retract_all_bad__parallel_1_fork",
+      "label": "contains",
+      "views": [
+        "constellation"
+      ],
+      "evidence_status": "derived"
+    },
+    {
+      "id": "contains:eject_bad:retract_all_bad__parallel_1_join",
+      "kind": "contains",
+      "from": "task:eject_bad",
+      "to": "step:eject_bad.retract_all_bad__parallel_1_join",
+      "label": "contains",
+      "views": [
+        "constellation"
+      ],
+      "evidence_status": "derived"
+    },
+    {
+      "id": "contains:eject_bad:retract_all_bad__parallel_1_branch_1_active",
+      "kind": "contains",
+      "from": "task:eject_bad",
+      "to": "step:eject_bad.retract_all_bad__parallel_1_branch_1_active",
+      "label": "contains",
+      "views": [
+        "constellation"
+      ],
+      "evidence_status": "derived"
+    },
+    {
+      "id": "contains:eject_bad:retract_all_bad__parallel_1_branch_1_done",
+      "kind": "contains",
+      "from": "task:eject_bad",
+      "to": "step:eject_bad.retract_all_bad__parallel_1_branch_1_done",
+      "label": "contains",
+      "views": [
+        "constellation"
+      ],
+      "evidence_status": "derived"
+    },
+    {
+      "id": "contains:eject_bad:retract_all_bad__parallel_1_branch_2_active",
+      "kind": "contains",
+      "from": "task:eject_bad",
+      "to": "step:eject_bad.retract_all_bad__parallel_1_branch_2_active",
+      "label": "contains",
+      "views": [
+        "constellation"
+      ],
+      "evidence_status": "derived"
+    },
+    {
+      "id": "contains:eject_bad:retract_all_bad__parallel_1_branch_2_done",
+      "kind": "contains",
+      "from": "task:eject_bad",
+      "to": "step:eject_bad.retract_all_bad__parallel_1_branch_2_done",
+      "label": "contains",
+      "views": [
+        "constellation"
+      ],
+      "evidence_status": "derived"
+    },
+    {
+      "id": "topology-link:1",
+      "kind": "topology_link",
+      "from": "device:Y0",
+      "to": "device:valve_push",
+      "label": "electrical",
+      "views": [
+        "constellation"
+      ],
+      "evidence_status": "authored",
+      "attributes": {
+        "link_kind": "electrical",
+        "to_port": "coil"
+      }
+    },
+    {
+      "id": "topology-link:2",
+      "kind": "topology_link",
+      "from": "device:Y1",
+      "to": "device:valve_press",
+      "label": "electrical",
+      "views": [
+        "constellation"
+      ],
+      "evidence_status": "authored",
+      "attributes": {
+        "link_kind": "electrical",
+        "to_port": "coil"
+      }
+    },
+    {
+      "id": "topology-link:3",
+      "kind": "topology_link",
+      "from": "device:Y2",
+      "to": "device:valve_eject",
+      "label": "electrical",
+      "views": [
+        "constellation"
+      ],
+      "evidence_status": "authored",
+      "attributes": {
+        "link_kind": "electrical",
+        "to_port": "coil"
+      }
+    },
+    {
+      "id": "topology-link:4",
+      "kind": "topology_link",
+      "from": "device:Y3",
+      "to": "device:valve_reject",
+      "label": "electrical",
+      "views": [
+        "constellation"
+      ],
+      "evidence_status": "authored",
+      "attributes": {
+        "link_kind": "electrical",
+        "to_port": "coil"
+      }
+    },
+    {
+      "id": "topology-link:5",
+      "kind": "topology_link",
+      "from": "device:cyl_eject",
+      "to": "device:sensor_eject_ext",
+      "label": "logical",
+      "views": [
+        "constellation"
+      ],
+      "evidence_status": "authored",
+      "attributes": {
+        "from_port": "extended",
+        "link_kind": "logical",
+        "to_port": "sense"
+      }
+    },
+    {
+      "id": "topology-link:6",
+      "kind": "topology_link",
+      "from": "device:cyl_eject",
+      "to": "device:sensor_eject_ret",
+      "label": "logical",
+      "views": [
+        "constellation"
+      ],
+      "evidence_status": "authored",
+      "attributes": {
+        "from_port": "retracted",
+        "link_kind": "logical",
+        "to_port": "sense"
+      }
+    },
+    {
+      "id": "topology-link:7",
+      "kind": "topology_link",
+      "from": "device:cyl_press",
+      "to": "device:sensor_press_ext",
+      "label": "logical",
+      "views": [
+        "constellation"
+      ],
+      "evidence_status": "authored",
+      "attributes": {
+        "from_port": "extended",
+        "link_kind": "logical",
+        "to_port": "sense"
+      }
+    },
+    {
+      "id": "topology-link:8",
+      "kind": "topology_link",
+      "from": "device:cyl_press",
+      "to": "device:sensor_press_ret",
+      "label": "logical",
+      "views": [
+        "constellation"
+      ],
+      "evidence_status": "authored",
+      "attributes": {
+        "from_port": "retracted",
+        "link_kind": "logical",
+        "to_port": "sense"
+      }
+    },
+    {
+      "id": "topology-link:9",
+      "kind": "topology_link",
+      "from": "device:cyl_push",
+      "to": "device:sensor_push_ext",
+      "label": "logical",
+      "views": [
+        "constellation"
+      ],
+      "evidence_status": "authored",
+      "attributes": {
+        "from_port": "extended",
+        "link_kind": "logical",
+        "to_port": "sense"
+      }
+    },
+    {
+      "id": "topology-link:10",
+      "kind": "topology_link",
+      "from": "device:cyl_push",
+      "to": "device:sensor_push_ret",
+      "label": "logical",
+      "views": [
+        "constellation"
+      ],
+      "evidence_status": "authored",
+      "attributes": {
+        "from_port": "retracted",
+        "link_kind": "logical",
+        "to_port": "sense"
+      }
+    },
+    {
+      "id": "topology-link:11",
+      "kind": "topology_link",
+      "from": "device:cyl_reject",
+      "to": "device:sensor_reject_ext",
+      "label": "logical",
+      "views": [
+        "constellation"
+      ],
+      "evidence_status": "authored",
+      "attributes": {
+        "from_port": "extended",
+        "link_kind": "logical",
+        "to_port": "sense"
+      }
+    },
+    {
+      "id": "topology-link:12",
+      "kind": "topology_link",
+      "from": "device:cyl_reject",
+      "to": "device:sensor_reject_ret",
+      "label": "logical",
+      "views": [
+        "constellation"
+      ],
+      "evidence_status": "authored",
+      "attributes": {
+        "from_port": "retracted",
+        "link_kind": "logical",
+        "to_port": "sense"
+      }
+    },
+    {
+      "id": "topology-link:13",
+      "kind": "topology_link",
+      "from": "device:sensor_eject_ext",
+      "to": "device:X6",
+      "label": "logical",
+      "views": [
+        "constellation"
+      ],
+      "evidence_status": "authored",
+      "attributes": {
+        "from_port": "out",
+        "link_kind": "logical"
+      }
+    },
+    {
+      "id": "topology-link:14",
+      "kind": "topology_link",
+      "from": "device:sensor_eject_ret",
+      "to": "device:X7",
+      "label": "logical",
+      "views": [
+        "constellation"
+      ],
+      "evidence_status": "authored",
+      "attributes": {
+        "from_port": "out",
+        "link_kind": "logical"
+      }
+    },
+    {
+      "id": "topology-link:15",
+      "kind": "topology_link",
+      "from": "device:sensor_press_ext",
+      "to": "device:X2",
+      "label": "logical",
+      "views": [
+        "constellation"
+      ],
+      "evidence_status": "authored",
+      "attributes": {
+        "from_port": "out",
+        "link_kind": "logical"
+      }
+    },
+    {
+      "id": "topology-link:16",
+      "kind": "topology_link",
+      "from": "device:sensor_press_ret",
+      "to": "device:X3",
+      "label": "logical",
+      "views": [
+        "constellation"
+      ],
+      "evidence_status": "authored",
+      "attributes": {
+        "from_port": "out",
+        "link_kind": "logical"
+      }
+    },
+    {
+      "id": "topology-link:17",
+      "kind": "topology_link",
+      "from": "device:sensor_push_ext",
+      "to": "device:X0",
+      "label": "logical",
+      "views": [
+        "constellation"
+      ],
+      "evidence_status": "authored",
+      "attributes": {
+        "from_port": "out",
+        "link_kind": "logical"
+      }
+    },
+    {
+      "id": "topology-link:18",
+      "kind": "topology_link",
+      "from": "device:sensor_push_ret",
+      "to": "device:X1",
+      "label": "logical",
+      "views": [
+        "constellation"
+      ],
+      "evidence_status": "authored",
+      "attributes": {
+        "from_port": "out",
+        "link_kind": "logical"
+      }
+    },
+    {
+      "id": "topology-link:19",
+      "kind": "topology_link",
+      "from": "device:sensor_quality_ng",
+      "to": "device:X5",
+      "label": "logical",
+      "views": [
+        "constellation"
+      ],
+      "evidence_status": "authored",
+      "attributes": {
+        "from_port": "out",
+        "link_kind": "logical"
+      }
+    },
+    {
+      "id": "topology-link:20",
+      "kind": "topology_link",
+      "from": "device:sensor_quality_ok",
+      "to": "device:X4",
+      "label": "logical",
+      "views": [
+        "constellation"
+      ],
+      "evidence_status": "authored",
+      "attributes": {
+        "from_port": "out",
+        "link_kind": "logical"
+      }
+    },
+    {
+      "id": "topology-link:21",
+      "kind": "topology_link",
+      "from": "device:sensor_reject_ext",
+      "to": "device:X8",
+      "label": "logical",
+      "views": [
+        "constellation"
+      ],
+      "evidence_status": "authored",
+      "attributes": {
+        "from_port": "out",
+        "link_kind": "logical"
+      }
+    },
+    {
+      "id": "topology-link:22",
+      "kind": "topology_link",
+      "from": "device:sensor_reject_ret",
+      "to": "device:X9",
+      "label": "logical",
+      "views": [
+        "constellation"
+      ],
+      "evidence_status": "authored",
+      "attributes": {
+        "from_port": "out",
+        "link_kind": "logical"
+      }
+    },
+    {
+      "id": "topology-link:23",
+      "kind": "topology_link",
+      "from": "device:start_button",
+      "to": "device:X11",
+      "label": "logical",
+      "views": [
+        "constellation"
+      ],
+      "evidence_status": "authored",
+      "attributes": {
+        "from_port": "out",
+        "link_kind": "logical"
+      }
+    },
+    {
+      "id": "topology-link:24",
+      "kind": "topology_link",
+      "from": "device:valve_eject",
+      "to": "device:cyl_eject",
+      "label": "pneumatic",
+      "views": [
+        "constellation"
+      ],
+      "evidence_status": "authored",
+      "attributes": {
+        "from_port": "out",
+        "link_kind": "pneumatic",
+        "to_port": "cmd"
+      }
+    },
+    {
+      "id": "topology-link:25",
+      "kind": "topology_link",
+      "from": "device:valve_press",
+      "to": "device:cyl_press",
+      "label": "pneumatic",
+      "views": [
+        "constellation"
+      ],
+      "evidence_status": "authored",
+      "attributes": {
+        "from_port": "out",
+        "link_kind": "pneumatic",
+        "to_port": "cmd"
+      }
+    },
+    {
+      "id": "topology-link:26",
+      "kind": "topology_link",
+      "from": "device:valve_push",
+      "to": "device:cyl_push",
+      "label": "pneumatic",
+      "views": [
+        "constellation"
+      ],
+      "evidence_status": "authored",
+      "attributes": {
+        "from_port": "out",
+        "link_kind": "pneumatic",
+        "to_port": "cmd"
+      }
+    },
+    {
+      "id": "topology-link:27",
+      "kind": "topology_link",
+      "from": "device:valve_reject",
+      "to": "device:cyl_reject",
+      "label": "pneumatic",
+      "views": [
+        "constellation"
+      ],
+      "evidence_status": "authored",
+      "attributes": {
+        "from_port": "out",
+        "link_kind": "pneumatic",
+        "to_port": "cmd"
+      }
+    },
+    {
+      "id": "timing-scope:0",
+      "kind": "timing_scope",
+      "from": "timing-rule:0",
+      "to": "task:cycle",
+      "label": "scopes",
+      "views": [
+        "evidence"
+      ],
+      "evidence_status": "verified",
+      "attributes": {
+        "duration_ms": "10000",
+        "reason": "三工位装配线节拍要求：完整循环（推料+压装+检测+出料）必须在 10 秒内完成",
+        "relation": "must_complete_within"
+      }
+    },
+    {
+      "id": "causality:0:Y0",
+      "kind": "causality",
+      "from": "causality:0",
+      "to": "device:Y0",
+      "label": "touches",
+      "views": [
+        "evidence"
+      ],
+      "evidence_status": "verified"
+    },
+    {
+      "id": "causality:0:valve_push",
+      "kind": "causality",
+      "from": "causality:0",
+      "to": "device:valve_push",
+      "label": "touches",
+      "views": [
+        "evidence"
+      ],
+      "evidence_status": "verified"
+    },
+    {
+      "id": "causality:0:cyl_push",
+      "kind": "causality",
+      "from": "causality:0",
+      "to": "device:cyl_push",
+      "label": "touches",
+      "views": [
+        "evidence"
+      ],
+      "evidence_status": "verified"
+    },
+    {
+      "id": "causality:0:sensor_push_ext",
+      "kind": "causality",
+      "from": "causality:0",
+      "to": "device:sensor_push_ext",
+      "label": "touches",
+      "views": [
+        "evidence"
+      ],
+      "evidence_status": "verified"
+    },
+    {
+      "id": "causality:1:Y0",
+      "kind": "causality",
+      "from": "causality:1",
+      "to": "device:Y0",
+      "label": "touches",
+      "views": [
+        "evidence"
+      ],
+      "evidence_status": "verified"
+    },
+    {
+      "id": "causality:1:valve_push",
+      "kind": "causality",
+      "from": "causality:1",
+      "to": "device:valve_push",
+      "label": "touches",
+      "views": [
+        "evidence"
+      ],
+      "evidence_status": "verified"
+    },
+    {
+      "id": "causality:1:cyl_push",
+      "kind": "causality",
+      "from": "causality:1",
+      "to": "device:cyl_push",
+      "label": "touches",
+      "views": [
+        "evidence"
+      ],
+      "evidence_status": "verified"
+    },
+    {
+      "id": "causality:1:sensor_push_ret",
+      "kind": "causality",
+      "from": "causality:1",
+      "to": "device:sensor_push_ret",
+      "label": "touches",
+      "views": [
+        "evidence"
+      ],
+      "evidence_status": "verified"
+    },
+    {
+      "id": "causality:2:Y1",
+      "kind": "causality",
+      "from": "causality:2",
+      "to": "device:Y1",
+      "label": "touches",
+      "views": [
+        "evidence"
+      ],
+      "evidence_status": "verified"
+    },
+    {
+      "id": "causality:2:valve_press",
+      "kind": "causality",
+      "from": "causality:2",
+      "to": "device:valve_press",
+      "label": "touches",
+      "views": [
+        "evidence"
+      ],
+      "evidence_status": "verified"
+    },
+    {
+      "id": "causality:2:cyl_press",
+      "kind": "causality",
+      "from": "causality:2",
+      "to": "device:cyl_press",
+      "label": "touches",
+      "views": [
+        "evidence"
+      ],
+      "evidence_status": "verified"
+    },
+    {
+      "id": "causality:2:sensor_press_ext",
+      "kind": "causality",
+      "from": "causality:2",
+      "to": "device:sensor_press_ext",
+      "label": "touches",
+      "views": [
+        "evidence"
+      ],
+      "evidence_status": "verified"
+    },
+    {
+      "id": "causality:3:Y1",
+      "kind": "causality",
+      "from": "causality:3",
+      "to": "device:Y1",
+      "label": "touches",
+      "views": [
+        "evidence"
+      ],
+      "evidence_status": "verified"
+    },
+    {
+      "id": "causality:3:valve_press",
+      "kind": "causality",
+      "from": "causality:3",
+      "to": "device:valve_press",
+      "label": "touches",
+      "views": [
+        "evidence"
+      ],
+      "evidence_status": "verified"
+    },
+    {
+      "id": "causality:3:cyl_press",
+      "kind": "causality",
+      "from": "causality:3",
+      "to": "device:cyl_press",
+      "label": "touches",
+      "views": [
+        "evidence"
+      ],
+      "evidence_status": "verified"
+    },
+    {
+      "id": "causality:3:sensor_press_ret",
+      "kind": "causality",
+      "from": "causality:3",
+      "to": "device:sensor_press_ret",
+      "label": "touches",
+      "views": [
+        "evidence"
+      ],
+      "evidence_status": "verified"
+    },
+    {
+      "id": "causality:4:Y2",
+      "kind": "causality",
+      "from": "causality:4",
+      "to": "device:Y2",
+      "label": "touches",
+      "views": [
+        "evidence"
+      ],
+      "evidence_status": "verified"
+    },
+    {
+      "id": "causality:4:valve_eject",
+      "kind": "causality",
+      "from": "causality:4",
+      "to": "device:valve_eject",
+      "label": "touches",
+      "views": [
+        "evidence"
+      ],
+      "evidence_status": "verified"
+    },
+    {
+      "id": "causality:4:cyl_eject",
+      "kind": "causality",
+      "from": "causality:4",
+      "to": "device:cyl_eject",
+      "label": "touches",
+      "views": [
+        "evidence"
+      ],
+      "evidence_status": "verified"
+    },
+    {
+      "id": "causality:4:sensor_eject_ext",
+      "kind": "causality",
+      "from": "causality:4",
+      "to": "device:sensor_eject_ext",
+      "label": "touches",
+      "views": [
+        "evidence"
+      ],
+      "evidence_status": "verified"
+    },
+    {
+      "id": "causality:5:Y2",
+      "kind": "causality",
+      "from": "causality:5",
+      "to": "device:Y2",
+      "label": "touches",
+      "views": [
+        "evidence"
+      ],
+      "evidence_status": "verified"
+    },
+    {
+      "id": "causality:5:valve_eject",
+      "kind": "causality",
+      "from": "causality:5",
+      "to": "device:valve_eject",
+      "label": "touches",
+      "views": [
+        "evidence"
+      ],
+      "evidence_status": "verified"
+    },
+    {
+      "id": "causality:5:cyl_eject",
+      "kind": "causality",
+      "from": "causality:5",
+      "to": "device:cyl_eject",
+      "label": "touches",
+      "views": [
+        "evidence"
+      ],
+      "evidence_status": "verified"
+    },
+    {
+      "id": "causality:5:sensor_eject_ret",
+      "kind": "causality",
+      "from": "causality:5",
+      "to": "device:sensor_eject_ret",
+      "label": "touches",
+      "views": [
+        "evidence"
+      ],
+      "evidence_status": "verified"
+    },
+    {
+      "id": "causality:6:Y3",
+      "kind": "causality",
+      "from": "causality:6",
+      "to": "device:Y3",
+      "label": "touches",
+      "views": [
+        "evidence"
+      ],
+      "evidence_status": "verified"
+    },
+    {
+      "id": "causality:6:valve_reject",
+      "kind": "causality",
+      "from": "causality:6",
+      "to": "device:valve_reject",
+      "label": "touches",
+      "views": [
+        "evidence"
+      ],
+      "evidence_status": "verified"
+    },
+    {
+      "id": "causality:6:cyl_reject",
+      "kind": "causality",
+      "from": "causality:6",
+      "to": "device:cyl_reject",
+      "label": "touches",
+      "views": [
+        "evidence"
+      ],
+      "evidence_status": "verified"
+    },
+    {
+      "id": "causality:6:sensor_reject_ext",
+      "kind": "causality",
+      "from": "causality:6",
+      "to": "device:sensor_reject_ext",
+      "label": "touches",
+      "views": [
+        "evidence"
+      ],
+      "evidence_status": "verified"
+    },
+    {
+      "id": "causality:7:Y3",
+      "kind": "causality",
+      "from": "causality:7",
+      "to": "device:Y3",
+      "label": "touches",
+      "views": [
+        "evidence"
+      ],
+      "evidence_status": "verified"
+    },
+    {
+      "id": "causality:7:valve_reject",
+      "kind": "causality",
+      "from": "causality:7",
+      "to": "device:valve_reject",
+      "label": "touches",
+      "views": [
+        "evidence"
+      ],
+      "evidence_status": "verified"
+    },
+    {
+      "id": "causality:7:cyl_reject",
+      "kind": "causality",
+      "from": "causality:7",
+      "to": "device:cyl_reject",
+      "label": "touches",
+      "views": [
+        "evidence"
+      ],
+      "evidence_status": "verified"
+    },
+    {
+      "id": "causality:7:sensor_reject_ret",
+      "kind": "causality",
+      "from": "causality:7",
+      "to": "device:sensor_reject_ret",
+      "label": "touches",
+      "views": [
+        "evidence"
+      ],
+      "evidence_status": "verified"
+    },
+    {
+      "id": "transition:0",
+      "kind": "transition",
+      "from": "step:cycle.push_out",
+      "to": "step:fault_handler.safe_retract",
+      "label": "timeout 800ms",
+      "views": [
+        "orbit",
+        "evidence"
+      ],
+      "evidence_status": "derived",
+      "attributes": {
+        "timers": "cycle.push_out.timeout_1:800ms"
+      }
+    },
+    {
+      "id": "transition:1",
+      "kind": "transition",
+      "from": "step:cycle.push_out",
+      "to": "step:cycle.press_down",
+      "label": "when sensor_push_ext == true",
+      "views": [
+        "orbit",
+        "evidence"
+      ],
+      "evidence_status": "derived",
+      "attributes": {
+        "actions": "extend cyl_push"
+      }
+    },
+    {
+      "id": "transition:2",
+      "kind": "transition",
+      "from": "step:cycle.press_down",
+      "to": "step:fault_handler.safe_retract",
+      "label": "timeout 500ms",
+      "views": [
+        "orbit",
+        "evidence"
+      ],
+      "evidence_status": "derived",
+      "attributes": {
+        "timers": "cycle.press_down.timeout_1:500ms"
+      }
+    },
+    {
+      "id": "transition:3",
+      "kind": "transition",
+      "from": "step:cycle.press_down",
+      "to": "step:cycle.press_up",
+      "label": "when sensor_press_ext == true",
+      "views": [
+        "orbit",
+        "evidence"
+      ],
+      "evidence_status": "derived",
+      "attributes": {
+        "actions": "extend cyl_press"
+      }
+    },
+    {
+      "id": "transition:4",
+      "kind": "transition",
+      "from": "step:cycle.press_up",
+      "to": "step:fault_handler.safe_retract",
+      "label": "timeout 500ms",
+      "views": [
+        "orbit",
+        "evidence"
+      ],
+      "evidence_status": "derived",
+      "attributes": {
+        "timers": "cycle.press_up.timeout_1:500ms"
+      }
+    },
+    {
+      "id": "transition:5",
+      "kind": "transition",
+      "from": "step:cycle.press_up",
+      "to": "step:cycle.check_quality",
+      "label": "when sensor_press_ret == true",
+      "views": [
+        "orbit",
+        "evidence"
+      ],
+      "evidence_status": "derived",
+      "attributes": {
+        "actions": "retract cyl_press"
+      }
+    },
+    {
+      "id": "transition:6",
+      "kind": "transition",
+      "from": "step:cycle.check_quality",
+      "to": "step:fault_handler.safe_retract",
+      "label": "timeout 1000ms",
+      "views": [
+        "orbit",
+        "evidence"
+      ],
+      "evidence_status": "derived",
+      "attributes": {
+        "timers": "cycle.check_quality.timeout_1:1000ms"
+      }
+    },
+    {
+      "id": "transition:7",
+      "kind": "transition",
+      "from": "step:cycle.check_quality",
+      "to": "step:cycle.route_part",
+      "label": "when sensor_quality_ok == true OR sensor_quality_ng == true",
+      "views": [
+        "orbit",
+        "evidence"
+      ],
+      "evidence_status": "derived"
+    },
+    {
+      "id": "transition:8",
+      "kind": "transition",
+      "from": "step:cycle.route_part",
+      "to": "step:eject_good.eject_out",
+      "label": "when sensor_quality_ok == true",
+      "views": [
+        "orbit",
+        "evidence"
+      ],
+      "evidence_status": "derived"
+    },
+    {
+      "id": "transition:9",
+      "kind": "transition",
+      "from": "step:cycle.route_part",
+      "to": "step:eject_bad.reject_out",
+      "label": "when NOT(sensor_quality_ok == true)",
+      "views": [
+        "orbit",
+        "evidence"
+      ],
+      "evidence_status": "derived"
+    },
+    {
+      "id": "transition:10",
+      "kind": "transition",
+      "from": "step:eject_good.eject_out",
+      "to": "step:fault_handler.safe_retract",
+      "label": "timeout 500ms",
+      "views": [
+        "orbit",
+        "evidence"
+      ],
+      "evidence_status": "derived",
+      "attributes": {
+        "timers": "eject_good.eject_out.timeout_1:500ms"
+      }
+    },
+    {
+      "id": "transition:11",
+      "kind": "transition",
+      "from": "step:eject_good.eject_out",
+      "to": "step:eject_good.retract_all_good",
+      "label": "when sensor_eject_ext == true",
+      "views": [
+        "orbit",
+        "evidence"
+      ],
+      "evidence_status": "derived",
+      "attributes": {
+        "actions": "extend cyl_eject"
+      }
+    },
+    {
+      "id": "transition:12",
+      "kind": "transition",
+      "from": "step:eject_good.retract_all_good",
+      "to": "step:eject_good.retract_all_good__parallel_1_fork",
+      "label": "always",
+      "views": [
+        "orbit",
+        "evidence"
+      ],
+      "evidence_status": "derived"
+    },
+    {
+      "id": "transition:13",
+      "kind": "transition",
+      "from": "step:eject_good.retract_all_good__parallel_1_fork",
+      "to": "step:eject_good.retract_all_good__parallel_1_branch_1_active",
+      "label": "always",
+      "views": [
+        "orbit",
+        "evidence"
+      ],
+      "evidence_status": "derived"
+    },
+    {
+      "id": "transition:14",
+      "kind": "transition",
+      "from": "step:eject_good.retract_all_good__parallel_1_branch_1_active",
+      "to": "step:eject_good.retract_all_good__parallel_1_branch_1_done",
+      "label": "when sensor_eject_ret == true",
+      "views": [
+        "orbit",
+        "evidence"
+      ],
+      "evidence_status": "derived",
+      "attributes": {
+        "actions": "retract cyl_eject"
+      }
+    },
+    {
+      "id": "transition:15",
+      "kind": "transition",
+      "from": "step:eject_good.retract_all_good__parallel_1_branch_1_done",
+      "to": "step:eject_good.retract_all_good__parallel_1_branch_2_active",
+      "label": "always",
+      "views": [
+        "orbit",
+        "evidence"
+      ],
+      "evidence_status": "derived"
+    },
+    {
+      "id": "transition:16",
+      "kind": "transition",
+      "from": "step:eject_good.retract_all_good__parallel_1_branch_2_active",
+      "to": "step:fault_handler.safe_retract",
+      "label": "timeout 800ms",
+      "views": [
+        "orbit",
+        "evidence"
+      ],
+      "evidence_status": "derived",
+      "attributes": {
+        "timers": "eject_good.retract_all_good.parallel_1_branch_2.timeout_1:800ms"
+      }
+    },
+    {
+      "id": "transition:17",
+      "kind": "transition",
+      "from": "step:eject_good.retract_all_good__parallel_1_branch_2_active",
+      "to": "step:eject_good.retract_all_good__parallel_1_branch_2_done",
+      "label": "when sensor_push_ret == true",
+      "views": [
+        "orbit",
+        "evidence"
+      ],
+      "evidence_status": "derived",
+      "attributes": {
+        "actions": "retract cyl_push"
+      }
+    },
+    {
+      "id": "transition:18",
+      "kind": "transition",
+      "from": "step:eject_good.retract_all_good__parallel_1_branch_2_done",
+      "to": "step:eject_good.retract_all_good__parallel_1_join",
+      "label": "always",
+      "views": [
+        "orbit",
+        "evidence"
+      ],
+      "evidence_status": "derived"
+    },
+    {
+      "id": "transition:19",
+      "kind": "transition",
+      "from": "step:eject_good.retract_all_good__parallel_1_join",
+      "to": "step:eject_good.good_done",
+      "label": "always",
+      "views": [
+        "orbit",
+        "evidence"
+      ],
+      "evidence_status": "derived"
+    },
+    {
+      "id": "transition:20",
+      "kind": "transition",
+      "from": "step:eject_good.good_done",
+      "to": "step:ready.wait_start",
+      "label": "always",
+      "views": [
+        "orbit",
+        "evidence"
+      ],
+      "evidence_status": "derived",
+      "attributes": {
+        "actions": "log 合格品出料完成，准备下一节拍"
+      }
+    },
+    {
+      "id": "transition:21",
+      "kind": "transition",
+      "from": "step:eject_bad.reject_out",
+      "to": "step:fault_handler.safe_retract",
+      "label": "timeout 500ms",
+      "views": [
+        "orbit",
+        "evidence"
+      ],
+      "evidence_status": "derived",
+      "attributes": {
+        "timers": "eject_bad.reject_out.timeout_1:500ms"
+      }
+    },
+    {
+      "id": "transition:22",
+      "kind": "transition",
+      "from": "step:eject_bad.reject_out",
+      "to": "step:eject_bad.retract_all_bad",
+      "label": "when sensor_reject_ext == true",
+      "views": [
+        "orbit",
+        "evidence"
+      ],
+      "evidence_status": "derived",
+      "attributes": {
+        "actions": "extend cyl_reject"
+      }
+    },
+    {
+      "id": "transition:23",
+      "kind": "transition",
+      "from": "step:eject_bad.retract_all_bad",
+      "to": "step:eject_bad.retract_all_bad__parallel_1_fork",
+      "label": "always",
+      "views": [
+        "orbit",
+        "evidence"
+      ],
+      "evidence_status": "derived"
+    },
+    {
+      "id": "transition:24",
+      "kind": "transition",
+      "from": "step:eject_bad.retract_all_bad__parallel_1_fork",
+      "to": "step:eject_bad.retract_all_bad__parallel_1_branch_1_active",
+      "label": "always",
+      "views": [
+        "orbit",
+        "evidence"
+      ],
+      "evidence_status": "derived"
+    },
+    {
+      "id": "transition:25",
+      "kind": "transition",
+      "from": "step:eject_bad.retract_all_bad__parallel_1_branch_1_active",
+      "to": "step:eject_bad.retract_all_bad__parallel_1_branch_1_done",
+      "label": "when sensor_reject_ret == true",
+      "views": [
+        "orbit",
+        "evidence"
+      ],
+      "evidence_status": "derived",
+      "attributes": {
+        "actions": "retract cyl_reject"
+      }
+    },
+    {
+      "id": "transition:26",
+      "kind": "transition",
+      "from": "step:eject_bad.retract_all_bad__parallel_1_branch_1_done",
+      "to": "step:eject_bad.retract_all_bad__parallel_1_branch_2_active",
+      "label": "always",
+      "views": [
+        "orbit",
+        "evidence"
+      ],
+      "evidence_status": "derived"
+    },
+    {
+      "id": "transition:27",
+      "kind": "transition",
+      "from": "step:eject_bad.retract_all_bad__parallel_1_branch_2_active",
+      "to": "step:fault_handler.safe_retract",
+      "label": "timeout 800ms",
+      "views": [
+        "orbit",
+        "evidence"
+      ],
+      "evidence_status": "derived",
+      "attributes": {
+        "timers": "eject_bad.retract_all_bad.parallel_1_branch_2.timeout_1:800ms"
+      }
+    },
+    {
+      "id": "transition:28",
+      "kind": "transition",
+      "from": "step:eject_bad.retract_all_bad__parallel_1_branch_2_active",
+      "to": "step:eject_bad.retract_all_bad__parallel_1_branch_2_done",
+      "label": "when sensor_push_ret == true",
+      "views": [
+        "orbit",
+        "evidence"
+      ],
+      "evidence_status": "derived",
+      "attributes": {
+        "actions": "retract cyl_push"
+      }
+    },
+    {
+      "id": "transition:29",
+      "kind": "transition",
+      "from": "step:eject_bad.retract_all_bad__parallel_1_branch_2_done",
+      "to": "step:eject_bad.retract_all_bad__parallel_1_join",
+      "label": "always",
+      "views": [
+        "orbit",
+        "evidence"
+      ],
+      "evidence_status": "derived"
+    },
+    {
+      "id": "transition:30",
+      "kind": "transition",
+      "from": "step:eject_bad.retract_all_bad__parallel_1_join",
+      "to": "step:eject_bad.bad_done",
+      "label": "always",
+      "views": [
+        "orbit",
+        "evidence"
+      ],
+      "evidence_status": "derived"
+    },
+    {
+      "id": "transition:31",
+      "kind": "transition",
+      "from": "step:eject_bad.bad_done",
+      "to": "step:ready.wait_start",
+      "label": "always",
+      "views": [
+        "orbit",
+        "evidence"
+      ],
+      "evidence_status": "derived",
+      "attributes": {
+        "actions": "log 废品出料完成，准备下一节拍"
+      }
+    },
+    {
+      "id": "transition:32",
+      "kind": "transition",
+      "from": "step:fault_handler.safe_retract",
+      "to": "step:fault_handler.alarm",
+      "label": "always",
+      "views": [
+        "orbit",
+        "evidence"
+      ],
+      "evidence_status": "derived",
+      "attributes": {
+        "actions": "retract cyl_press | retract cyl_push | retract cyl_eject | retract cyl_reject"
+      }
+    },
+    {
+      "id": "transition:33",
+      "kind": "transition",
+      "from": "step:fault_handler.alarm",
+      "to": "step:ready.wait_start",
+      "label": "always",
+      "views": [
+        "orbit",
+        "evidence"
+      ],
+      "evidence_status": "derived",
+      "attributes": {
+        "actions": "log 三工位装配线故障：动作超时，请人工确认设备状态"
+      }
+    },
+    {
+      "id": "transition:34",
+      "kind": "transition",
+      "from": "step:ready.wait_start",
+      "to": "step:cycle.push_out",
+      "label": "when start_button == true",
+      "views": [
+        "orbit",
+        "evidence"
+      ],
+      "evidence_status": "derived"
+    }
+  ],
+  "overlays": {},
+  "narrative": {
+    "tasks": [
+      {
+        "task_id": "task:cycle",
+        "label": "cycle",
+        "entry_step_id": "step:cycle.push_out",
+        "current_step_id": "step:cycle.push_out",
+        "blocking_state": "ready",
+        "main_path_step_ids": [
+          "step:cycle.push_out",
+          "step:cycle.press_down",
+          "step:cycle.press_up",
+          "step:cycle.check_quality",
+          "step:cycle.route_part"
+        ],
+        "blocking_points": [
+          {
+            "step_id": "step:cycle.push_out",
+            "step_label": "push_out",
+            "release_transitions": [
+              {
+                "transition_id": "transition:1",
+                "guard_kind": "condition",
+                "guard_label": "when sensor_push_ext == true",
+                "to_step_id": "step:cycle.press_down",
+                "to_step_label": "press_down"
+              }
+            ],
+            "timeout_transitions": [
+              {
+                "transition_id": "transition:0",
+                "guard_kind": "timeout",
+                "guard_label": "timeout 800ms",
+                "to_step_id": "step:fault_handler.safe_retract",
+                "to_step_label": "safe_retract"
+              }
+            ]
+          },
+          {
+            "step_id": "step:cycle.press_down",
+            "step_label": "press_down",
+            "release_transitions": [
+              {
+                "transition_id": "transition:3",
+                "guard_kind": "condition",
+                "guard_label": "when sensor_press_ext == true",
+                "to_step_id": "step:cycle.press_up",
+                "to_step_label": "press_up"
+              }
+            ],
+            "timeout_transitions": [
+              {
+                "transition_id": "transition:2",
+                "guard_kind": "timeout",
+                "guard_label": "timeout 500ms",
+                "to_step_id": "step:fault_handler.safe_retract",
+                "to_step_label": "safe_retract"
+              }
+            ]
+          },
+          {
+            "step_id": "step:cycle.press_up",
+            "step_label": "press_up",
+            "release_transitions": [
+              {
+                "transition_id": "transition:5",
+                "guard_kind": "condition",
+                "guard_label": "when sensor_press_ret == true",
+                "to_step_id": "step:cycle.check_quality",
+                "to_step_label": "check_quality"
+              }
+            ],
+            "timeout_transitions": [
+              {
+                "transition_id": "transition:4",
+                "guard_kind": "timeout",
+                "guard_label": "timeout 500ms",
+                "to_step_id": "step:fault_handler.safe_retract",
+                "to_step_label": "safe_retract"
+              }
+            ]
+          },
+          {
+            "step_id": "step:cycle.check_quality",
+            "step_label": "check_quality",
+            "release_transitions": [
+              {
+                "transition_id": "transition:7",
+                "guard_kind": "condition",
+                "guard_label": "when sensor_quality_ok == true OR sensor_quality_ng == true",
+                "to_step_id": "step:cycle.route_part",
+                "to_step_label": "route_part"
+              }
+            ],
+            "timeout_transitions": [
+              {
+                "transition_id": "transition:6",
+                "guard_kind": "timeout",
+                "guard_label": "timeout 1000ms",
+                "to_step_id": "step:fault_handler.safe_retract",
+                "to_step_label": "safe_retract"
+              }
+            ]
+          },
+          {
+            "step_id": "step:cycle.route_part",
+            "step_label": "route_part",
+            "release_transitions": [
+              {
+                "transition_id": "transition:8",
+                "guard_kind": "condition",
+                "guard_label": "when sensor_quality_ok == true",
+                "to_step_id": "step:eject_good.eject_out",
+                "to_step_label": "eject_out"
+              },
+              {
+                "transition_id": "transition:9",
+                "guard_kind": "condition",
+                "guard_label": "when NOT(sensor_quality_ok == true)",
+                "to_step_id": "step:eject_bad.reject_out",
+                "to_step_label": "reject_out"
+              }
+            ]
+          }
+        ],
+        "fault_exits": [
+          {
+            "from_step_id": "step:cycle.push_out",
+            "from_step_label": "push_out",
+            "via": {
+              "transition_id": "transition:0",
+              "guard_kind": "timeout",
+              "guard_label": "timeout 800ms",
+              "to_step_id": "step:fault_handler.safe_retract",
+              "to_step_label": "safe_retract"
+            }
+          },
+          {
+            "from_step_id": "step:cycle.press_down",
+            "from_step_label": "press_down",
+            "via": {
+              "transition_id": "transition:2",
+              "guard_kind": "timeout",
+              "guard_label": "timeout 500ms",
+              "to_step_id": "step:fault_handler.safe_retract",
+              "to_step_label": "safe_retract"
+            }
+          },
+          {
+            "from_step_id": "step:cycle.press_up",
+            "from_step_label": "press_up",
+            "via": {
+              "transition_id": "transition:4",
+              "guard_kind": "timeout",
+              "guard_label": "timeout 500ms",
+              "to_step_id": "step:fault_handler.safe_retract",
+              "to_step_label": "safe_retract"
+            }
+          },
+          {
+            "from_step_id": "step:cycle.check_quality",
+            "from_step_label": "check_quality",
+            "via": {
+              "transition_id": "transition:6",
+              "guard_kind": "timeout",
+              "guard_label": "timeout 1000ms",
+              "to_step_id": "step:fault_handler.safe_retract",
+              "to_step_label": "safe_retract"
+            }
+          },
+          {
+            "from_step_id": "step:cycle.route_part",
+            "from_step_label": "route_part",
+            "via": {
+              "transition_id": "transition:9",
+              "guard_kind": "condition",
+              "guard_label": "when NOT(sensor_quality_ok == true)",
+              "to_step_id": "step:eject_bad.reject_out",
+              "to_step_label": "reject_out"
+            }
+          }
+        ],
+        "coverage": {
+          "uncovered_step_count": 0,
+          "trace_available": false,
+          "intent_available": false
+        },
+        "steps": [
+          {
+            "step_id": "step:cycle.push_out",
+            "label": "push_out",
+            "index": 0,
+            "is_initial": true,
+            "is_current": true,
+            "incoming_transition_ids": [
+              "transition:34"
+            ],
+            "outgoing": [
+              {
+                "transition_id": "transition:0",
+                "to_step_id": "step:fault_handler.safe_retract",
+                "to_step_label": "safe_retract",
+                "guard_kind": "timeout",
+                "guard_label": "timeout 800ms",
+                "timers": [
+                  "cycle.push_out.timeout_1:800ms"
+                ],
+                "observed": false
+              },
+              {
+                "transition_id": "transition:1",
+                "to_step_id": "step:cycle.press_down",
+                "to_step_label": "press_down",
+                "guard_kind": "condition",
+                "guard_label": "when sensor_push_ext == true",
+                "actions": [
+                  {
+                    "kind": "extend",
+                    "label": "extend cyl_push",
+                    "target_device_id": "device:cyl_push",
+                    "target_port": "self"
+                  }
+                ],
+                "observed": false
+              }
+            ],
+            "device_chains": [
+              {
+                "source_kind": "action_target",
+                "explanation": "extend cyl_push",
+                "command_devices": [
+                  {
+                    "device_id": "device:Y0",
+                    "label": "Y0",
+                    "kind": "digital_output"
+                  }
+                ],
+                "actuator_devices": [
+                  {
+                    "device_id": "device:cyl_push",
+                    "label": "cyl_push",
+                    "kind": "cylinder"
+                  },
+                  {
+                    "device_id": "device:valve_push",
+                    "label": "valve_push",
+                    "kind": "solenoid_valve"
+                  }
+                ],
+                "feedback_devices": [
+                  {
+                    "device_id": "device:sensor_push_ext",
+                    "label": "sensor_push_ext",
+                    "kind": "sensor"
+                  },
+                  {
+                    "device_id": "device:sensor_push_ret",
+                    "label": "sensor_push_ret",
+                    "kind": "sensor"
+                  }
+                ],
+                "io_devices": [
+                  {
+                    "device_id": "device:X0",
+                    "label": "X0",
+                    "kind": "digital_input"
+                  },
+                  {
+                    "device_id": "device:X1",
+                    "label": "X1",
+                    "kind": "digital_input"
+                  }
+                ],
+                "evidence_chain_ids": [
+                  "causality:0",
+                  "causality:1"
+                ]
+              },
+              {
+                "source_kind": "guard_dependency",
+                "explanation": "when sensor_push_ext == true",
+                "command_devices": [
+                  {
+                    "device_id": "device:Y0",
+                    "label": "Y0",
+                    "kind": "digital_output"
+                  }
+                ],
+                "actuator_devices": [
+                  {
+                    "device_id": "device:valve_push",
+                    "label": "valve_push",
+                    "kind": "solenoid_valve"
+                  },
+                  {
+                    "device_id": "device:cyl_push",
+                    "label": "cyl_push",
+                    "kind": "cylinder"
+                  }
+                ],
+                "feedback_devices": [
+                  {
+                    "device_id": "device:sensor_push_ext",
+                    "label": "sensor_push_ext",
+                    "kind": "sensor"
+                  }
+                ],
+                "io_devices": [
+                  {
+                    "device_id": "device:X0",
+                    "label": "X0",
+                    "kind": "digital_input"
+                  }
+                ],
+                "evidence_chain_ids": [
+                  "causality:0",
+                  "causality:1"
+                ]
+              }
+            ],
+            "evidence_chain_ids": [
+              "causality:0",
+              "causality:1"
+            ],
+            "evidence_reasons": [
+              "推料缸伸出应能被传感器检测",
+              "推料缸缩回应能被传感器检测"
+            ]
+          },
+          {
+            "step_id": "step:cycle.press_down",
+            "label": "press_down",
+            "index": 1,
+            "is_initial": false,
+            "is_current": false,
+            "incoming_transition_ids": [
+              "transition:1"
+            ],
+            "outgoing": [
+              {
+                "transition_id": "transition:2",
+                "to_step_id": "step:fault_handler.safe_retract",
+                "to_step_label": "safe_retract",
+                "guard_kind": "timeout",
+                "guard_label": "timeout 500ms",
+                "timers": [
+                  "cycle.press_down.timeout_1:500ms"
+                ],
+                "observed": false
+              },
+              {
+                "transition_id": "transition:3",
+                "to_step_id": "step:cycle.press_up",
+                "to_step_label": "press_up",
+                "guard_kind": "condition",
+                "guard_label": "when sensor_press_ext == true",
+                "actions": [
+                  {
+                    "kind": "extend",
+                    "label": "extend cyl_press",
+                    "target_device_id": "device:cyl_press",
+                    "target_port": "self"
+                  }
+                ],
+                "observed": false
+              }
+            ],
+            "device_chains": [
+              {
+                "source_kind": "action_target",
+                "explanation": "extend cyl_press",
+                "command_devices": [
+                  {
+                    "device_id": "device:Y1",
+                    "label": "Y1",
+                    "kind": "digital_output"
+                  }
+                ],
+                "actuator_devices": [
+                  {
+                    "device_id": "device:cyl_press",
+                    "label": "cyl_press",
+                    "kind": "cylinder"
+                  },
+                  {
+                    "device_id": "device:valve_press",
+                    "label": "valve_press",
+                    "kind": "solenoid_valve"
+                  }
+                ],
+                "feedback_devices": [
+                  {
+                    "device_id": "device:sensor_press_ext",
+                    "label": "sensor_press_ext",
+                    "kind": "sensor"
+                  },
+                  {
+                    "device_id": "device:sensor_press_ret",
+                    "label": "sensor_press_ret",
+                    "kind": "sensor"
+                  }
+                ],
+                "io_devices": [
+                  {
+                    "device_id": "device:X2",
+                    "label": "X2",
+                    "kind": "digital_input"
+                  },
+                  {
+                    "device_id": "device:X3",
+                    "label": "X3",
+                    "kind": "digital_input"
+                  }
+                ],
+                "evidence_chain_ids": [
+                  "causality:2",
+                  "causality:3"
+                ]
+              },
+              {
+                "source_kind": "guard_dependency",
+                "explanation": "when sensor_press_ext == true",
+                "command_devices": [
+                  {
+                    "device_id": "device:Y1",
+                    "label": "Y1",
+                    "kind": "digital_output"
+                  }
+                ],
+                "actuator_devices": [
+                  {
+                    "device_id": "device:valve_press",
+                    "label": "valve_press",
+                    "kind": "solenoid_valve"
+                  },
+                  {
+                    "device_id": "device:cyl_press",
+                    "label": "cyl_press",
+                    "kind": "cylinder"
+                  }
+                ],
+                "feedback_devices": [
+                  {
+                    "device_id": "device:sensor_press_ext",
+                    "label": "sensor_press_ext",
+                    "kind": "sensor"
+                  }
+                ],
+                "io_devices": [
+                  {
+                    "device_id": "device:X2",
+                    "label": "X2",
+                    "kind": "digital_input"
+                  }
+                ],
+                "evidence_chain_ids": [
+                  "causality:2",
+                  "causality:3"
+                ]
+              }
+            ],
+            "evidence_chain_ids": [
+              "causality:2",
+              "causality:3"
+            ],
+            "evidence_reasons": [
+              "压装缸伸出应能被传感器检测",
+              "压装缸缩回应能被传感器检测"
+            ]
+          },
+          {
+            "step_id": "step:cycle.press_up",
+            "label": "press_up",
+            "index": 2,
+            "is_initial": false,
+            "is_current": false,
+            "incoming_transition_ids": [
+              "transition:3"
+            ],
+            "outgoing": [
+              {
+                "transition_id": "transition:4",
+                "to_step_id": "step:fault_handler.safe_retract",
+                "to_step_label": "safe_retract",
+                "guard_kind": "timeout",
+                "guard_label": "timeout 500ms",
+                "timers": [
+                  "cycle.press_up.timeout_1:500ms"
+                ],
+                "observed": false
+              },
+              {
+                "transition_id": "transition:5",
+                "to_step_id": "step:cycle.check_quality",
+                "to_step_label": "check_quality",
+                "guard_kind": "condition",
+                "guard_label": "when sensor_press_ret == true",
+                "actions": [
+                  {
+                    "kind": "retract",
+                    "label": "retract cyl_press",
+                    "target_device_id": "device:cyl_press",
+                    "target_port": "self"
+                  }
+                ],
+                "observed": false
+              }
+            ],
+            "device_chains": [
+              {
+                "source_kind": "action_target",
+                "explanation": "retract cyl_press",
+                "command_devices": [
+                  {
+                    "device_id": "device:Y1",
+                    "label": "Y1",
+                    "kind": "digital_output"
+                  }
+                ],
+                "actuator_devices": [
+                  {
+                    "device_id": "device:cyl_press",
+                    "label": "cyl_press",
+                    "kind": "cylinder"
+                  },
+                  {
+                    "device_id": "device:valve_press",
+                    "label": "valve_press",
+                    "kind": "solenoid_valve"
+                  }
+                ],
+                "feedback_devices": [
+                  {
+                    "device_id": "device:sensor_press_ext",
+                    "label": "sensor_press_ext",
+                    "kind": "sensor"
+                  },
+                  {
+                    "device_id": "device:sensor_press_ret",
+                    "label": "sensor_press_ret",
+                    "kind": "sensor"
+                  }
+                ],
+                "io_devices": [
+                  {
+                    "device_id": "device:X2",
+                    "label": "X2",
+                    "kind": "digital_input"
+                  },
+                  {
+                    "device_id": "device:X3",
+                    "label": "X3",
+                    "kind": "digital_input"
+                  }
+                ],
+                "evidence_chain_ids": [
+                  "causality:2",
+                  "causality:3"
+                ]
+              },
+              {
+                "source_kind": "guard_dependency",
+                "explanation": "when sensor_press_ret == true",
+                "command_devices": [
+                  {
+                    "device_id": "device:Y1",
+                    "label": "Y1",
+                    "kind": "digital_output"
+                  }
+                ],
+                "actuator_devices": [
+                  {
+                    "device_id": "device:valve_press",
+                    "label": "valve_press",
+                    "kind": "solenoid_valve"
+                  },
+                  {
+                    "device_id": "device:cyl_press",
+                    "label": "cyl_press",
+                    "kind": "cylinder"
+                  }
+                ],
+                "feedback_devices": [
+                  {
+                    "device_id": "device:sensor_press_ret",
+                    "label": "sensor_press_ret",
+                    "kind": "sensor"
+                  }
+                ],
+                "io_devices": [
+                  {
+                    "device_id": "device:X3",
+                    "label": "X3",
+                    "kind": "digital_input"
+                  }
+                ],
+                "evidence_chain_ids": [
+                  "causality:2",
+                  "causality:3"
+                ]
+              }
+            ],
+            "evidence_chain_ids": [
+              "causality:2",
+              "causality:3"
+            ],
+            "evidence_reasons": [
+              "压装缸伸出应能被传感器检测",
+              "压装缸缩回应能被传感器检测"
+            ]
+          },
+          {
+            "step_id": "step:cycle.check_quality",
+            "label": "check_quality",
+            "index": 3,
+            "is_initial": false,
+            "is_current": false,
+            "incoming_transition_ids": [
+              "transition:5"
+            ],
+            "outgoing": [
+              {
+                "transition_id": "transition:6",
+                "to_step_id": "step:fault_handler.safe_retract",
+                "to_step_label": "safe_retract",
+                "guard_kind": "timeout",
+                "guard_label": "timeout 1000ms",
+                "timers": [
+                  "cycle.check_quality.timeout_1:1000ms"
+                ],
+                "observed": false
+              },
+              {
+                "transition_id": "transition:7",
+                "to_step_id": "step:cycle.route_part",
+                "to_step_label": "route_part",
+                "guard_kind": "condition",
+                "guard_label": "when sensor_quality_ok == true OR sensor_quality_ng == true",
+                "observed": false
+              }
+            ],
+            "device_chains": [
+              {
+                "source_kind": "guard_dependency",
+                "explanation": "when sensor_quality_ok == true OR sensor_quality_ng == true",
+                "feedback_devices": [
+                  {
+                    "device_id": "device:sensor_quality_ng",
+                    "label": "sensor_quality_ng",
+                    "kind": "sensor"
+                  }
+                ],
+                "io_devices": [
+                  {
+                    "device_id": "device:X5",
+                    "label": "X5",
+                    "kind": "digital_input"
+                  }
+                ]
+              },
+              {
+                "source_kind": "guard_dependency",
+                "explanation": "when sensor_quality_ok == true OR sensor_quality_ng == true",
+                "feedback_devices": [
+                  {
+                    "device_id": "device:sensor_quality_ok",
+                    "label": "sensor_quality_ok",
+                    "kind": "sensor"
+                  }
+                ],
+                "io_devices": [
+                  {
+                    "device_id": "device:X4",
+                    "label": "X4",
+                    "kind": "digital_input"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "step_id": "step:cycle.route_part",
+            "label": "route_part",
+            "index": 4,
+            "is_initial": false,
+            "is_current": false,
+            "incoming_transition_ids": [
+              "transition:7"
+            ],
+            "outgoing": [
+              {
+                "transition_id": "transition:8",
+                "to_step_id": "step:eject_good.eject_out",
+                "to_step_label": "eject_out",
+                "guard_kind": "condition",
+                "guard_label": "when sensor_quality_ok == true",
+                "observed": false
+              },
+              {
+                "transition_id": "transition:9",
+                "to_step_id": "step:eject_bad.reject_out",
+                "to_step_label": "reject_out",
+                "guard_kind": "condition",
+                "guard_label": "when NOT(sensor_quality_ok == true)",
+                "observed": false
+              }
+            ],
+            "device_chains": [
+              {
+                "source_kind": "guard_dependency",
+                "explanation": "when sensor_quality_ok == true",
+                "feedback_devices": [
+                  {
+                    "device_id": "device:sensor_quality_ok",
+                    "label": "sensor_quality_ok",
+                    "kind": "sensor"
+                  }
+                ],
+                "io_devices": [
+                  {
+                    "device_id": "device:X4",
+                    "label": "X4",
+                    "kind": "digital_input"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "task_id": "task:eject_bad",
+        "label": "eject_bad",
+        "entry_step_id": "step:eject_bad.reject_out",
+        "current_step_id": "step:eject_bad.reject_out",
+        "blocking_state": "ready",
+        "main_path_step_ids": [
+          "step:eject_bad.reject_out",
+          "step:eject_bad.retract_all_bad",
+          "step:eject_bad.retract_all_bad__parallel_1_fork",
+          "step:eject_bad.retract_all_bad__parallel_1_branch_1_active",
+          "step:eject_bad.retract_all_bad__parallel_1_branch_1_done",
+          "step:eject_bad.retract_all_bad__parallel_1_branch_2_active",
+          "step:eject_bad.retract_all_bad__parallel_1_branch_2_done",
+          "step:eject_bad.retract_all_bad__parallel_1_join",
+          "step:eject_bad.bad_done"
+        ],
+        "blocking_points": [
+          {
+            "step_id": "step:eject_bad.reject_out",
+            "step_label": "reject_out",
+            "release_transitions": [
+              {
+                "transition_id": "transition:22",
+                "guard_kind": "condition",
+                "guard_label": "when sensor_reject_ext == true",
+                "to_step_id": "step:eject_bad.retract_all_bad",
+                "to_step_label": "retract_all_bad"
+              }
+            ],
+            "timeout_transitions": [
+              {
+                "transition_id": "transition:21",
+                "guard_kind": "timeout",
+                "guard_label": "timeout 500ms",
+                "to_step_id": "step:fault_handler.safe_retract",
+                "to_step_label": "safe_retract"
+              }
+            ]
+          },
+          {
+            "step_id": "step:eject_bad.retract_all_bad__parallel_1_branch_1_active",
+            "step_label": "retract_all_bad__parallel_1_branch_1_active",
+            "release_transitions": [
+              {
+                "transition_id": "transition:25",
+                "guard_kind": "condition",
+                "guard_label": "when sensor_reject_ret == true",
+                "to_step_id": "step:eject_bad.retract_all_bad__parallel_1_branch_1_done",
+                "to_step_label": "retract_all_bad__parallel_1_branch_1_done"
+              }
+            ]
+          },
+          {
+            "step_id": "step:eject_bad.retract_all_bad__parallel_1_branch_2_active",
+            "step_label": "retract_all_bad__parallel_1_branch_2_active",
+            "release_transitions": [
+              {
+                "transition_id": "transition:28",
+                "guard_kind": "condition",
+                "guard_label": "when sensor_push_ret == true",
+                "to_step_id": "step:eject_bad.retract_all_bad__parallel_1_branch_2_done",
+                "to_step_label": "retract_all_bad__parallel_1_branch_2_done"
+              }
+            ],
+            "timeout_transitions": [
+              {
+                "transition_id": "transition:27",
+                "guard_kind": "timeout",
+                "guard_label": "timeout 800ms",
+                "to_step_id": "step:fault_handler.safe_retract",
+                "to_step_label": "safe_retract"
+              }
+            ]
+          }
+        ],
+        "fault_exits": [
+          {
+            "from_step_id": "step:eject_bad.reject_out",
+            "from_step_label": "reject_out",
+            "via": {
+              "transition_id": "transition:21",
+              "guard_kind": "timeout",
+              "guard_label": "timeout 500ms",
+              "to_step_id": "step:fault_handler.safe_retract",
+              "to_step_label": "safe_retract"
+            }
+          },
+          {
+            "from_step_id": "step:eject_bad.retract_all_bad__parallel_1_branch_2_active",
+            "from_step_label": "retract_all_bad__parallel_1_branch_2_active",
+            "via": {
+              "transition_id": "transition:27",
+              "guard_kind": "timeout",
+              "guard_label": "timeout 800ms",
+              "to_step_id": "step:fault_handler.safe_retract",
+              "to_step_label": "safe_retract"
+            }
+          }
+        ],
+        "coverage": {
+          "uncovered_step_count": 6,
+          "trace_available": false,
+          "intent_available": false
+        },
+        "steps": [
+          {
+            "step_id": "step:eject_bad.reject_out",
+            "label": "reject_out",
+            "index": 0,
+            "is_initial": true,
+            "is_current": true,
+            "incoming_transition_ids": [
+              "transition:9"
+            ],
+            "outgoing": [
+              {
+                "transition_id": "transition:21",
+                "to_step_id": "step:fault_handler.safe_retract",
+                "to_step_label": "safe_retract",
+                "guard_kind": "timeout",
+                "guard_label": "timeout 500ms",
+                "timers": [
+                  "eject_bad.reject_out.timeout_1:500ms"
+                ],
+                "observed": false
+              },
+              {
+                "transition_id": "transition:22",
+                "to_step_id": "step:eject_bad.retract_all_bad",
+                "to_step_label": "retract_all_bad",
+                "guard_kind": "condition",
+                "guard_label": "when sensor_reject_ext == true",
+                "actions": [
+                  {
+                    "kind": "extend",
+                    "label": "extend cyl_reject",
+                    "target_device_id": "device:cyl_reject",
+                    "target_port": "self"
+                  }
+                ],
+                "observed": false
+              }
+            ],
+            "device_chains": [
+              {
+                "source_kind": "action_target",
+                "explanation": "extend cyl_reject",
+                "command_devices": [
+                  {
+                    "device_id": "device:Y3",
+                    "label": "Y3",
+                    "kind": "digital_output"
+                  }
+                ],
+                "actuator_devices": [
+                  {
+                    "device_id": "device:cyl_reject",
+                    "label": "cyl_reject",
+                    "kind": "cylinder"
+                  },
+                  {
+                    "device_id": "device:valve_reject",
+                    "label": "valve_reject",
+                    "kind": "solenoid_valve"
+                  }
+                ],
+                "feedback_devices": [
+                  {
+                    "device_id": "device:sensor_reject_ext",
+                    "label": "sensor_reject_ext",
+                    "kind": "sensor"
+                  },
+                  {
+                    "device_id": "device:sensor_reject_ret",
+                    "label": "sensor_reject_ret",
+                    "kind": "sensor"
+                  }
+                ],
+                "io_devices": [
+                  {
+                    "device_id": "device:X8",
+                    "label": "X8",
+                    "kind": "digital_input"
+                  },
+                  {
+                    "device_id": "device:X9",
+                    "label": "X9",
+                    "kind": "digital_input"
+                  }
+                ],
+                "evidence_chain_ids": [
+                  "causality:6",
+                  "causality:7"
+                ]
+              },
+              {
+                "source_kind": "guard_dependency",
+                "explanation": "when sensor_reject_ext == true",
+                "command_devices": [
+                  {
+                    "device_id": "device:Y3",
+                    "label": "Y3",
+                    "kind": "digital_output"
+                  }
+                ],
+                "actuator_devices": [
+                  {
+                    "device_id": "device:valve_reject",
+                    "label": "valve_reject",
+                    "kind": "solenoid_valve"
+                  },
+                  {
+                    "device_id": "device:cyl_reject",
+                    "label": "cyl_reject",
+                    "kind": "cylinder"
+                  }
+                ],
+                "feedback_devices": [
+                  {
+                    "device_id": "device:sensor_reject_ext",
+                    "label": "sensor_reject_ext",
+                    "kind": "sensor"
+                  }
+                ],
+                "io_devices": [
+                  {
+                    "device_id": "device:X8",
+                    "label": "X8",
+                    "kind": "digital_input"
+                  }
+                ],
+                "evidence_chain_ids": [
+                  "causality:6",
+                  "causality:7"
+                ]
+              }
+            ],
+            "evidence_chain_ids": [
+              "causality:6",
+              "causality:7"
+            ],
+            "evidence_reasons": [
+              "废品缸伸出应能被传感器检测",
+              "废品缸缩回应能被传感器检测"
+            ]
+          },
+          {
+            "step_id": "step:eject_bad.retract_all_bad",
+            "label": "retract_all_bad",
+            "index": 1,
+            "is_initial": false,
+            "is_current": false,
+            "incoming_transition_ids": [
+              "transition:22"
+            ],
+            "outgoing": [
+              {
+                "transition_id": "transition:23",
+                "to_step_id": "step:eject_bad.retract_all_bad__parallel_1_fork",
+                "to_step_label": "retract_all_bad__parallel_1_fork",
+                "guard_kind": "always",
+                "guard_label": "always",
+                "observed": false
+              }
+            ]
+          },
+          {
+            "step_id": "step:eject_bad.retract_all_bad__parallel_1_fork",
+            "label": "retract_all_bad__parallel_1_fork",
+            "index": 2,
+            "is_initial": false,
+            "is_current": false,
+            "incoming_transition_ids": [
+              "transition:23"
+            ],
+            "outgoing": [
+              {
+                "transition_id": "transition:24",
+                "to_step_id": "step:eject_bad.retract_all_bad__parallel_1_branch_1_active",
+                "to_step_label": "retract_all_bad__parallel_1_branch_1_active",
+                "guard_kind": "always",
+                "guard_label": "always",
+                "observed": false
+              }
+            ]
+          },
+          {
+            "step_id": "step:eject_bad.retract_all_bad__parallel_1_branch_1_active",
+            "label": "retract_all_bad__parallel_1_branch_1_active",
+            "index": 3,
+            "is_initial": false,
+            "is_current": false,
+            "incoming_transition_ids": [
+              "transition:24"
+            ],
+            "outgoing": [
+              {
+                "transition_id": "transition:25",
+                "to_step_id": "step:eject_bad.retract_all_bad__parallel_1_branch_1_done",
+                "to_step_label": "retract_all_bad__parallel_1_branch_1_done",
+                "guard_kind": "condition",
+                "guard_label": "when sensor_reject_ret == true",
+                "actions": [
+                  {
+                    "kind": "retract",
+                    "label": "retract cyl_reject",
+                    "target_device_id": "device:cyl_reject",
+                    "target_port": "self"
+                  }
+                ],
+                "observed": false
+              }
+            ],
+            "device_chains": [
+              {
+                "source_kind": "action_target",
+                "explanation": "retract cyl_reject",
+                "command_devices": [
+                  {
+                    "device_id": "device:Y3",
+                    "label": "Y3",
+                    "kind": "digital_output"
+                  }
+                ],
+                "actuator_devices": [
+                  {
+                    "device_id": "device:cyl_reject",
+                    "label": "cyl_reject",
+                    "kind": "cylinder"
+                  },
+                  {
+                    "device_id": "device:valve_reject",
+                    "label": "valve_reject",
+                    "kind": "solenoid_valve"
+                  }
+                ],
+                "feedback_devices": [
+                  {
+                    "device_id": "device:sensor_reject_ext",
+                    "label": "sensor_reject_ext",
+                    "kind": "sensor"
+                  },
+                  {
+                    "device_id": "device:sensor_reject_ret",
+                    "label": "sensor_reject_ret",
+                    "kind": "sensor"
+                  }
+                ],
+                "io_devices": [
+                  {
+                    "device_id": "device:X8",
+                    "label": "X8",
+                    "kind": "digital_input"
+                  },
+                  {
+                    "device_id": "device:X9",
+                    "label": "X9",
+                    "kind": "digital_input"
+                  }
+                ],
+                "evidence_chain_ids": [
+                  "causality:6",
+                  "causality:7"
+                ]
+              },
+              {
+                "source_kind": "guard_dependency",
+                "explanation": "when sensor_reject_ret == true",
+                "command_devices": [
+                  {
+                    "device_id": "device:Y3",
+                    "label": "Y3",
+                    "kind": "digital_output"
+                  }
+                ],
+                "actuator_devices": [
+                  {
+                    "device_id": "device:valve_reject",
+                    "label": "valve_reject",
+                    "kind": "solenoid_valve"
+                  },
+                  {
+                    "device_id": "device:cyl_reject",
+                    "label": "cyl_reject",
+                    "kind": "cylinder"
+                  }
+                ],
+                "feedback_devices": [
+                  {
+                    "device_id": "device:sensor_reject_ret",
+                    "label": "sensor_reject_ret",
+                    "kind": "sensor"
+                  }
+                ],
+                "io_devices": [
+                  {
+                    "device_id": "device:X9",
+                    "label": "X9",
+                    "kind": "digital_input"
+                  }
+                ],
+                "evidence_chain_ids": [
+                  "causality:6",
+                  "causality:7"
+                ]
+              }
+            ],
+            "evidence_chain_ids": [
+              "causality:6",
+              "causality:7"
+            ],
+            "evidence_reasons": [
+              "废品缸伸出应能被传感器检测",
+              "废品缸缩回应能被传感器检测"
+            ]
+          },
+          {
+            "step_id": "step:eject_bad.retract_all_bad__parallel_1_branch_1_done",
+            "label": "retract_all_bad__parallel_1_branch_1_done",
+            "index": 4,
+            "is_initial": false,
+            "is_current": false,
+            "incoming_transition_ids": [
+              "transition:25"
+            ],
+            "outgoing": [
+              {
+                "transition_id": "transition:26",
+                "to_step_id": "step:eject_bad.retract_all_bad__parallel_1_branch_2_active",
+                "to_step_label": "retract_all_bad__parallel_1_branch_2_active",
+                "guard_kind": "always",
+                "guard_label": "always",
+                "observed": false
+              }
+            ]
+          },
+          {
+            "step_id": "step:eject_bad.retract_all_bad__parallel_1_branch_2_active",
+            "label": "retract_all_bad__parallel_1_branch_2_active",
+            "index": 5,
+            "is_initial": false,
+            "is_current": false,
+            "incoming_transition_ids": [
+              "transition:26"
+            ],
+            "outgoing": [
+              {
+                "transition_id": "transition:27",
+                "to_step_id": "step:fault_handler.safe_retract",
+                "to_step_label": "safe_retract",
+                "guard_kind": "timeout",
+                "guard_label": "timeout 800ms",
+                "timers": [
+                  "eject_bad.retract_all_bad.parallel_1_branch_2.timeout_1:800ms"
+                ],
+                "observed": false
+              },
+              {
+                "transition_id": "transition:28",
+                "to_step_id": "step:eject_bad.retract_all_bad__parallel_1_branch_2_done",
+                "to_step_label": "retract_all_bad__parallel_1_branch_2_done",
+                "guard_kind": "condition",
+                "guard_label": "when sensor_push_ret == true",
+                "actions": [
+                  {
+                    "kind": "retract",
+                    "label": "retract cyl_push",
+                    "target_device_id": "device:cyl_push",
+                    "target_port": "self"
+                  }
+                ],
+                "observed": false
+              }
+            ],
+            "device_chains": [
+              {
+                "source_kind": "action_target",
+                "explanation": "retract cyl_push",
+                "command_devices": [
+                  {
+                    "device_id": "device:Y0",
+                    "label": "Y0",
+                    "kind": "digital_output"
+                  }
+                ],
+                "actuator_devices": [
+                  {
+                    "device_id": "device:cyl_push",
+                    "label": "cyl_push",
+                    "kind": "cylinder"
+                  },
+                  {
+                    "device_id": "device:valve_push",
+                    "label": "valve_push",
+                    "kind": "solenoid_valve"
+                  }
+                ],
+                "feedback_devices": [
+                  {
+                    "device_id": "device:sensor_push_ext",
+                    "label": "sensor_push_ext",
+                    "kind": "sensor"
+                  },
+                  {
+                    "device_id": "device:sensor_push_ret",
+                    "label": "sensor_push_ret",
+                    "kind": "sensor"
+                  }
+                ],
+                "io_devices": [
+                  {
+                    "device_id": "device:X0",
+                    "label": "X0",
+                    "kind": "digital_input"
+                  },
+                  {
+                    "device_id": "device:X1",
+                    "label": "X1",
+                    "kind": "digital_input"
+                  }
+                ],
+                "evidence_chain_ids": [
+                  "causality:0",
+                  "causality:1"
+                ]
+              },
+              {
+                "source_kind": "guard_dependency",
+                "explanation": "when sensor_push_ret == true",
+                "command_devices": [
+                  {
+                    "device_id": "device:Y0",
+                    "label": "Y0",
+                    "kind": "digital_output"
+                  }
+                ],
+                "actuator_devices": [
+                  {
+                    "device_id": "device:valve_push",
+                    "label": "valve_push",
+                    "kind": "solenoid_valve"
+                  },
+                  {
+                    "device_id": "device:cyl_push",
+                    "label": "cyl_push",
+                    "kind": "cylinder"
+                  }
+                ],
+                "feedback_devices": [
+                  {
+                    "device_id": "device:sensor_push_ret",
+                    "label": "sensor_push_ret",
+                    "kind": "sensor"
+                  }
+                ],
+                "io_devices": [
+                  {
+                    "device_id": "device:X1",
+                    "label": "X1",
+                    "kind": "digital_input"
+                  }
+                ],
+                "evidence_chain_ids": [
+                  "causality:0",
+                  "causality:1"
+                ]
+              }
+            ],
+            "evidence_chain_ids": [
+              "causality:0",
+              "causality:1"
+            ],
+            "evidence_reasons": [
+              "推料缸伸出应能被传感器检测",
+              "推料缸缩回应能被传感器检测"
+            ]
+          },
+          {
+            "step_id": "step:eject_bad.retract_all_bad__parallel_1_branch_2_done",
+            "label": "retract_all_bad__parallel_1_branch_2_done",
+            "index": 6,
+            "is_initial": false,
+            "is_current": false,
+            "incoming_transition_ids": [
+              "transition:28"
+            ],
+            "outgoing": [
+              {
+                "transition_id": "transition:29",
+                "to_step_id": "step:eject_bad.retract_all_bad__parallel_1_join",
+                "to_step_label": "retract_all_bad__parallel_1_join",
+                "guard_kind": "always",
+                "guard_label": "always",
+                "observed": false
+              }
+            ]
+          },
+          {
+            "step_id": "step:eject_bad.retract_all_bad__parallel_1_join",
+            "label": "retract_all_bad__parallel_1_join",
+            "index": 7,
+            "is_initial": false,
+            "is_current": false,
+            "incoming_transition_ids": [
+              "transition:29"
+            ],
+            "outgoing": [
+              {
+                "transition_id": "transition:30",
+                "to_step_id": "step:eject_bad.bad_done",
+                "to_step_label": "bad_done",
+                "guard_kind": "always",
+                "guard_label": "always",
+                "observed": false
+              }
+            ]
+          },
+          {
+            "step_id": "step:eject_bad.bad_done",
+            "label": "bad_done",
+            "index": 8,
+            "is_initial": false,
+            "is_current": false,
+            "incoming_transition_ids": [
+              "transition:30"
+            ],
+            "outgoing": [
+              {
+                "transition_id": "transition:31",
+                "to_step_id": "step:ready.wait_start",
+                "to_step_label": "wait_start",
+                "guard_kind": "always",
+                "guard_label": "always",
+                "actions": [
+                  {
+                    "kind": "log",
+                    "label": "log 废品出料完成，准备下一节拍"
+                  }
+                ],
+                "observed": false
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "task_id": "task:eject_good",
+        "label": "eject_good",
+        "entry_step_id": "step:eject_good.eject_out",
+        "current_step_id": "step:eject_good.eject_out",
+        "blocking_state": "ready",
+        "main_path_step_ids": [
+          "step:eject_good.eject_out",
+          "step:eject_good.retract_all_good",
+          "step:eject_good.retract_all_good__parallel_1_fork",
+          "step:eject_good.retract_all_good__parallel_1_branch_1_active",
+          "step:eject_good.retract_all_good__parallel_1_branch_1_done",
+          "step:eject_good.retract_all_good__parallel_1_branch_2_active",
+          "step:eject_good.retract_all_good__parallel_1_branch_2_done",
+          "step:eject_good.retract_all_good__parallel_1_join",
+          "step:eject_good.good_done"
+        ],
+        "blocking_points": [
+          {
+            "step_id": "step:eject_good.eject_out",
+            "step_label": "eject_out",
+            "release_transitions": [
+              {
+                "transition_id": "transition:11",
+                "guard_kind": "condition",
+                "guard_label": "when sensor_eject_ext == true",
+                "to_step_id": "step:eject_good.retract_all_good",
+                "to_step_label": "retract_all_good"
+              }
+            ],
+            "timeout_transitions": [
+              {
+                "transition_id": "transition:10",
+                "guard_kind": "timeout",
+                "guard_label": "timeout 500ms",
+                "to_step_id": "step:fault_handler.safe_retract",
+                "to_step_label": "safe_retract"
+              }
+            ]
+          },
+          {
+            "step_id": "step:eject_good.retract_all_good__parallel_1_branch_1_active",
+            "step_label": "retract_all_good__parallel_1_branch_1_active",
+            "release_transitions": [
+              {
+                "transition_id": "transition:14",
+                "guard_kind": "condition",
+                "guard_label": "when sensor_eject_ret == true",
+                "to_step_id": "step:eject_good.retract_all_good__parallel_1_branch_1_done",
+                "to_step_label": "retract_all_good__parallel_1_branch_1_done"
+              }
+            ]
+          },
+          {
+            "step_id": "step:eject_good.retract_all_good__parallel_1_branch_2_active",
+            "step_label": "retract_all_good__parallel_1_branch_2_active",
+            "release_transitions": [
+              {
+                "transition_id": "transition:17",
+                "guard_kind": "condition",
+                "guard_label": "when sensor_push_ret == true",
+                "to_step_id": "step:eject_good.retract_all_good__parallel_1_branch_2_done",
+                "to_step_label": "retract_all_good__parallel_1_branch_2_done"
+              }
+            ],
+            "timeout_transitions": [
+              {
+                "transition_id": "transition:16",
+                "guard_kind": "timeout",
+                "guard_label": "timeout 800ms",
+                "to_step_id": "step:fault_handler.safe_retract",
+                "to_step_label": "safe_retract"
+              }
+            ]
+          }
+        ],
+        "fault_exits": [
+          {
+            "from_step_id": "step:eject_good.eject_out",
+            "from_step_label": "eject_out",
+            "via": {
+              "transition_id": "transition:10",
+              "guard_kind": "timeout",
+              "guard_label": "timeout 500ms",
+              "to_step_id": "step:fault_handler.safe_retract",
+              "to_step_label": "safe_retract"
+            }
+          },
+          {
+            "from_step_id": "step:eject_good.retract_all_good__parallel_1_branch_2_active",
+            "from_step_label": "retract_all_good__parallel_1_branch_2_active",
+            "via": {
+              "transition_id": "transition:16",
+              "guard_kind": "timeout",
+              "guard_label": "timeout 800ms",
+              "to_step_id": "step:fault_handler.safe_retract",
+              "to_step_label": "safe_retract"
+            }
+          }
+        ],
+        "coverage": {
+          "uncovered_step_count": 6,
+          "trace_available": false,
+          "intent_available": false
+        },
+        "steps": [
+          {
+            "step_id": "step:eject_good.eject_out",
+            "label": "eject_out",
+            "index": 0,
+            "is_initial": true,
+            "is_current": true,
+            "incoming_transition_ids": [
+              "transition:8"
+            ],
+            "outgoing": [
+              {
+                "transition_id": "transition:10",
+                "to_step_id": "step:fault_handler.safe_retract",
+                "to_step_label": "safe_retract",
+                "guard_kind": "timeout",
+                "guard_label": "timeout 500ms",
+                "timers": [
+                  "eject_good.eject_out.timeout_1:500ms"
+                ],
+                "observed": false
+              },
+              {
+                "transition_id": "transition:11",
+                "to_step_id": "step:eject_good.retract_all_good",
+                "to_step_label": "retract_all_good",
+                "guard_kind": "condition",
+                "guard_label": "when sensor_eject_ext == true",
+                "actions": [
+                  {
+                    "kind": "extend",
+                    "label": "extend cyl_eject",
+                    "target_device_id": "device:cyl_eject",
+                    "target_port": "self"
+                  }
+                ],
+                "observed": false
+              }
+            ],
+            "device_chains": [
+              {
+                "source_kind": "action_target",
+                "explanation": "extend cyl_eject",
+                "command_devices": [
+                  {
+                    "device_id": "device:Y2",
+                    "label": "Y2",
+                    "kind": "digital_output"
+                  }
+                ],
+                "actuator_devices": [
+                  {
+                    "device_id": "device:cyl_eject",
+                    "label": "cyl_eject",
+                    "kind": "cylinder"
+                  },
+                  {
+                    "device_id": "device:valve_eject",
+                    "label": "valve_eject",
+                    "kind": "solenoid_valve"
+                  }
+                ],
+                "feedback_devices": [
+                  {
+                    "device_id": "device:sensor_eject_ext",
+                    "label": "sensor_eject_ext",
+                    "kind": "sensor"
+                  },
+                  {
+                    "device_id": "device:sensor_eject_ret",
+                    "label": "sensor_eject_ret",
+                    "kind": "sensor"
+                  }
+                ],
+                "io_devices": [
+                  {
+                    "device_id": "device:X6",
+                    "label": "X6",
+                    "kind": "digital_input"
+                  },
+                  {
+                    "device_id": "device:X7",
+                    "label": "X7",
+                    "kind": "digital_input"
+                  }
+                ],
+                "evidence_chain_ids": [
+                  "causality:4",
+                  "causality:5"
+                ]
+              },
+              {
+                "source_kind": "guard_dependency",
+                "explanation": "when sensor_eject_ext == true",
+                "command_devices": [
+                  {
+                    "device_id": "device:Y2",
+                    "label": "Y2",
+                    "kind": "digital_output"
+                  }
+                ],
+                "actuator_devices": [
+                  {
+                    "device_id": "device:valve_eject",
+                    "label": "valve_eject",
+                    "kind": "solenoid_valve"
+                  },
+                  {
+                    "device_id": "device:cyl_eject",
+                    "label": "cyl_eject",
+                    "kind": "cylinder"
+                  }
+                ],
+                "feedback_devices": [
+                  {
+                    "device_id": "device:sensor_eject_ext",
+                    "label": "sensor_eject_ext",
+                    "kind": "sensor"
+                  }
+                ],
+                "io_devices": [
+                  {
+                    "device_id": "device:X6",
+                    "label": "X6",
+                    "kind": "digital_input"
+                  }
+                ],
+                "evidence_chain_ids": [
+                  "causality:4",
+                  "causality:5"
+                ]
+              }
+            ],
+            "evidence_chain_ids": [
+              "causality:4",
+              "causality:5"
+            ],
+            "evidence_reasons": [
+              "出料缸伸出应能被传感器检测",
+              "出料缸缩回应能被传感器检测"
+            ]
+          },
+          {
+            "step_id": "step:eject_good.retract_all_good",
+            "label": "retract_all_good",
+            "index": 1,
+            "is_initial": false,
+            "is_current": false,
+            "incoming_transition_ids": [
+              "transition:11"
+            ],
+            "outgoing": [
+              {
+                "transition_id": "transition:12",
+                "to_step_id": "step:eject_good.retract_all_good__parallel_1_fork",
+                "to_step_label": "retract_all_good__parallel_1_fork",
+                "guard_kind": "always",
+                "guard_label": "always",
+                "observed": false
+              }
+            ]
+          },
+          {
+            "step_id": "step:eject_good.retract_all_good__parallel_1_fork",
+            "label": "retract_all_good__parallel_1_fork",
+            "index": 2,
+            "is_initial": false,
+            "is_current": false,
+            "incoming_transition_ids": [
+              "transition:12"
+            ],
+            "outgoing": [
+              {
+                "transition_id": "transition:13",
+                "to_step_id": "step:eject_good.retract_all_good__parallel_1_branch_1_active",
+                "to_step_label": "retract_all_good__parallel_1_branch_1_active",
+                "guard_kind": "always",
+                "guard_label": "always",
+                "observed": false
+              }
+            ]
+          },
+          {
+            "step_id": "step:eject_good.retract_all_good__parallel_1_branch_1_active",
+            "label": "retract_all_good__parallel_1_branch_1_active",
+            "index": 3,
+            "is_initial": false,
+            "is_current": false,
+            "incoming_transition_ids": [
+              "transition:13"
+            ],
+            "outgoing": [
+              {
+                "transition_id": "transition:14",
+                "to_step_id": "step:eject_good.retract_all_good__parallel_1_branch_1_done",
+                "to_step_label": "retract_all_good__parallel_1_branch_1_done",
+                "guard_kind": "condition",
+                "guard_label": "when sensor_eject_ret == true",
+                "actions": [
+                  {
+                    "kind": "retract",
+                    "label": "retract cyl_eject",
+                    "target_device_id": "device:cyl_eject",
+                    "target_port": "self"
+                  }
+                ],
+                "observed": false
+              }
+            ],
+            "device_chains": [
+              {
+                "source_kind": "action_target",
+                "explanation": "retract cyl_eject",
+                "command_devices": [
+                  {
+                    "device_id": "device:Y2",
+                    "label": "Y2",
+                    "kind": "digital_output"
+                  }
+                ],
+                "actuator_devices": [
+                  {
+                    "device_id": "device:cyl_eject",
+                    "label": "cyl_eject",
+                    "kind": "cylinder"
+                  },
+                  {
+                    "device_id": "device:valve_eject",
+                    "label": "valve_eject",
+                    "kind": "solenoid_valve"
+                  }
+                ],
+                "feedback_devices": [
+                  {
+                    "device_id": "device:sensor_eject_ext",
+                    "label": "sensor_eject_ext",
+                    "kind": "sensor"
+                  },
+                  {
+                    "device_id": "device:sensor_eject_ret",
+                    "label": "sensor_eject_ret",
+                    "kind": "sensor"
+                  }
+                ],
+                "io_devices": [
+                  {
+                    "device_id": "device:X6",
+                    "label": "X6",
+                    "kind": "digital_input"
+                  },
+                  {
+                    "device_id": "device:X7",
+                    "label": "X7",
+                    "kind": "digital_input"
+                  }
+                ],
+                "evidence_chain_ids": [
+                  "causality:4",
+                  "causality:5"
+                ]
+              },
+              {
+                "source_kind": "guard_dependency",
+                "explanation": "when sensor_eject_ret == true",
+                "command_devices": [
+                  {
+                    "device_id": "device:Y2",
+                    "label": "Y2",
+                    "kind": "digital_output"
+                  }
+                ],
+                "actuator_devices": [
+                  {
+                    "device_id": "device:valve_eject",
+                    "label": "valve_eject",
+                    "kind": "solenoid_valve"
+                  },
+                  {
+                    "device_id": "device:cyl_eject",
+                    "label": "cyl_eject",
+                    "kind": "cylinder"
+                  }
+                ],
+                "feedback_devices": [
+                  {
+                    "device_id": "device:sensor_eject_ret",
+                    "label": "sensor_eject_ret",
+                    "kind": "sensor"
+                  }
+                ],
+                "io_devices": [
+                  {
+                    "device_id": "device:X7",
+                    "label": "X7",
+                    "kind": "digital_input"
+                  }
+                ],
+                "evidence_chain_ids": [
+                  "causality:4",
+                  "causality:5"
+                ]
+              }
+            ],
+            "evidence_chain_ids": [
+              "causality:4",
+              "causality:5"
+            ],
+            "evidence_reasons": [
+              "出料缸伸出应能被传感器检测",
+              "出料缸缩回应能被传感器检测"
+            ]
+          },
+          {
+            "step_id": "step:eject_good.retract_all_good__parallel_1_branch_1_done",
+            "label": "retract_all_good__parallel_1_branch_1_done",
+            "index": 4,
+            "is_initial": false,
+            "is_current": false,
+            "incoming_transition_ids": [
+              "transition:14"
+            ],
+            "outgoing": [
+              {
+                "transition_id": "transition:15",
+                "to_step_id": "step:eject_good.retract_all_good__parallel_1_branch_2_active",
+                "to_step_label": "retract_all_good__parallel_1_branch_2_active",
+                "guard_kind": "always",
+                "guard_label": "always",
+                "observed": false
+              }
+            ]
+          },
+          {
+            "step_id": "step:eject_good.retract_all_good__parallel_1_branch_2_active",
+            "label": "retract_all_good__parallel_1_branch_2_active",
+            "index": 5,
+            "is_initial": false,
+            "is_current": false,
+            "incoming_transition_ids": [
+              "transition:15"
+            ],
+            "outgoing": [
+              {
+                "transition_id": "transition:16",
+                "to_step_id": "step:fault_handler.safe_retract",
+                "to_step_label": "safe_retract",
+                "guard_kind": "timeout",
+                "guard_label": "timeout 800ms",
+                "timers": [
+                  "eject_good.retract_all_good.parallel_1_branch_2.timeout_1:800ms"
+                ],
+                "observed": false
+              },
+              {
+                "transition_id": "transition:17",
+                "to_step_id": "step:eject_good.retract_all_good__parallel_1_branch_2_done",
+                "to_step_label": "retract_all_good__parallel_1_branch_2_done",
+                "guard_kind": "condition",
+                "guard_label": "when sensor_push_ret == true",
+                "actions": [
+                  {
+                    "kind": "retract",
+                    "label": "retract cyl_push",
+                    "target_device_id": "device:cyl_push",
+                    "target_port": "self"
+                  }
+                ],
+                "observed": false
+              }
+            ],
+            "device_chains": [
+              {
+                "source_kind": "action_target",
+                "explanation": "retract cyl_push",
+                "command_devices": [
+                  {
+                    "device_id": "device:Y0",
+                    "label": "Y0",
+                    "kind": "digital_output"
+                  }
+                ],
+                "actuator_devices": [
+                  {
+                    "device_id": "device:cyl_push",
+                    "label": "cyl_push",
+                    "kind": "cylinder"
+                  },
+                  {
+                    "device_id": "device:valve_push",
+                    "label": "valve_push",
+                    "kind": "solenoid_valve"
+                  }
+                ],
+                "feedback_devices": [
+                  {
+                    "device_id": "device:sensor_push_ext",
+                    "label": "sensor_push_ext",
+                    "kind": "sensor"
+                  },
+                  {
+                    "device_id": "device:sensor_push_ret",
+                    "label": "sensor_push_ret",
+                    "kind": "sensor"
+                  }
+                ],
+                "io_devices": [
+                  {
+                    "device_id": "device:X0",
+                    "label": "X0",
+                    "kind": "digital_input"
+                  },
+                  {
+                    "device_id": "device:X1",
+                    "label": "X1",
+                    "kind": "digital_input"
+                  }
+                ],
+                "evidence_chain_ids": [
+                  "causality:0",
+                  "causality:1"
+                ]
+              },
+              {
+                "source_kind": "guard_dependency",
+                "explanation": "when sensor_push_ret == true",
+                "command_devices": [
+                  {
+                    "device_id": "device:Y0",
+                    "label": "Y0",
+                    "kind": "digital_output"
+                  }
+                ],
+                "actuator_devices": [
+                  {
+                    "device_id": "device:valve_push",
+                    "label": "valve_push",
+                    "kind": "solenoid_valve"
+                  },
+                  {
+                    "device_id": "device:cyl_push",
+                    "label": "cyl_push",
+                    "kind": "cylinder"
+                  }
+                ],
+                "feedback_devices": [
+                  {
+                    "device_id": "device:sensor_push_ret",
+                    "label": "sensor_push_ret",
+                    "kind": "sensor"
+                  }
+                ],
+                "io_devices": [
+                  {
+                    "device_id": "device:X1",
+                    "label": "X1",
+                    "kind": "digital_input"
+                  }
+                ],
+                "evidence_chain_ids": [
+                  "causality:0",
+                  "causality:1"
+                ]
+              }
+            ],
+            "evidence_chain_ids": [
+              "causality:0",
+              "causality:1"
+            ],
+            "evidence_reasons": [
+              "推料缸伸出应能被传感器检测",
+              "推料缸缩回应能被传感器检测"
+            ]
+          },
+          {
+            "step_id": "step:eject_good.retract_all_good__parallel_1_branch_2_done",
+            "label": "retract_all_good__parallel_1_branch_2_done",
+            "index": 6,
+            "is_initial": false,
+            "is_current": false,
+            "incoming_transition_ids": [
+              "transition:17"
+            ],
+            "outgoing": [
+              {
+                "transition_id": "transition:18",
+                "to_step_id": "step:eject_good.retract_all_good__parallel_1_join",
+                "to_step_label": "retract_all_good__parallel_1_join",
+                "guard_kind": "always",
+                "guard_label": "always",
+                "observed": false
+              }
+            ]
+          },
+          {
+            "step_id": "step:eject_good.retract_all_good__parallel_1_join",
+            "label": "retract_all_good__parallel_1_join",
+            "index": 7,
+            "is_initial": false,
+            "is_current": false,
+            "incoming_transition_ids": [
+              "transition:18"
+            ],
+            "outgoing": [
+              {
+                "transition_id": "transition:19",
+                "to_step_id": "step:eject_good.good_done",
+                "to_step_label": "good_done",
+                "guard_kind": "always",
+                "guard_label": "always",
+                "observed": false
+              }
+            ]
+          },
+          {
+            "step_id": "step:eject_good.good_done",
+            "label": "good_done",
+            "index": 8,
+            "is_initial": false,
+            "is_current": false,
+            "incoming_transition_ids": [
+              "transition:19"
+            ],
+            "outgoing": [
+              {
+                "transition_id": "transition:20",
+                "to_step_id": "step:ready.wait_start",
+                "to_step_label": "wait_start",
+                "guard_kind": "always",
+                "guard_label": "always",
+                "actions": [
+                  {
+                    "kind": "log",
+                    "label": "log 合格品出料完成，准备下一节拍"
+                  }
+                ],
+                "observed": false
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "task_id": "task:fault_handler",
+        "label": "fault_handler",
+        "entry_step_id": "step:fault_handler.safe_retract",
+        "current_step_id": "step:fault_handler.safe_retract",
+        "blocking_state": "ready",
+        "main_path_step_ids": [
+          "step:fault_handler.safe_retract",
+          "step:fault_handler.alarm"
+        ],
+        "coverage": {
+          "uncovered_step_count": 1,
+          "trace_available": false,
+          "intent_available": false
+        },
+        "steps": [
+          {
+            "step_id": "step:fault_handler.safe_retract",
+            "label": "safe_retract",
+            "index": 0,
+            "is_initial": true,
+            "is_current": true,
+            "incoming_transition_ids": [
+              "transition:0",
+              "transition:2",
+              "transition:4",
+              "transition:6",
+              "transition:10",
+              "transition:16",
+              "transition:21",
+              "transition:27"
+            ],
+            "outgoing": [
+              {
+                "transition_id": "transition:32",
+                "to_step_id": "step:fault_handler.alarm",
+                "to_step_label": "alarm",
+                "guard_kind": "always",
+                "guard_label": "always",
+                "actions": [
+                  {
+                    "kind": "retract",
+                    "label": "retract cyl_press",
+                    "target_device_id": "device:cyl_press",
+                    "target_port": "self"
+                  },
+                  {
+                    "kind": "retract",
+                    "label": "retract cyl_push",
+                    "target_device_id": "device:cyl_push",
+                    "target_port": "self"
+                  },
+                  {
+                    "kind": "retract",
+                    "label": "retract cyl_eject",
+                    "target_device_id": "device:cyl_eject",
+                    "target_port": "self"
+                  },
+                  {
+                    "kind": "retract",
+                    "label": "retract cyl_reject",
+                    "target_device_id": "device:cyl_reject",
+                    "target_port": "self"
+                  }
+                ],
+                "observed": false
+              }
+            ],
+            "device_chains": [
+              {
+                "source_kind": "action_target",
+                "explanation": "retract cyl_press",
+                "command_devices": [
+                  {
+                    "device_id": "device:Y1",
+                    "label": "Y1",
+                    "kind": "digital_output"
+                  }
+                ],
+                "actuator_devices": [
+                  {
+                    "device_id": "device:cyl_press",
+                    "label": "cyl_press",
+                    "kind": "cylinder"
+                  },
+                  {
+                    "device_id": "device:valve_press",
+                    "label": "valve_press",
+                    "kind": "solenoid_valve"
+                  }
+                ],
+                "feedback_devices": [
+                  {
+                    "device_id": "device:sensor_press_ext",
+                    "label": "sensor_press_ext",
+                    "kind": "sensor"
+                  },
+                  {
+                    "device_id": "device:sensor_press_ret",
+                    "label": "sensor_press_ret",
+                    "kind": "sensor"
+                  }
+                ],
+                "io_devices": [
+                  {
+                    "device_id": "device:X2",
+                    "label": "X2",
+                    "kind": "digital_input"
+                  },
+                  {
+                    "device_id": "device:X3",
+                    "label": "X3",
+                    "kind": "digital_input"
+                  }
+                ],
+                "evidence_chain_ids": [
+                  "causality:2",
+                  "causality:3"
+                ]
+              },
+              {
+                "source_kind": "action_target",
+                "explanation": "retract cyl_push",
+                "command_devices": [
+                  {
+                    "device_id": "device:Y0",
+                    "label": "Y0",
+                    "kind": "digital_output"
+                  }
+                ],
+                "actuator_devices": [
+                  {
+                    "device_id": "device:cyl_push",
+                    "label": "cyl_push",
+                    "kind": "cylinder"
+                  },
+                  {
+                    "device_id": "device:valve_push",
+                    "label": "valve_push",
+                    "kind": "solenoid_valve"
+                  }
+                ],
+                "feedback_devices": [
+                  {
+                    "device_id": "device:sensor_push_ext",
+                    "label": "sensor_push_ext",
+                    "kind": "sensor"
+                  },
+                  {
+                    "device_id": "device:sensor_push_ret",
+                    "label": "sensor_push_ret",
+                    "kind": "sensor"
+                  }
+                ],
+                "io_devices": [
+                  {
+                    "device_id": "device:X0",
+                    "label": "X0",
+                    "kind": "digital_input"
+                  },
+                  {
+                    "device_id": "device:X1",
+                    "label": "X1",
+                    "kind": "digital_input"
+                  }
+                ],
+                "evidence_chain_ids": [
+                  "causality:0",
+                  "causality:1"
+                ]
+              },
+              {
+                "source_kind": "action_target",
+                "explanation": "retract cyl_eject",
+                "command_devices": [
+                  {
+                    "device_id": "device:Y2",
+                    "label": "Y2",
+                    "kind": "digital_output"
+                  }
+                ],
+                "actuator_devices": [
+                  {
+                    "device_id": "device:cyl_eject",
+                    "label": "cyl_eject",
+                    "kind": "cylinder"
+                  },
+                  {
+                    "device_id": "device:valve_eject",
+                    "label": "valve_eject",
+                    "kind": "solenoid_valve"
+                  }
+                ],
+                "feedback_devices": [
+                  {
+                    "device_id": "device:sensor_eject_ext",
+                    "label": "sensor_eject_ext",
+                    "kind": "sensor"
+                  },
+                  {
+                    "device_id": "device:sensor_eject_ret",
+                    "label": "sensor_eject_ret",
+                    "kind": "sensor"
+                  }
+                ],
+                "io_devices": [
+                  {
+                    "device_id": "device:X6",
+                    "label": "X6",
+                    "kind": "digital_input"
+                  },
+                  {
+                    "device_id": "device:X7",
+                    "label": "X7",
+                    "kind": "digital_input"
+                  }
+                ],
+                "evidence_chain_ids": [
+                  "causality:4",
+                  "causality:5"
+                ]
+              },
+              {
+                "source_kind": "action_target",
+                "explanation": "retract cyl_reject",
+                "command_devices": [
+                  {
+                    "device_id": "device:Y3",
+                    "label": "Y3",
+                    "kind": "digital_output"
+                  }
+                ],
+                "actuator_devices": [
+                  {
+                    "device_id": "device:cyl_reject",
+                    "label": "cyl_reject",
+                    "kind": "cylinder"
+                  },
+                  {
+                    "device_id": "device:valve_reject",
+                    "label": "valve_reject",
+                    "kind": "solenoid_valve"
+                  }
+                ],
+                "feedback_devices": [
+                  {
+                    "device_id": "device:sensor_reject_ext",
+                    "label": "sensor_reject_ext",
+                    "kind": "sensor"
+                  },
+                  {
+                    "device_id": "device:sensor_reject_ret",
+                    "label": "sensor_reject_ret",
+                    "kind": "sensor"
+                  }
+                ],
+                "io_devices": [
+                  {
+                    "device_id": "device:X8",
+                    "label": "X8",
+                    "kind": "digital_input"
+                  },
+                  {
+                    "device_id": "device:X9",
+                    "label": "X9",
+                    "kind": "digital_input"
+                  }
+                ],
+                "evidence_chain_ids": [
+                  "causality:6",
+                  "causality:7"
+                ]
+              }
+            ],
+            "evidence_chain_ids": [
+              "causality:0",
+              "causality:1",
+              "causality:2",
+              "causality:3",
+              "causality:4",
+              "causality:5",
+              "causality:6",
+              "causality:7"
+            ],
+            "evidence_reasons": [
+              "推料缸伸出应能被传感器检测",
+              "推料缸缩回应能被传感器检测",
+              "压装缸伸出应能被传感器检测",
+              "压装缸缩回应能被传感器检测",
+              "出料缸伸出应能被传感器检测",
+              "出料缸缩回应能被传感器检测",
+              "废品缸伸出应能被传感器检测",
+              "废品缸缩回应能被传感器检测"
+            ]
+          },
+          {
+            "step_id": "step:fault_handler.alarm",
+            "label": "alarm",
+            "index": 1,
+            "is_initial": false,
+            "is_current": false,
+            "incoming_transition_ids": [
+              "transition:32"
+            ],
+            "outgoing": [
+              {
+                "transition_id": "transition:33",
+                "to_step_id": "step:ready.wait_start",
+                "to_step_label": "wait_start",
+                "guard_kind": "always",
+                "guard_label": "always",
+                "actions": [
+                  {
+                    "kind": "log",
+                    "label": "log 三工位装配线故障：动作超时，请人工确认设备状态"
+                  }
+                ],
+                "observed": false
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "task_id": "task:ready",
+        "label": "ready",
+        "entry_step_id": "step:ready.wait_start",
+        "current_step_id": "step:ready.wait_start",
+        "blocking_state": "ready",
+        "main_path_step_ids": [
+          "step:ready.wait_start"
+        ],
+        "blocking_points": [
+          {
+            "step_id": "step:ready.wait_start",
+            "step_label": "wait_start",
+            "release_transitions": [
+              {
+                "transition_id": "transition:34",
+                "guard_kind": "condition",
+                "guard_label": "when start_button == true",
+                "to_step_id": "step:cycle.push_out",
+                "to_step_label": "push_out"
+              }
+            ]
+          }
+        ],
+        "coverage": {
+          "uncovered_step_count": 0,
+          "trace_available": false,
+          "intent_available": false
+        },
+        "steps": [
+          {
+            "step_id": "step:ready.wait_start",
+            "label": "wait_start",
+            "index": 0,
+            "is_initial": true,
+            "is_current": true,
+            "incoming_transition_ids": [
+              "transition:20",
+              "transition:31",
+              "transition:33"
+            ],
+            "outgoing": [
+              {
+                "transition_id": "transition:34",
+                "to_step_id": "step:cycle.push_out",
+                "to_step_label": "push_out",
+                "guard_kind": "condition",
+                "guard_label": "when start_button == true",
+                "observed": false
+              }
+            ],
+            "device_chains": [
+              {
+                "source_kind": "guard_dependency",
+                "explanation": "when start_button == true",
+                "feedback_devices": [
+                  {
+                    "device_id": "device:start_button",
+                    "label": "start_button",
+                    "kind": "sensor"
+                  }
+                ],
+                "io_devices": [
+                  {
+                    "device_id": "device:X11",
+                    "label": "X11",
+                    "kind": "digital_input"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}
