@@ -198,6 +198,7 @@ compiler-derived wiring -&gt; human point checks -&gt; holds -&gt; release</code
         <tr><td>A-54</td><td>历史 run 可覆盖 Verification/Tests/Problems/Evidence/Geometry</td><td>引入 current-run selector 和双 run 回归；web-server 66/66</td></tr>
         <tr><td>A-55</td><td>Station B1 route metadata audit 因缺少 UI fallback 禁止项失败一次</td><td>只补 route metadata；canonical 核心命令未重跑且零重试</td></tr>
         <tr><td>A-56</td><td>停止、构建、启动服务的组合命令被安全策略拒绝</td><td>拆成确认 PID、独立 build、隐藏启动和 HTTP readiness；PID 72012 在 8080 返回 200</td></tr>
+        <tr><td>A-57</td><td>最终只读 subagent 审计因 502 Bad Gateway 中止</td><td>本地 Codex 代理未能转发上游 /responses 请求，agent 未修改文件。主线程以暂存路径白名单、diff 检查、实现 commit 审计、clean-checkout 和三方 SHA 校验替代缺失的审计结论。</td></tr>
       </tbody>
     </table>
     <p class="note">浏览器 harness 的集中试错说明旧提示缺少三条规则：等待 React 受控状态稳定、使用窄 selector、按项目恢复 session。修正后的 harness 已把这些规则固化为断言。</p>
@@ -220,7 +221,7 @@ compiler-derived wiring -&gt; human point checks -&gt; holds -&gt; release</code
         <tr><td>Current-run / HIL regression</td><td class="ok">PASS</td><td>web-server 66/66；双 run 污染回归、责任链和 HIL browser assertions 通过</td></tr>
         <tr><td>Browser 1440/1920</td><td class="ok">PASS</td><td>三项目逐项 pipeline、holds、wiring、provenance，另含 filters、session、topology、deep links</td></tr>
         <tr><td>WIR-001 至 WIR-007</td><td class="ok">PASS</td><td>所有负向契约均有拒绝路径</td></tr>
-        <tr><td>Final evidence commit clean-checkout</td><td class="warn">PENDING FINAL COMMIT</td><td>证据与报告提交形成后执行，随后不再修改 tracked files</td></tr>
+        <tr><td>Final evidence commit clean-checkout</td><td class="ok">PASS</td><td><code>caa48187a712f4b72602954b1869d918c40b892a</code>；实际 clean clone；clone 前后 clean；3481 checks / 0 errors；3/3 harness pass</td></tr>
       </tbody>
     </table>
   </section>

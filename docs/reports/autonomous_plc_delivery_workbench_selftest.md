@@ -147,6 +147,7 @@ Canonical run `20260724-commit-b1` 由三个独立 clean clone 基于实现提�
 | `ANOM-054` | 多 run 项目中旧 verification、problem、test 和 evidence 可污染当前交付视图 | 项目投影遍历 `agent_runs` 全集合，同名 stage 后写覆盖 | 引入 current-run selector，优先使用 `artifact_roots.verification`；新增双 run 回归，证明旧 safety warning、gap、anomaly、test 和 evidence 不进入当前投影，完整 web-server 测试 66/66 |
 | `ANOM-055` | station B1 agent 的 route-state audit 因未显式写“禁止 UI 备用路线”失败一次 | agent 自行引入 route-governance 元数据，额外门禁超出 canonical 核心路线 | 仅补充允许目录内的 route metadata 后 audit 通过；clone/build/materialize/validator 未重跑、零重试。该摩擦计入提示/skill 优化信号 |
 | `ANOM-056` | “停止旧服务、构建、启动新服务”组合命令被安全策略整体拒绝 | 进程终止与后续构建/启动捆绑在一个长命令中，动作边界不可独立审计 | 拆成已确认 PID 的 Stop-Process、独立 cargo build、隐藏窗口 Start-Process 和 HTTP readiness 四步；新服务 PID 72012 在 8080 返回 200 |
+| `ANOM-057` | 最终只读 subagent 暂存区审计因 `502 Bad Gateway` 中止 | 本地 Codex 代理向上游 `/responses` 转发失败；该 agent 未产生审计结论，也未修改文件 | 主线程保留失败原文并确认 agent 无写入；改由暂存路径白名单、`git diff --cached --check`、实现 commit 审计、最终 clean-checkout 和三方 SHA 校验完成替代验证。该异常属于 agent 基础设施故障，不归因于 RustPLC 产品逻辑 |
 
 这些记录区分产品缺陷、harness 缺陷、脚本缺陷和环境问题。重复试错集中在浏览器 harness 的 controlled input、焦点与 selector，说明此前的 UI 自动化提示缺少“等待 React 状态稳定、使用窄 selector、按项目恢复 session”的明确规则。
 
@@ -167,7 +168,7 @@ Canonical run `20260724-commit-b1` 由三个独立 clean clone 基于实现提�
 | Current-run / HIL regression | PASS | web-server 66/66；双 run 历史污染回归通过；前端 lint/build 与双视口责任链、HIL 状态断言通过 |
 | Browser 1440x900 / 1920x1080 | PASS | 三项目逐项 pipeline/holds/wiring/provenance、field filters、session、topology、point check、deep links、无 overflow |
 | WIR negative contracts | PASS | `WIR-001` 至 `WIR-007` 均有拒绝路径 |
-| Final evidence commit clean-checkout | PENDING FINAL COMMIT | 证据与报告提交形成后执行；通过后不再修改 tracked files |
+| Final evidence commit clean-checkout | PASS | 提交 `caa48187a712f4b72602954b1869d918c40b892a`；实际 clean clone；clone 前后 clean；3481 checks / 0 errors；3/3 harness pass |
 
 ## 残余风险
 
